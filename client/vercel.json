@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://nsl-lgkx.onrender.com/:path*"
+      "destination": "https://nsl-lgkx.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
