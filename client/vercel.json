@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "RENDER_BACKEND_URL/api/:path*"
+      "destination": "https://nsl-lgkx.onrender.com/:path*"
     },
     {
       "source": "/(.*)",
