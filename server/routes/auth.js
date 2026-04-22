@@ -1,0 +1,147 @@
+/**
+ * Public auth routes — forgot-password & reset-password.
+ * Fully autonomous: token and password stored in server/data/admin.json.
+ * No database dependency.
+ */
+const express    = require('express');
+const { body, validationResult } = require('express-validator');
+const crypto     = require('crypto');
+const nodemailer = require('nodemailer');
+const router     = express.Router();
+const { readConfig, writeConfig } = require('../utils/adminConfig');
+
+/* ── Gmail transporter ── */
+function createTransporter() {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.GMAIL_FROM || 'hariharan19.mhs@gmail.com',
+      pass: process.env.GMAIL_APP_PASSWORD,
+    },
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   POST /api/auth/forgot-password
+   Generates a one-time token → saves to local file → emails reset link.
+   No auth required, no database.
+───────────────────────────────────────────────────────────── */
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const token   = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+
+    /* Write token + expiry to local file */
+    writeConfig({ reset_token: token, reset_expires: expires });
+
+    const origin   = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+    const resetUrl = `${origin}/admin/reset-password?token=${token}`;
+    const fromAddr = process.env.GMAIL_FROM    || 'hariharan19.mhs@gmail.com';
+    const toAddr   = process.env.RESET_EMAIL_TO || 'marketing.integfarms@gmail.com';
+
+    const transporter = createTransporter();
+
+    await transporter.sendMail({
+      from:    `"MHS Admin" <${fromAddr}>`,
+      to:      toAddr,
+      subject: 'MHS Admin — Password Reset Request',
+      html: `
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#F3F0FD;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" style="max-width:480px;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 8px 32px rgba(91,33,182,0.12);" cellpadding="0" cellspacing="0">
+
+        <tr>
+          <td style="background:linear-gradient(135deg,#5B21B6,#8B5CF6);padding:32px 28px;text-align:center;">
+            <div style="width:52px;height:52px;background:rgba(255,255,255,0.18);border-radius:14px;display:inline-block;line-height:52px;margin-bottom:14px;">
+              <span style="color:#fff;font-size:26px;font-weight:800;">M</span>
+            </div>
+            <h1 style="color:#fff;margin:0;font-size:1.35rem;font-weight:700;">Password Reset</h1>
+            <p style="color:rgba(255,255,255,0.70);margin:6px 0 0;font-size:0.84rem;">My Health School · Admin Panel</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 28px;">
+            <p style="color:#3B0764;font-size:0.95rem;margin:0 0 10px;font-weight:600;">Hi Admin,</p>
+            <p style="color:#555;font-size:0.88rem;line-height:1.6;margin:0 0 24px;">
+              A password reset was requested. Click the button below to set a new password.
+              This link is valid for <strong style="color:#5B21B6;">1 hour</strong>.
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td align="center" style="padding-bottom:24px;">
+                  <a href="${resetUrl}"
+                    style="display:inline-block;background:#5B21B6;color:#fff;text-decoration:none;padding:15px 40px;border-radius:50px;font-weight:700;font-size:0.95rem;box-shadow:0 4px 18px rgba(91,33,182,0.35);">
+                    Reset My Password &rarr;
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="color:#888;font-size:0.75rem;margin:0 0 6px;">If the button doesn't work, paste this link in your browser:</p>
+            <p style="word-break:break-all;color:#5B21B6;font-size:0.74rem;background:#F3F0FD;padding:10px 14px;border-radius:8px;margin:0 0 24px;">${resetUrl}</p>
+            <p style="color:#aaa;font-size:0.73rem;margin:0;">If you didn't request this, you can safely ignore this email.</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="border-top:1px solid #EDE9FE;padding:16px 28px;text-align:center;">
+            <p style="color:#c4b5fd;font-size:0.69rem;margin:0;">My Health School &middot; ${new Date().getFullYear()}</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('forgot-password error:', err.message);
+    res.status(500).json({ error: 'Failed to send reset email. Check GMAIL_APP_PASSWORD in .env' });
+  }
+});
+
+/* ─────────────────────────────────────────────────────────────
+   POST /api/auth/reset-password
+   Verifies token from local file → sets new password in local file.
+   No auth required, no database.
+───────────────────────────────────────────────────────────── */
+router.post('/reset-password',
+  body('token').notEmpty(),
+  body('new_password').isLength({ min: 6 }),
+  (req, res) => {
+    const errs = validationResult(req);
+    if (!errs.isEmpty()) {
+      return res.status(422).json({ error: 'Password must be at least 6 characters.' });
+    }
+
+    const { token, new_password } = req.body;
+    const cfg = readConfig();
+
+    if (!cfg.reset_token || cfg.reset_token !== token) {
+      return res.status(400).json({ error: 'Invalid or already-used reset link.' });
+    }
+
+    if (!cfg.reset_expires || new Date(cfg.reset_expires) < new Date()) {
+      return res.status(400).json({ error: 'Reset link has expired. Please request a new one.' });
+    }
+
+    try {
+      writeConfig({
+        password:      new_password,
+        reset_token:   null,
+        reset_expires: null,
+      });
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: 'Failed to save new password.' });
+    }
+  }
+);
+
+module.exports = router;
