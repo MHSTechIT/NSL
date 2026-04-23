@@ -69,7 +69,7 @@ function UrgencyTimer() {
   const lang = state.lang;
 
   return (
-    <div style={{ background: urgent ? 'rgba(254,242,242,0.7)' : 'rgba(255,255,255,0.45)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: urgent ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 24px rgba(91,33,182,0.07)', borderRadius: 18, padding: '16px 20px', transition: 'background 0.4s, border-color 0.4s' }}>
+    <div style={{ background: urgent ? 'rgba(254,242,242,0.7)' : 'rgba(255,255,255,0.82)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: urgent ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 24px rgba(91,33,182,0.07)', borderRadius: 18, padding: '16px 20px', transition: 'background 0.4s, border-color 0.4s' }}>
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 3 }}>
         <FlipUnit value={mins} label={lang === 'tamil' ? 'நிமி' : 'Min'} size="lg" />
         <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.4rem', color: urgent ? 'rgba(220,38,38,0.5)' : 'rgba(91,33,182,0.5)', lineHeight: 1, marginTop: 6, userSelect: 'none', transition: 'color 0.4s' }}>:</span>
@@ -376,7 +376,7 @@ export default function Screen3() {
           }}
           style={{
             width: '100%',
-            background: isSolid ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.55)',
+            background: isSolid ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.82)',
             backdropFilter: isSolid ? 'none' : 'blur(20px)',
             WebkitBackdropFilter: isSolid ? 'none' : 'blur(20px)',
             borderRadius: 22,

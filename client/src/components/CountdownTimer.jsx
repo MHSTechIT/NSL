@@ -12,7 +12,7 @@ export function stopTick() {
   if (_audio) { _audio.pause(); _audio.currentTime = 0; }
 }
 
-export default function CountdownTimer() {
+export default function CountdownTimer({ floating = false }) {
   const { state } = useFunnel();
   const lang = state.lang;
   const [parts, setParts] = useState(getCountdownParts(state.webinarConfig.next_webinar_at));
@@ -49,16 +49,17 @@ export default function CountdownTimer() {
   }
 
   const isNear = parts.isNearStart;
+  const totalSec = parts.hrs * 3600 + parts.min * 60 + parts.sec;
+  const isUrgent = totalSec > 0 && totalSec < 12 * 3600;
   const units = [
-    { val: parts.days, label: t.screen1A.days[lang] },
     { val: parts.hrs,  label: t.screen1A.hrs[lang] },
     { val: parts.min,  label: t.screen1A.min[lang] },
     { val: parts.sec,  label: t.screen1A.sec[lang] },
   ];
 
   return (
-    <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: 'rgba(255,255,255,0.45)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 24px rgba(91,33,182,0.07)' }}>
-      <p className="font-sans text-center text-xs font-semibold mb-4 tracking-widest uppercase text-purple-700">
+    <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: floating ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.82)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', border: floating ? '1px solid rgba(255,255,255,0.45)' : '1px solid rgba(255,255,255,0.6)', boxShadow: floating ? '0 4px 24px rgba(91,33,182,0.10)' : '0 4px 24px rgba(91,33,182,0.07)' }}>
+      <p className="font-sans text-center text-xs font-semibold mb-4 tracking-widest uppercase" style={{ color: isUrgent ? '#991B1B' : undefined }} >
         {isNear ? t.screen1A.nearStart[lang] : t.screen1A.timerLabel[lang]}
       </p>
 
@@ -66,15 +67,15 @@ export default function CountdownTimer() {
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 3 }}>
         {units.map(({ val, label }, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 3 }}>
-            <FlipUnit value={val} label={label} size="lg" />
+            <FlipUnit value={val} label={label} size="lg" urgent={isUrgent} />
             {i < units.length - 1 && (
               <span style={{
                 fontFamily: 'Outfit, sans-serif',
                 fontWeight: 700,
                 fontSize: '1.4rem',
-                color: 'rgba(91,33,182,0.5)',
+                color: isUrgent ? 'rgba(153,27,27,0.60)' : 'rgba(91,33,182,0.5)',
                 lineHeight: 1,
-                marginTop: 6,
+                marginTop: 14,
                 userSelect: 'none',
               }}>:</span>
             )}

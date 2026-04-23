@@ -32,7 +32,7 @@
 
   /* ── Cards ── */
   .card {
-    background: rgba(255,255,255,0.45);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-radius: 18px;
@@ -50,7 +50,7 @@
 
   /* ── Frosted glass hero ── */
   .glass-card {
-    background: rgba(255,255,255,0.45);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-radius: 18px;
@@ -185,7 +185,7 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    background: rgba(255,255,255,0.45);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-radius: 18px;
@@ -213,7 +213,7 @@
     padding-right: 1rem;
     border-radius: 14px;
     border: 1px solid rgba(255,255,255,0.80);
-    background: rgba(255,255,255,0.55);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     box-shadow: 0 2px 10px rgba(91,33,182,0.07);
@@ -228,7 +228,7 @@
   }
   .field-input:focus {
     border-color: rgba(91,33,182,0.45);
-    background: rgba(255,255,255,0.70);
+    background: rgba(255,255,255,0.92);
     box-shadow: 0 0 0 3px rgba(91,33,182,0.10), 0 2px 10px rgba(91,33,182,0.08);
   }
 
@@ -300,6 +300,19 @@
 }
 
 /* Morph digit animation handled by Framer Motion */
+
+@keyframes pressMarquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.press-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: pressMarquee 35s linear infinite;
+}
+.press-marquee-track:hover {
+  animation-play-state: paused;
+}
 
 @keyframes successGlowPulse {
   0%   { box-shadow: 0 0 0 0 rgba(147,51,234,0.55), 0 8px 40px rgba(91,33,182,0.22); }

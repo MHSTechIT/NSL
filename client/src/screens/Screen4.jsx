@@ -153,7 +153,7 @@ export default function Screen4() {
             display: 'flex', alignItems: 'center',
             borderRadius: 14, height: '3.5rem', overflow: 'hidden',
             border: errors.whatsappNumber ? '1px solid rgba(248,113,113,0.6)' : '1px solid rgba(255,255,255,0.80)',
-            background: errors.whatsappNumber ? 'rgba(254,242,242,0.65)' : 'rgba(255,255,255,0.55)',
+            background: errors.whatsappNumber ? 'rgba(254,242,242,0.65)' : 'rgba(255,255,255,0.82)',
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
             boxShadow: '0 2px 10px rgba(91,33,182,0.07)',
@@ -246,7 +246,7 @@ export default function Screen4() {
               { icon: '🔒', text: t.screen4.trustPrivate[lang] },
               { icon: '🚫', text: t.screen4.trustNoSpam[lang] },
             ].map((item, i) => (
-              <div key={i} className="flex items-start gap-1.5 rounded-[10px] px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.55)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.75)' }}>
+              <div key={i} className="flex items-start gap-1.5 rounded-[10px] px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.75)' }}>
                 <span className="text-sm flex-shrink-0">{item.icon}</span>
                 <span className="font-sans text-[11px] text-purple-600 leading-tight">{item.text}</span>
               </div>
