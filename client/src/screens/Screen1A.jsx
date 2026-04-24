@@ -287,6 +287,11 @@ export default function Screen1A() {
     dispatch({ type: 'SET_SUGAR_LEVEL', payload: opt.id });
     pixelSugarLevelSelected(opt.id);
     pixelInitiateQualification(state.utm);
+    // Transition to zoom question step
+    setPopupStep('zoom');
+  }
+
+  function handleZoomYes() {
     setPopupLeaving(true);
     setTimeout(() => {
       setExpanded(false);
@@ -295,7 +300,15 @@ export default function Screen1A() {
       setShowEligible(true);
       setTimeout(() => navigate('/duration'), 1800);
     }, 420);
-    return;
+  }
+
+  function handleZoomNo() {
+    dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
+    setLeaving(true);
+    setTimeout(() => {
+      pixelDisqualifiedLead('no_zoom', state.utm);
+      navigate('/not-eligible');
+    }, 420);
   }
 
   function handleClose() {
@@ -325,17 +338,17 @@ export default function Screen1A() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen pb-6">
+    <div className="flex flex-col min-h-screen">
       {/* Top bar — removed */}
 
-      <div className="flex-1 px-4 flex flex-col gap-4">
+      <div className="flex-1 px-4 pb-8 flex flex-col gap-4" style={{ overflowY: 'auto' }}>
 
 
         {/* Hero — image behind the card, card overlaps image bottom */}
         <motion.div {...cardAnim(1)} style={{ position: 'relative' }}>
           {/* Person image — behind card */}
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: -50, position: 'relative', zIndex: 0, pointerEvents: 'none', userSelect: 'none' }}>
-            <img src="/person.webp" alt="" style={{ width: '55%', maxWidth: 200, display: 'block' }} />
+            <img src="/person.png" alt="" style={{ width: '55%', maxWidth: 200, display: 'block' }} />
           </div>
           {/* Glass card — in front, covers lower part of image, minimal top padding */}
           <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1 }}>
@@ -572,7 +585,7 @@ export default function Screen1A() {
                       key="sugar-step"
                       initial={{ opacity: 0, x: 0 }}
                       animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, y: -60, transition: { duration: 0.22 } }}
+                      exit={{ opacity: 0, x: -60, transition: { duration: 0.22 } }}
                       transition={{ delay: 0.1, duration: 0.25 }}
                       style={{ padding: '20px 16px 28px' }}
                     >
@@ -602,6 +615,67 @@ export default function Screen1A() {
                             {opt.label}
                           </motion.button>
                         ))}
+                      </div>
+
+                    </motion.div>
+                  )}
+
+                  {/* ── Step 2: Zoom question ── */}
+                  {popupStep === 'zoom' && (
+                    <motion.div
+                      key="zoom-step"
+                      initial={{ opacity: 0, x: 60 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, y: -60, transition: { duration: 0.22 } }}
+                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                      style={{ padding: '20px 16px 28px' }}
+                    >
+                      {/* Header */}
+                      <div style={{ marginBottom: 6 }}>
+                        <p style={{
+                          fontFamily: 'Outfit, sans-serif',
+                          fontWeight: 700, fontSize: '1.45rem',
+                          color: '#3B0764', margin: 0, lineHeight: 1.2,
+                        }}>
+                          Can you join our FREE Live Webinar on Zoom?
+                        </p>
+                        <p style={{
+                          fontFamily: 'Outfit, sans-serif',
+                          fontSize: '0.82rem', color: 'rgba(91,33,182,0.55)',
+                          margin: '6px 0 0', fontWeight: 500,
+                        }}>
+                          The session is conducted live — attendance is required.
+                        </p>
+                      </div>
+
+                      {/* Yes / No buttons */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 16 }}>
+                        <motion.button
+                          onClick={handleZoomYes}
+                          initial={{ opacity: 0, y: 12 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.1 }}
+                          whileTap={{ scale: 0.97 }}
+                          style={{
+                            ...pillStyle,
+                            background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
+                            color: '#fff',
+                            border: 'none',
+                            boxShadow: '0 4px 18px rgba(91,33,182,0.35)',
+                          }}
+                        >
+                          Yes, I Can Attend
+                        </motion.button>
+                        <motion.button
+                          onClick={handleZoomNo}
+                          initial={{ opacity: 0, y: 12 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.18 }}
+                          whileTap={{ scale: 0.97 }}
+                          style={pillStyle}
+                        >
+                          No, I Can't
+                        </motion.button>
                       </div>
 
                     </motion.div>
