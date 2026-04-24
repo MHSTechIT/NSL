@@ -583,10 +583,10 @@ export default function Screen1A() {
                   {popupStep === 'sugar' && (
                     <motion.div
                       key="sugar-step"
-                      initial={{ opacity: 0, x: 0 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -60, transition: { duration: 0.22 } }}
-                      transition={{ delay: 0.1, duration: 0.25 }}
+                      initial={{ opacity: 0, y: 40 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -50, transition: { duration: 0.25, ease: [0.32, 0, 0.67, 0] } }}
+                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                       style={{ padding: '20px 16px 28px' }}
                     >
                       {/* Header */}
@@ -624,9 +624,9 @@ export default function Screen1A() {
                   {popupStep === 'zoom' && (
                     <motion.div
                       key="zoom-step"
-                      initial={{ opacity: 0, x: 60 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, y: -60, transition: { duration: 0.22 } }}
+                      initial={{ opacity: 0, y: 50 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -50, transition: { duration: 0.25, ease: [0.32, 0, 0.67, 0] } }}
                       transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                       style={{ padding: '20px 16px 28px' }}
                     >
