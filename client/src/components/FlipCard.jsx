@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 
 /* ─── Single morphing digit ─── */
-function MorphDigit({ value, size = 'lg' }) {
+function MorphDigit({ value, size = 'lg', urgent = false }) {
   const isLg = size === 'lg';
   const W  = isLg ? 38 : 28;
   const H  = isLg ? 50 : 36;
@@ -16,22 +16,19 @@ function MorphDigit({ value, size = 'lg' }) {
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
-      background: 'rgba(255,255,255,0.60)',
-      backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
+      background: urgent
+        ? 'linear-gradient(160deg, rgba(255,255,255,0.60) 0%, rgba(254,226,226,0.40) 100%)'
+        : 'linear-gradient(160deg, rgba(255,255,255,0.60) 0%, rgba(237,234,248,0.35) 100%)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
       borderRadius: r,
-      border: '1px solid rgba(255,255,255,0.75)',
-      boxShadow: '0 2px 10px rgba(91,33,182,0.10)',
+      border: urgent ? '1px solid rgba(255,255,255,0.72)' : '1px solid rgba(255,255,255,0.72)',
+      boxShadow: urgent
+        ? 'inset 0 1.5px 0 rgba(255,255,255,0.92), inset 0 -1px 0 rgba(239,68,68,0.10), inset 0 0 12px rgba(239,68,68,0.12)'
+        : 'inset 0 1.5px 0 rgba(255,255,255,0.92), inset 0 -1px 0 rgba(91,33,182,0.08), inset 0 0 10px rgba(91,33,182,0.07)',
       overflow: 'hidden',
+      transition: 'all 0.5s',
     }}>
-      {/* subtle centre line */}
-      <div style={{
-        position: 'absolute', left: 0, right: 0,
-        top: '50%', height: 1,
-        background: 'rgba(91,33,182,0.08)',
-        pointerEvents: 'none', zIndex: 0,
-      }} />
-
       <AnimatePresence mode="popLayout">
         <motion.span
           key={value}
@@ -43,7 +40,7 @@ function MorphDigit({ value, size = 'lg' }) {
             fontFamily: '"Outfit", "Noto Sans Tamil", sans-serif',
             fontWeight: 800,
             fontSize: fs,
-            color: '#3B0764',
+            color: urgent ? '#991B1B' : '#3B0764',
             lineHeight: 1,
             userSelect: 'none',
             letterSpacing: '-0.02em',
@@ -58,23 +55,25 @@ function MorphDigit({ value, size = 'lg' }) {
   );
 }
 
-/* ─── Two-digit unit with label ─── */
-export function FlipUnit({ value, label, size = 'lg' }) {
-  const str = String(value).padStart(2, '0');
+/* ─── Two-or-three-digit unit with label ─── */
+export function FlipUnit({ value, label, size = 'lg', urgent = false }) {
+  const digits = value >= 100 ? 3 : 2;
+  const str = String(value).padStart(digits, '0');
   const gap = size === 'lg' ? 3 : 2;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
       <div style={{ display: 'flex', gap }}>
-        <MorphDigit value={str[0]} size={size} />
-        <MorphDigit value={str[1]} size={size} />
+        {str.split('').map((d, i) => (
+          <MorphDigit key={i} value={d} size={size} urgent={urgent} />
+        ))}
       </div>
 
       {label && (
         <span style={{
           fontFamily: 'Outfit, "Noto Sans Tamil", sans-serif',
           fontSize: 9, fontWeight: 600,
-          color: 'rgba(91,33,182,0.55)',
+          color: urgent ? 'rgba(153,27,27,0.70)' : 'rgba(91,33,182,0.55)',
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
           userSelect: 'none',

@@ -6,6 +6,7 @@ import { t } from '../translations';
 import { computeLeadScore } from '../utils/scoring';
 import TopBar from '../components/TopBar';
 import Confetti from '../components/Confetti';
+import CountdownTimer from '../components/CountdownTimer';
 import { FlipUnit } from '../components/FlipCard';
 import {
   pixelDurationSelected,
@@ -69,7 +70,7 @@ function UrgencyTimer() {
   const lang = state.lang;
 
   return (
-    <div style={{ background: urgent ? 'rgba(254,242,242,0.7)' : 'rgba(255,255,255,0.45)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: urgent ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 24px rgba(91,33,182,0.07)', borderRadius: 18, padding: '16px 20px', transition: 'background 0.4s, border-color 0.4s' }}>
+    <div style={{ background: urgent ? 'rgba(254,242,242,0.7)' : 'rgba(255,255,255,0.82)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: urgent ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 24px rgba(91,33,182,0.07)', borderRadius: 18, padding: '16px 20px', transition: 'background 0.4s, border-color 0.4s' }}>
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 3 }}>
         <FlipUnit value={mins} label={lang === 'tamil' ? 'நிமி' : 'Min'} size="lg" />
         <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.4rem', color: urgent ? 'rgba(220,38,38,0.5)' : 'rgba(91,33,182,0.5)', lineHeight: 1, marginTop: 6, userSelect: 'none', transition: 'color 0.4s' }}>:</span>
@@ -81,6 +82,53 @@ function UrgencyTimer() {
         </p>
       )}
     </div>
+  );
+}
+
+/* ─────────────────────────────────────── Urgency Banner Timer ── */
+function UrgencyBannerTimer({ lang }) {
+  const [total, setTotal] = useState(300);
+  const urgent = total <= 60;
+  const mins = String(Math.floor(total / 60)).padStart(2, '0');
+  const secs = String(total % 60).padStart(2, '0');
+
+  useEffect(() => {
+    if (total <= 0) return;
+    const id = setTimeout(() => setTotal(t => t - 1), 1000);
+    return () => clearTimeout(id);
+  }, [total]);
+
+  return (
+    <motion.div
+      animate={urgent ? { scale: [1, 1.02, 1] } : {}}
+      transition={urgent ? { repeat: Infinity, duration: 0.8 } : {}}
+      style={{
+        background: urgent
+          ? 'linear-gradient(135deg, #7F1D1D, #991B1B)'
+          : 'linear-gradient(135deg, #DC2626, #B91C1C)',
+        borderRadius: 14,
+        padding: '10px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 2,
+        boxShadow: '0 4px 18px rgba(185,28,28,0.40)',
+      }}
+    >
+      <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.65rem', color: 'rgba(255,255,255,0.75)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+        {lang === 'tamil' ? 'முடிக்க வேண்டிய நேரம்' : 'COMPLETE IN'}
+      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Clock icon */}
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.90)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+        <span style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '2rem', color: '#fff', letterSpacing: '0.04em', lineHeight: 1 }}>
+          {mins}:{secs}
+        </span>
+      </div>
+    </motion.div>
   );
 }
 
@@ -136,10 +184,10 @@ export default function Screen3() {
   const lang = state.lang;
   const navigate = useNavigate();
 
-  // phases: teaser | question | form | success | webinar
-  const [phase, setPhase] = useState('teaser');
+  // phases: form | success | webinar
+  const [phase, setPhase] = useState('form');
   const [cardRotY, setCardRotY] = useState(0);
-  const [cardHeight, setCardHeight] = useState(230);
+  const [cardHeight, setCardHeight] = useState(580);
   const [slideDown, setSlideDown] = useState(false);
   const [wLink, setWLink] = useState('');
   const [showOverlay, setShowOverlay] = useState(false);
@@ -156,6 +204,7 @@ export default function Screen3() {
 
   useEffect(() => {
     if (!state.sugarLevel) navigate('/', { replace: true });
+    dispatch({ type: 'SET_DURATION', payload: 'mid' });
   }, []);
 
   /* flip helper: fold to 90°, swap content, unfold back to 0° */
@@ -168,11 +217,6 @@ export default function Screen3() {
     }, HALF);
   }
 
-  /* auto-flip teaser → question after 800ms */
-  useEffect(() => {
-    const id = setTimeout(() => doFlip('question', 270), 800);
-    return () => clearTimeout(id);
-  }, []);
 
   function handleFirstInput() {
     if (!hasStartedRef.current) {
@@ -355,17 +399,148 @@ export default function Screen3() {
       </AnimatePresence>
 
       <TopBar
-        showBack={phase === 'question' || phase === 'form'}
-        step={phase === 'webinar' ? 4 : isSolid ? 3 : 2}
+        showBack={phase === 'form'}
+        step={phase === 'webinar' ? 4 : 3}
         onBack={() => {
           stopUrgencyTick();
-          if (phase === 'form') doFlip('question', 270);
-          else navigate('/');
+          navigate('/');
         }}
       />
 
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 16px 28px' }}>
+      {/* ══ FORM PHASE — new full-page layout ══ */}
+      {phase === 'form' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 48px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
+          {/* Red urgency banner */}
+          <UrgencyBannerTimer lang={lang} />
+
+          {/* Main white card */}
+          <div style={{ background: '#fff', borderRadius: 18, padding: '20px 18px 26px', boxShadow: '0 4px 24px rgba(91,33,182,0.10)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* Headline */}
+            <h1 style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.1rem, 5vw, 1.3rem)', color: '#3B0764', lineHeight: 1.2, margin: 0, whiteSpace: 'nowrap' }}>
+              Reserve Your <span style={{ color: '#059669' }}>FREE</span> Seat
+            </h1>
+
+            {/* Webinar info row */}
+            {webinarISO && (
+              <div style={{ background: 'rgba(237,234,248,0.5)', border: '1px solid rgba(91,33,182,0.12)', borderRadius: 12, padding: '11px 14px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 14px' }}>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem', color: '#3B0764' }}>📅 {formatIST(webinarISO)}</span>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem', color: '#3B0764' }}>⏱ 3 Hours</span>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem', color: '#3B0764' }}>🎥 Zoom Live</span>
+                <span style={{ background: '#D1FAE5', color: '#065F46', border: '1px solid #6EE7B7', borderRadius: 20, padding: '2px 10px', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.75rem' }}>FREE</span>
+              </div>
+            )}
+
+            {/* Personalization card */}
+            <div style={{ background: '#FFFBEB', border: '1.5px dashed #FCD34D', borderRadius: 12, padding: '14px' }}>
+              <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.7rem', color: '#92400E', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
+                📋 {lang === 'tamil' ? 'உங்கள் பதில்களின்படி:' : 'BASED ON YOUR ANSWERS:'}
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                {[
+                  lang === 'tamil'
+                    ? `சர்க்கரை அளவு: ${state.sugarLevel === '250+' ? '250-க்கு மேல்' : '150–250 mg/dL'}`
+                    : `Sugar level: ${state.sugarLevel === '250+' ? 'Above 250 mg/dL' : '150–250 mg/dL'}`,
+                  lang === 'tamil'
+                    ? 'தமிழ் உங்களுக்கு வசதியானது'
+                    : 'Tamil is comfortable for you',
+                ].map((point, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <span style={{ color: '#059669', fontWeight: 700, fontSize: '0.9rem', flexShrink: 0, lineHeight: 1.3 }}>✓</span>
+                    <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#374151', lineHeight: 1.4 }}>{point}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1.5px dashed #FCD34D' }}>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#92400E', fontWeight: 600 }}>
+                  {lang === 'tamil' ? 'இந்த அமர்வு உங்களுக்காகவே உருவாக்கப்பட்டது.' : 'This session is built for '}
+                  {lang !== 'tamil' && <em style={{ fontStyle: 'italic' }}>YOU</em>}
+                  {lang !== 'tamil' && '.'}
+                </span>
+              </div>
+            </div>
+
+            {/* Social proof */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10 }}>
+              <motion.div animate={{ opacity: [1, 0.3, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}
+                style={{ width: 8, height: 8, borderRadius: '50%', background: '#22C55E', flexShrink: 0 }} />
+              <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#166534', lineHeight: 1.35 }}>
+                <strong>347 people</strong> {lang === 'tamil' ? 'கடந்த 24 மணி நேரத்தில் பதிவு செய்தனர்' : 'have registered in the last 24 hours'}
+              </span>
+            </div>
+
+            {/* ── Form ── */}
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Full Name */}
+              <Field index={0}>
+                <label style={labelStyle}>{lang === 'tamil' ? 'முழு பெயர்' : 'Full Name'}</label>
+                <input type="text" value={fullName} placeholder={lang === 'tamil' ? 'இராமசாமி' : 'Ramaswamy'} autoCapitalize="words"
+                  onChange={e => { setFullName(e.target.value); handleFirstInput(); }}
+                  style={{ ...inputStyle, borderColor: errors.fullName ? 'rgba(248,113,113,0.6)' : undefined }} />
+                {errors.fullName && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorName[lang]}</p>}
+              </Field>
+
+              {/* WhatsApp */}
+              <Field index={1}>
+                <label style={labelStyle}>{lang === 'tamil' ? 'WhatsApp எண்' : 'WhatsApp Number'}</label>
+                <div style={{ display: 'flex', alignItems: 'center', borderRadius: 12, height: '3rem', overflow: 'hidden', border: errors.phone ? '1px solid rgba(248,113,113,0.6)' : '1px solid rgba(209,196,240,0.7)', background: '#fff' }}>
+                  <span style={{ padding: '0 10px', fontFamily: 'Outfit,sans-serif', fontWeight: 600, color: 'rgba(91,33,182,0.55)', fontSize: '0.85rem', borderRight: '1px solid rgba(91,33,182,0.12)', height: '100%', display: 'flex', alignItems: 'center', background: 'rgba(237,234,248,0.5)', flexShrink: 0 }}>+91</span>
+                  <input type="tel" inputMode="numeric" value={phone} placeholder="98XXX XXXXX"
+                    onChange={e => { setPhone(e.target.value.replace(/\D/g, '').slice(0, 10)); handleFirstInput(); }}
+                    style={{ flex: 1, padding: '0 10px', fontFamily: 'Outfit,sans-serif', fontSize: '0.9rem', color: '#3B0764', background: 'transparent', border: 'none', outline: 'none' }} />
+                  {/^\d{10}$/.test(phone) && <span style={{ paddingRight: 10, color: '#22C55E', fontWeight: 700 }}>✓</span>}
+                </div>
+                {errors.phone && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorPhone[lang]}</p>}
+                <p style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.72rem', color: '#6B7280', marginTop: 5, lineHeight: 1.4 }}>
+                  🎁 {lang === 'tamil' ? 'அனைத்து Workshop போனஸ்கள் உங்கள் WhatsApp-ல் பகிரப்படும்' : 'All Workshop bonuses and Diabetic guides will be shared to your WhatsApp'}
+                </p>
+              </Field>
+
+              {/* Email */}
+              <Field index={2}>
+                <label style={labelStyle}>{lang === 'tamil' ? 'மின்னஞ்சல் முகவரி' : 'Email Address'}</label>
+                <input type="email" value={email} placeholder="yourname@gmail.com"
+                  onChange={e => { setEmail(e.target.value); handleFirstInput(); }}
+                  style={{ ...inputStyle, borderColor: errors.email ? 'rgba(248,113,113,0.6)' : undefined }} />
+                {errors.email && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorEmail[lang]}</p>}
+                <p style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.72rem', color: '#6B7280', marginTop: 5, lineHeight: 1.4 }}>
+                  📧 {lang === 'tamil' ? 'Workshop இலவச சேர்வு இணைப்பு உங்கள் மின்னஞ்சலுக்கு அனுப்பப்படும்' : 'Workshop Free Joining link will be sent to your email'}
+                </p>
+              </Field>
+
+              {serverError && <p style={{ color: '#EF4444', fontSize: '0.78rem', fontFamily: 'Outfit,sans-serif', textAlign: 'center' }}>{serverError}</p>}
+
+              {/* Submit button */}
+              <Field index={3}>
+                <motion.button type="submit" disabled={submitting}
+                  animate={submitting ? {} : { scale: [1, 1.02, 1] }}
+                  transition={{ repeat: Infinity, repeatDelay: 3, duration: 0.4 }}
+                  style={{ width: '100%', minHeight: '3.6rem', background: submitting ? 'rgba(91,33,182,0.55)' : 'linear-gradient(135deg,#7C3AED,#5B21B6)', border: 'none', borderRadius: 14, color: '#fff', fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1rem', letterSpacing: '0.04em', textTransform: 'uppercase', cursor: submitting ? 'not-allowed' : 'pointer', boxShadow: '0 4px 22px rgba(91,33,182,0.38)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexDirection: 'column', lineHeight: 1.2 }}>
+                  {submitting
+                    ? <><svg style={{ animation: 'spin 1s linear infinite', width: 18, height: 18 }} viewBox="0 0 24 24" fill="none"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>{lang === 'tamil' ? 'பதிவு செய்கிறோம்...' : 'Registering...'}</>
+                    : <span>{lang === 'tamil' ? 'பதிவை முடிக்கவும்' : 'COMPLETE REGISTRATION'}</span>}
+                </motion.button>
+              </Field>
+
+              {/* Privacy */}
+              <p style={{ textAlign: 'center', fontFamily: 'Outfit,sans-serif', fontSize: '0.7rem', color: 'rgba(91,33,182,0.40)', lineHeight: 1.5 }}>
+                {lang === 'tamil'
+                  ? 'சேர்வதன் மூலம் நீங்கள் எங்கள் '
+                  : 'By joining, you agree to our '}
+                <a href="/privacy" style={{ color: '#6D28D9', textDecoration: 'underline' }}>Privacy Policy</a>
+                {' & '}
+                <a href="/terms" style={{ color: '#6D28D9', textDecoration: 'underline' }}>Terms</a>
+                {lang === 'tamil' ? '-ஐ ஏற்கிறீர்கள்' : ''}
+              </p>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ══ OTHER PHASES — keep existing flip card ══ */}
+      {phase !== 'form' && (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 16px 28px', gap: 14 }}>
         {/* ── single card that flips in-place ── */}
         <motion.div
           animate={{ rotateY: cardRotY, minHeight: cardHeight, y: slideDown ? '110vh' : 0 }}
@@ -376,7 +551,7 @@ export default function Screen3() {
           }}
           style={{
             width: '100%',
-            background: isSolid ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.55)',
+            background: isSolid ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.82)',
             backdropFilter: isSolid ? 'none' : 'blur(20px)',
             WebkitBackdropFilter: isSolid ? 'none' : 'blur(20px)',
             borderRadius: 22,
@@ -530,6 +705,8 @@ export default function Screen3() {
 
         </motion.div>
       </div>
+      )}
+
     </motion.div>
   );
 }

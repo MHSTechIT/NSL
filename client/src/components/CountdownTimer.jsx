@@ -49,11 +49,12 @@ export default function CountdownTimer() {
   }
 
   const isNear = parts.isNearStart;
+  /* Convert days → extra hours so we only show 3 units */
+  const totalHrs = parts.days * 24 + parts.hrs;
   const units = [
-    { val: parts.days, label: t.screen1A.days[lang] },
-    { val: parts.hrs,  label: t.screen1A.hrs[lang] },
-    { val: parts.min,  label: t.screen1A.min[lang] },
-    { val: parts.sec,  label: t.screen1A.sec[lang] },
+    { val: totalHrs,  label: t.screen1A.hrs[lang] },
+    { val: parts.min, label: t.screen1A.min[lang] },
+    { val: parts.sec, label: t.screen1A.sec[lang] },
   ];
 
   return (
