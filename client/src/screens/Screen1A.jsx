@@ -630,41 +630,35 @@ export default function Screen1A() {
                       transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                       style={{ padding: '20px 16px 28px' }}
                     >
-                      {/* Header */}
-                      <div style={{ marginBottom: 6 }}>
-                        <p style={{
-                          fontFamily: 'Outfit, sans-serif',
-                          fontWeight: 700, fontSize: '1.45rem',
-                          color: '#3B0764', margin: 0, lineHeight: 1.2,
-                        }}>
-                          Can you join our FREE Live Webinar on Zoom?
-                        </p>
-                        <p style={{
-                          fontFamily: 'Outfit, sans-serif',
-                          fontSize: '0.82rem', color: 'rgba(91,33,182,0.55)',
-                          margin: '6px 0 0', fontWeight: 500,
-                        }}>
-                          The session is conducted live — attendance is required.
-                        </p>
-                      </div>
+                      {/* Small label */}
+                      <p style={{
+                        fontFamily: 'Outfit, sans-serif',
+                        fontSize: '0.78rem', color: 'rgba(91,33,182,0.50)',
+                        fontWeight: 500, margin: '0 0 6px',
+                      }}>
+                        This webinar is conducted on Zoom
+                      </p>
+
+                      {/* Big question */}
+                      <p style={{
+                        fontFamily: 'Outfit, sans-serif',
+                        fontWeight: 700, fontSize: '1.45rem',
+                        color: '#3B0764', margin: '0 0 16px', lineHeight: 1.2,
+                      }}>
+                        Can you attend on Zoom?
+                      </p>
 
                       {/* Yes / No buttons */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 16 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
                         <motion.button
                           onClick={handleZoomYes}
                           initial={{ opacity: 0, y: 12 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: 0.1 }}
                           whileTap={{ scale: 0.97 }}
-                          style={{
-                            ...pillStyle,
-                            background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
-                            color: '#fff',
-                            border: 'none',
-                            boxShadow: '0 4px 18px rgba(91,33,182,0.35)',
-                          }}
+                          style={pillStyle}
                         >
-                          Yes, I Can Attend
+                          Yes, I can attend on Zoom
                         </motion.button>
                         <motion.button
                           onClick={handleZoomNo}
@@ -674,7 +668,7 @@ export default function Screen1A() {
                           whileTap={{ scale: 0.97 }}
                           style={pillStyle}
                         >
-                          No, I Can't
+                          No, I can't attend on Zoom
                         </motion.button>
                       </div>
 
