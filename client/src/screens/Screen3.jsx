@@ -67,18 +67,17 @@ function UrgencyTimer() {
   }, [total]);
 
   const { state } = useFunnel();
-  const lang = state.lang;
 
   return (
     <div style={{ background: urgent ? 'rgba(254,242,242,0.7)' : 'rgba(255,255,255,0.82)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: urgent ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 24px rgba(91,33,182,0.07)', borderRadius: 18, padding: '16px 20px', transition: 'background 0.4s, border-color 0.4s' }}>
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 3 }}>
-        <FlipUnit value={mins} label={lang === 'tamil' ? 'நிமி' : 'Min'} size="lg" />
+        <FlipUnit value={mins} label="Min" size="lg" />
         <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.4rem', color: urgent ? 'rgba(220,38,38,0.5)' : 'rgba(91,33,182,0.5)', lineHeight: 1, marginTop: 6, userSelect: 'none', transition: 'color 0.4s' }}>:</span>
-        <FlipUnit value={secs} label={lang === 'tamil' ? 'வி' : 'Sec'} size="lg" />
+        <FlipUnit value={secs} label="Sec" size="lg" />
       </div>
       {total <= 0 && (
         <p style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.74rem', color: '#DC2626', fontWeight: 700, textAlign: 'center', marginTop: 10 }}>
-          ⚠ {lang === 'tamil' ? 'உடனே சேரவும்!' : 'Offer expired — join immediately!'}
+          ⚠ Offer expired — join immediately!
         </p>
       )}
     </div>
@@ -86,7 +85,7 @@ function UrgencyTimer() {
 }
 
 /* ─────────────────────────────────────── Urgency Banner Timer ── */
-function UrgencyBannerTimer({ lang }) {
+function UrgencyBannerTimer() {
   const [total, setTotal] = useState(300);
   const urgent = total <= 60;
   const mins = String(Math.floor(total / 60)).padStart(2, '0');
@@ -116,7 +115,7 @@ function UrgencyBannerTimer({ lang }) {
       }}
     >
       <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.65rem', color: 'rgba(255,255,255,0.75)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-        {lang === 'tamil' ? 'முடிக்க வேண்டிய நேரம்' : 'COMPLETE IN'}
+        COMPLETE IN
       </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {/* Clock icon */}
@@ -133,7 +132,7 @@ function UrgencyBannerTimer({ lang }) {
 }
 
 /* ─────────────────────────────────────── Link Expiry Timer ── */
-function LinkExpiryTimer({ lang }) {
+function LinkExpiryTimer() {
   const [total, setTotal] = useState(300);
   const mins = String(Math.floor(total / 60)).padStart(2, '0');
   const secs = String(total % 60).padStart(2, '0');
@@ -156,7 +155,7 @@ function LinkExpiryTimer({ lang }) {
       boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.80), inset 0 0 18px rgba(239,68,68,0.18)',
     }}>
       <span style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 700, fontSize: '0.60rem', color: '#DC2626', letterSpacing: '0.14em', textTransform: 'uppercase' }}>
-        {lang === 'tamil' ? 'இணைப்பு காலாவதியாகும் நேரம்' : 'LINK EXPIRES IN'}
+        LINK EXPIRES IN
       </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -219,7 +218,6 @@ function formatIST(iso) {
 /* ═══════════════════════════════════════════════ Screen3 ═══ */
 export default function Screen3() {
   const { state, dispatch } = useFunnel();
-  const lang = state.lang;
   const navigate = useNavigate();
 
   // phases: form | success | webinar
@@ -289,7 +287,7 @@ export default function Screen3() {
         body: JSON.stringify({ full_name: fullName.trim(), whatsapp_number: phone, email: email.trim().toLowerCase(), sugar_level: state.sugarLevel, diabetes_duration: state.diabetesDuration, language_pref: state.lang, ...state.utm }),
       });
       const data = await res.json();
-      if (res.status === 409) { setServerError(t.screen4.paused[lang]); setSubmitting(false); return; }
+      if (res.status === 409) { setServerError(t.screen4.paused.english); setSubmitting(false); return; }
       if (!res.ok || !data.success) { setServerError('Something went wrong. Please try again.'); setSubmitting(false); return; }
 
       pixelLead({ full_name: fullName, email, whatsapp_number: phone });
@@ -415,7 +413,7 @@ export default function Screen3() {
                 transition={{ delay: 0.42, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
                 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.52rem', color: '#3B0764', lineHeight: 1.2, marginBottom: 10 }}
               >
-                {lang === 'tamil' ? `${firstName}, பதிவு வெற்றி!` : `${firstName}, Registration Successful!`}
+                {`${firstName}, Registration Successful!`}
               </motion.p>
 
               {/* Supporting text */}
@@ -425,7 +423,7 @@ export default function Screen3() {
                 transition={{ delay: 0.58, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
                 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.88rem', color: 'rgba(91,33,182,0.60)', marginBottom: 18 }}
               >
-                {lang === 'tamil' ? 'உங்கள் இலவச இடம் உறுதிப்படுத்தப்பட்டது 🎉' : 'Your free seat has been confirmed 🎉'}
+                Your free seat has been confirmed 🎉
               </motion.p>
 
               {/* Loading hint */}
@@ -435,7 +433,7 @@ export default function Screen3() {
                 transition={{ delay: 0.74, duration: 0.4 }}
                 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.74rem', color: 'rgba(91,33,182,0.38)' }}
               >
-                {lang === 'tamil' ? 'வெபினார் விவரங்கள் வருகின்றன...' : 'Webinar details loading...'}
+                Webinar details loading...
               </motion.p>
             </motion.div>
           </motion.div>
@@ -456,7 +454,7 @@ export default function Screen3() {
         <div ref={formScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 48px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {/* Red urgency banner */}
-          <UrgencyBannerTimer lang={lang} />
+          <UrgencyBannerTimer />
 
           {/* Main white card */}
           <div style={{ background: '#fff', borderRadius: 18, padding: '20px 18px 26px', boxShadow: '0 4px 24px rgba(91,33,182,0.10)', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -493,16 +491,12 @@ export default function Screen3() {
                   <line x1="9" y1="12" x2="15" y2="12"/>
                   <line x1="9" y1="16" x2="13" y2="16"/>
                 </svg>
-                {' '}{lang === 'tamil' ? 'உங்கள் பதில்களின்படி:' : 'BASED ON YOUR ANSWERS:'}
+                {' '}BASED ON YOUR ANSWERS:
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {[
-                  lang === 'tamil'
-                    ? `சர்க்கரை அளவு: ${state.sugarLevel === '250+' ? '250-க்கு மேல்' : '150–250 mg/dL'}`
-                    : `Sugar level: ${state.sugarLevel === '250+' ? 'Above 250 mg/dL' : '150–250 mg/dL'}`,
-                  lang === 'tamil'
-                    ? 'தமிழ் உங்களுக்கு வசதியானது'
-                    : 'Tamil is comfortable for you',
+                  `Sugar level: ${state.sugarLevel === '250+' ? 'Above 250 mg/dL' : '150–250 mg/dL'}`,
+                  'English is comfortable for you',
                 ].map((point, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     <span style={{ color: '#059669', fontWeight: 700, fontSize: '0.9rem', flexShrink: 0, lineHeight: 1.3 }}>✓</span>
@@ -512,9 +506,7 @@ export default function Screen3() {
               </div>
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1.5px dashed #FCD34D' }}>
                 <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#92400E', fontWeight: 600 }}>
-                  {lang === 'tamil' ? 'இந்த அமர்வு உங்களுக்காகவே உருவாக்கப்பட்டது.' : 'This session is built for '}
-                  {lang !== 'tamil' && <em style={{ fontStyle: 'italic' }}>YOU</em>}
-                  {lang !== 'tamil' && '.'}
+                  This session is built for <em style={{ fontStyle: 'italic' }}>YOU</em>.
                 </span>
               </div>
             </div>
@@ -524,7 +516,7 @@ export default function Screen3() {
               <motion.div animate={{ opacity: [1, 0.3, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}
                 style={{ width: 8, height: 8, borderRadius: '50%', background: '#22C55E', flexShrink: 0 }} />
               <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#166534', lineHeight: 1.35 }}>
-                <strong>347 people</strong> {lang === 'tamil' ? 'கடந்த 24 மணி நேரத்தில் பதிவு செய்தனர்' : 'have registered in the last 24 hours'}
+                <strong>347 people</strong> have registered in the last 24 hours
               </span>
             </div>
 
@@ -532,16 +524,16 @@ export default function Screen3() {
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Full Name */}
               <Field index={0}>
-                <label style={labelStyle}>{lang === 'tamil' ? 'முழு பெயர்' : 'Full Name'}</label>
-                <input type="text" value={fullName} placeholder={lang === 'tamil' ? 'இராமசாமி' : 'Ramaswamy'} autoCapitalize="words"
+                <label style={labelStyle}>Full Name</label>
+                <input type="text" value={fullName} placeholder="Ramaswamy" autoCapitalize="words"
                   onChange={e => { setFullName(e.target.value); handleFirstInput(); }}
                   style={{ ...inputStyle, borderColor: errors.fullName ? 'rgba(248,113,113,0.6)' : undefined }} />
-                {errors.fullName && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorName[lang]}</p>}
+                {errors.fullName && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorName.english}</p>}
               </Field>
 
               {/* WhatsApp */}
               <Field index={1}>
-                <label style={labelStyle}>{lang === 'tamil' ? 'WhatsApp எண்' : 'WhatsApp Number'}</label>
+                <label style={labelStyle}>WhatsApp Number</label>
                 <div style={{ display: 'flex', alignItems: 'center', borderRadius: 12, height: '3rem', overflow: 'hidden', border: errors.phone ? '1px solid rgba(248,113,113,0.6)' : '1px solid rgba(209,196,240,0.7)', background: '#fff' }}>
                   <span style={{ padding: '0 10px', fontFamily: 'Outfit,sans-serif', fontWeight: 600, color: 'rgba(91,33,182,0.55)', fontSize: '0.85rem', borderRight: '1px solid rgba(91,33,182,0.12)', height: '100%', display: 'flex', alignItems: 'center', background: 'rgba(237,234,248,0.5)', flexShrink: 0 }}>+91</span>
                   <input type="tel" inputMode="numeric" value={phone} placeholder="98XXX XXXXX"
@@ -549,21 +541,21 @@ export default function Screen3() {
                     style={{ flex: 1, padding: '0 10px', fontFamily: 'Outfit,sans-serif', fontSize: '0.9rem', color: '#3B0764', background: 'transparent', border: 'none', outline: 'none' }} />
                   {/^\d{10}$/.test(phone) && <span style={{ paddingRight: 10, color: '#22C55E', fontWeight: 700 }}>✓</span>}
                 </div>
-                {errors.phone && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorPhone[lang]}</p>}
+                {errors.phone && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorPhone.english}</p>}
                 <p style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.72rem', color: '#6B7280', marginTop: 5, lineHeight: 1.4 }}>
-                  🎁 {lang === 'tamil' ? 'அனைத்து Workshop போனஸ்கள் உங்கள் WhatsApp-ல் பகிரப்படும்' : 'All Workshop bonuses and Diabetic guides will be shared to your WhatsApp'}
+                  🎁 All Workshop bonuses and Diabetic guides will be shared to your WhatsApp
                 </p>
               </Field>
 
               {/* Email */}
               <Field index={2}>
-                <label style={labelStyle}>{lang === 'tamil' ? 'மின்னஞ்சல் முகவரி' : 'Email Address'}</label>
+                <label style={labelStyle}>Email Address</label>
                 <input type="email" value={email} placeholder="yourname@gmail.com"
                   onChange={e => { setEmail(e.target.value); handleFirstInput(); }}
                   style={{ ...inputStyle, borderColor: errors.email ? 'rgba(248,113,113,0.6)' : undefined }} />
-                {errors.email && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorEmail[lang]}</p>}
+                {errors.email && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorEmail.english}</p>}
                 <p style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.72rem', color: '#6B7280', marginTop: 5, lineHeight: 1.4 }}>
-                  {lang === 'tamil' ? 'Workshop இலவச சேர்வு இணைப்பு உங்கள் மின்னஞ்சலுக்கு அனுப்பப்படும்' : 'Workshop Free Joining link will be sent to your email'}
+                  Workshop Free Joining link will be sent to your email
                 </p>
               </Field>
 
@@ -576,20 +568,17 @@ export default function Screen3() {
                   transition={{ repeat: Infinity, repeatDelay: 3, duration: 0.4 }}
                   style={{ width: '100%', minHeight: '3.6rem', background: submitting ? 'rgba(91,33,182,0.55)' : 'linear-gradient(135deg,#7C3AED,#5B21B6)', border: 'none', borderRadius: 14, color: '#fff', fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1rem', letterSpacing: '0.04em', textTransform: 'uppercase', cursor: submitting ? 'not-allowed' : 'pointer', boxShadow: '0 4px 22px rgba(91,33,182,0.38)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexDirection: 'column', lineHeight: 1.2 }}>
                   {submitting
-                    ? <><svg style={{ animation: 'spin 1s linear infinite', width: 18, height: 18 }} viewBox="0 0 24 24" fill="none"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>{lang === 'tamil' ? 'பதிவு செய்கிறோம்...' : 'Registering...'}</>
-                    : <span>{lang === 'tamil' ? 'பதிவை முடிக்கவும்' : 'COMPLETE REGISTRATION'}</span>}
+                    ? <><svg style={{ animation: 'spin 1s linear infinite', width: 18, height: 18 }} viewBox="0 0 24 24" fill="none"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>Registering...</>
+                    : <span>COMPLETE REGISTRATION</span>}
                 </motion.button>
               </Field>
 
               {/* Privacy */}
               <p style={{ textAlign: 'center', fontFamily: 'Outfit,sans-serif', fontSize: '0.7rem', color: 'rgba(91,33,182,0.40)', lineHeight: 1.5 }}>
-                {lang === 'tamil'
-                  ? 'சேர்வதன் மூலம் நீங்கள் எங்கள் '
-                  : 'By joining, you agree to our '}
+                By joining, you agree to our{' '}
                 <a href="/privacy" style={{ color: '#6D28D9', textDecoration: 'underline' }}>Privacy Policy</a>
                 {' & '}
                 <a href="/terms" style={{ color: '#6D28D9', textDecoration: 'underline' }}>Terms</a>
-                {lang === 'tamil' ? '-ஐ ஏற்கிறீர்கள்' : ''}
               </p>
             </form>
           </div>
@@ -635,7 +624,7 @@ export default function Screen3() {
               <motion.div animate={{ opacity: [1, 0.3, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}
                 style={{ width: 8, height: 8, borderRadius: '50%', background: '#16A34A', flexShrink: 0 }} />
               <span style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 700, fontSize: '0.68rem', color: '#15803D', letterSpacing: '0.10em', textTransform: 'uppercase' }}>
-                {lang === 'tamil' ? 'உங்கள் பதிவை உறுதிப்படுத்துங்கள்' : 'Confirm Your Registration'}
+                Confirm Your Registration
               </span>
             </div>
 
@@ -665,23 +654,16 @@ export default function Screen3() {
             {/* Title */}
             <div style={{ textAlign: 'center' }}>
               <h2 style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.15rem, 5.5vw, 1.45rem)', color: '#3B0764', lineHeight: 1.2, margin: 0, whiteSpace: 'nowrap' }}>
-                {lang === 'tamil' ? (
-                  <>WhatsApp <span style={{ color: '#25D366' }}>குழுவில்</span> சேரவும்</>
-                ) : (
-                  <>Join the <span style={{ color: '#25D366' }}>WhatsApp Group</span></>
-                )}
+                <>Join the <span style={{ color: '#25D366' }}>WhatsApp Group</span></>
               </h2>
               <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 400, fontSize: '0.85rem', color: 'rgba(91,33,182,0.55)', lineHeight: 1.6, marginTop: 8, textAlign: 'center' }}>
-                {lang === 'tamil'
-                  ? <>அனைத்து Workshop <strong style={{ color: '#5B21B6' }}>போனஸ்கள்</strong> மற்றும் <strong style={{ color: '#5B21B6' }}>சேரும் இணைப்பு</strong> WhatsApp குழுவில் அனுப்பப்படும்</>
-                  : <>All workshop <strong style={{ color: '#5B21B6' }}>bonuses</strong> and the <strong style={{ color: '#5B21B6' }}>joining link</strong> will be sent inside the WhatsApp group</>
-                }
+                <>All workshop <strong style={{ color: '#5B21B6' }}>bonuses</strong> and the <strong style={{ color: '#5B21B6' }}>joining link</strong> will be sent inside the WhatsApp group</>
               </p>
             </div>
 
             {/* Link expiry countdown */}
             <div style={{ width: '100%' }}>
-              <LinkExpiryTimer lang={lang} />
+              <LinkExpiryTimer />
             </div>
 
             {/* Join button */}
@@ -704,7 +686,7 @@ export default function Screen3() {
               <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
               </svg>
-              {lang === 'tamil' ? 'WhatsApp குழுவில் சேரவும்' : 'Join WhatsApp Group'}
+              Join WhatsApp Group
             </motion.button>
 
           </motion.div>
@@ -740,10 +722,10 @@ export default function Screen3() {
             <div style={{ padding: '36px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: 12 }}>
               <SandClockIcon />
               <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.4rem', color: '#3B0764', lineHeight: 1.2 }}>
-                {lang === 'tamil' ? 'ஒரு கேள்வி மட்டும்...' : 'One last question...'}
+                One last question...
               </p>
               <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: 'rgba(91,33,182,0.55)' }}>
-                {lang === 'tamil' ? 'உங்கள் இலவச இடம் காத்திருக்கிறது' : 'Your free seat is waiting'}
+                Your free seat is waiting
               </p>
             </div>
           )}
@@ -752,7 +734,7 @@ export default function Screen3() {
           {phase === 'question' && (
             <div style={{ padding: '28px 18px 22px' }}>
               <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.45rem', color: '#3B0764', marginBottom: 20, lineHeight: 1.2 }}>
-                {t.screen3.question[lang]}
+                {t.screen3.question.english}
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {durationOptions.map((key, i) => (
@@ -760,12 +742,12 @@ export default function Screen3() {
                     initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.06 + i * 0.07, duration: 0.28 }}
                     whileTap={{ scale: 0.97 }} style={pillStyle}>
-                    {lang === 'tamil' ? t.screen3[`opt${i + 1}Title`].tamil : t.screen3[`opt${i + 1}Title`].english}
+                    {t.screen3[`opt${i + 1}Title`].english}
                   </motion.button>
                 ))}
               </div>
               <p style={{ textAlign: 'center', marginTop: 16, fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', color: 'rgba(91,33,182,0.38)' }}>
-                🔒 {lang === 'tamil' ? '100% தனிப்பட்டது & பாதுகாப்பானது' : '100% Private & Secure'}
+                🔒 100% Private & Secure
               </p>
             </div>
           )}
@@ -775,18 +757,18 @@ export default function Screen3() {
             <form onSubmit={handleSubmit} style={{ padding: '22px 18px 24px', display: 'flex', flexDirection: 'column', gap: 13 }}>
               <Field index={0}>
                 <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.45rem', color: '#3B0764', lineHeight: 1.2, marginBottom: 2 }}>
-                  {t.screen4.headline[lang]}
+                  {t.screen4.headline.english}
                 </h2>
               </Field>
               <Field index={1}>
-                <label style={labelStyle}>{t.screen4.nameLabel[lang]}</label>
-                <input type="text" value={fullName} placeholder={t.screen4.namePlaceholder[lang]} autoCapitalize="words"
+                <label style={labelStyle}>{t.screen4.nameLabel.english}</label>
+                <input type="text" value={fullName} placeholder={t.screen4.namePlaceholder.english} autoCapitalize="words"
                   onChange={e => { setFullName(e.target.value); handleFirstInput(); }}
                   style={{ ...inputStyle, borderColor: errors.fullName ? 'rgba(248,113,113,0.6)' : undefined }} />
-                {errors.fullName && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorName[lang]}</p>}
+                {errors.fullName && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorName.english}</p>}
               </Field>
               <Field index={2}>
-                <label style={labelStyle}>{t.screen4.phoneLabel[lang]}</label>
+                <label style={labelStyle}>{t.screen4.phoneLabel.english}</label>
                 <div style={{ display: 'flex', alignItems: 'center', borderRadius: 12, height: '3rem', overflow: 'hidden', border: errors.phone ? '1px solid rgba(248,113,113,0.6)' : '1px solid rgba(209,196,240,0.7)', background: '#fff' }}>
                   <span style={{ padding: '0 10px', fontFamily: 'Outfit,sans-serif', fontWeight: 600, color: 'rgba(91,33,182,0.55)', fontSize: '0.85rem', borderRight: '1px solid rgba(91,33,182,0.12)', height: '100%', display: 'flex', alignItems: 'center', background: 'rgba(237,234,248,0.5)', flexShrink: 0 }}>+91</span>
                   <input type="tel" inputMode="numeric" value={phone} placeholder="98XXX XXXXX"
@@ -794,19 +776,19 @@ export default function Screen3() {
                     style={{ flex: 1, padding: '0 10px', fontFamily: 'Outfit,sans-serif', fontSize: '0.9rem', color: '#3B0764', background: 'transparent', border: 'none', outline: 'none' }} />
                   {/^\d{10}$/.test(phone) && <span style={{ paddingRight: 10, color: '#22C55E', fontWeight: 700 }}>✓</span>}
                 </div>
-                {errors.phone && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorPhone[lang]}</p>}
+                {errors.phone && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorPhone.english}</p>}
               </Field>
               <Field index={3}>
-                <label style={labelStyle}>{t.screen4.emailLabel[lang]}</label>
-                <input type="email" value={email} placeholder={t.screen4.emailPlaceholder[lang]}
+                <label style={labelStyle}>{t.screen4.emailLabel.english}</label>
+                <input type="email" value={email} placeholder={t.screen4.emailPlaceholder.english}
                   onChange={e => { setEmail(e.target.value); handleFirstInput(); }}
                   style={{ ...inputStyle, borderColor: errors.email ? 'rgba(248,113,113,0.6)' : undefined }} />
-                {errors.email && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorEmail[lang]}</p>}
+                {errors.email && <p style={{ color: '#EF4444', fontSize: '0.72rem', marginTop: 4, fontFamily: 'Outfit,sans-serif' }}>⚠ {t.screen4.errorEmail.english}</p>}
               </Field>
               <Field index={4}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                   <input type="checkbox" defaultChecked id="consent3" style={{ marginTop: 2, accentColor: '#5B21B6', width: 14, height: 14, flexShrink: 0 }} />
-                  <label htmlFor="consent3" style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.7rem', color: 'rgba(91,33,182,0.50)', lineHeight: 1.4 }}>{t.screen4.consent[lang]}</label>
+                  <label htmlFor="consent3" style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.7rem', color: 'rgba(91,33,182,0.50)', lineHeight: 1.4 }}>{t.screen4.consent.english}</label>
                 </div>
               </Field>
               {serverError && <p style={{ color: '#EF4444', fontSize: '0.78rem', fontFamily: 'Outfit,sans-serif', textAlign: 'center' }}>{serverError}</p>}
@@ -816,13 +798,13 @@ export default function Screen3() {
                   transition={{ repeat: Infinity, repeatDelay: 3, duration: 0.4 }}
                   style={{ width: '100%', height: '3.4rem', background: submitting ? 'rgba(91,33,182,0.55)' : '#5B21B6', border: 'none', borderRadius: 50, color: '#fff', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '1.05rem', cursor: submitting ? 'not-allowed' : 'pointer', boxShadow: '0 4px 22px rgba(91,33,182,0.38)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                   {submitting
-                    ? <><svg style={{ animation: 'spin 1s linear infinite', width: 18, height: 18 }} viewBox="0 0 24 24" fill="none"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>{t.screen4.submitting[lang]}</>
-                    : t.screen4.cta[lang]}
+                    ? <><svg style={{ animation: 'spin 1s linear infinite', width: 18, height: 18 }} viewBox="0 0 24 24" fill="none"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>{t.screen4.submitting.english}</>
+                    : t.screen4.cta.english}
                 </motion.button>
               </Field>
               <Field index={6}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {[{ icon: '🔒', text: t.screen4.trustPrivate[lang] }, { icon: '🚫', text: t.screen4.trustNoSpam[lang] }].map((item, i) => (
+                  {[{ icon: '🔒', text: t.screen4.trustPrivate.english }, { icon: '🚫', text: t.screen4.trustNoSpam.english }].map((item, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, borderRadius: 10, padding: '7px 10px', background: 'rgba(237,234,248,0.60)', border: '1px solid rgba(209,196,240,0.5)' }}>
                       <span style={{ fontSize: '0.8rem', flexShrink: 0 }}>{item.icon}</span>
                       <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.68rem', color: '#5B21B6', lineHeight: 1.35 }}>{item.text}</span>

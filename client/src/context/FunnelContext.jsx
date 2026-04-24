@@ -4,7 +4,7 @@ import { parseUTMParams } from '../utils/utm';
 const FunnelContext = createContext(null);
 
 const initialState = {
-  lang: 'tamil',
+  lang: 'english',
   navDirection: 'forward',
   sugarLevel: null,
   diabetesDuration: null,
@@ -65,9 +65,6 @@ export function FunnelProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => {
-    const saved = localStorage.getItem('mhs_lang');
-    if (saved === 'tamil' || saved === 'english') dispatch({ type: 'SET_LANG', payload: saved });
-
     dispatch({ type: 'SET_UTM', payload: parseUTMParams() });
 
     fetch('/api/webinar-config')

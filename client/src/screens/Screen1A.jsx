@@ -4,12 +4,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import CountdownTimer, { stopTick } from '../components/CountdownTimer';
-import CountdownTimerCompact from '../components/CountdownTimerCompact';
-import LanguageToggle from '../components/LanguageToggle';
 import TrustBar from '../components/TrustBar';
 import {
   pixelPageView, pixelViewContent, pixelInitiateQualification,
-  pixelDisqualifiedLead, pixelSugarLevelSelected, pixelLanguageQualified,
+  pixelDisqualifiedLead, pixelSugarLevelSelected,
 } from '../utils/pixel';
 
 /* ── Live social proof messages ───────────────────────────────────────── */
@@ -18,9 +16,9 @@ const LIVE_MSGS = [
 ];
 
 const sugarOptions = [
-  { id: '150-250', labelEn: '150 – 250 mg/dL',     labelTa: '150–250 mg/dL',         disqualify: false },
-  { id: '250+',   labelEn: 'Above 250 mg/dL',       labelTa: '250-க்கு மேல்',          disqualify: false },
-  { id: 'none',   labelEn: "I Don't Have Diabetes", labelTa: 'சர்க்கரை நோய் இல்லை', disqualify: true  },
+  { id: '150-250', label: '150 – 250 mg/dL',     disqualify: false },
+  { id: '250+',   label: 'Above 250 mg/dL',       disqualify: false },
+  { id: 'none',   label: "I Don't Have Diabetes", disqualify: true  },
 ];
 
 /* ── Social Proof Card (merged seats + live feed) ─────────────────────── */
@@ -206,7 +204,6 @@ function SeatBadge({ info }) {
 
 export default function Screen1A() {
   const { state, dispatch } = useFunnel();
-  const lang = state.lang;
   const navigate = useNavigate();
   const [seatInfo, setSeatInfo] = useState(() => getSeatInfo(state.webinarConfig?.next_webinar_at));
   const [seatsReserved, setSeatsReserved] = useState(1813);
@@ -218,7 +215,6 @@ export default function Screen1A() {
   // 'sugar' → first question, 'language' → second question inline
   const [popupStep, setPopupStep] = useState('sugar');
   const [popupLeaving, setPopupLeaving] = useState(false);
-  const [exitUp, setExitUp] = useState(false);
   const [showEligible, setShowEligible] = useState(false);
 
   useEffect(() => {
@@ -231,13 +227,8 @@ export default function Screen1A() {
     if (!expanded) return;
     window.history.pushState({ popup: true }, '');
     const onPop = () => {
-      if (popupStep === 'language') {
-        setPopupStep('sugar');
-        window.history.pushState({ popup: true }, '');
-      } else {
-        setExpanded(false);
-        setPopupStep('sugar');
-      }
+      setExpanded(false);
+      setPopupStep('sugar');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -296,22 +287,6 @@ export default function Screen1A() {
     dispatch({ type: 'SET_SUGAR_LEVEL', payload: opt.id });
     pixelSugarLevelSelected(opt.id);
     pixelInitiateQualification(state.utm);
-    setExitUp(true);
-    setPopupLeaving(true);
-    setTimeout(() => {
-      setPopupLeaving(false);
-      setExitUp(false);
-      setPopupStep('language');
-    }, 380);
-    return;
-  }
-
-  function handleLanguageYes() {
-    stopTick();
-    dispatch({ type: 'SET_LANGUAGE_QUALIFIED', payload: true });
-    dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
-    pixelLanguageQualified();
-    setExitUp(false);
     setPopupLeaving(true);
     setTimeout(() => {
       setExpanded(false);
@@ -320,19 +295,7 @@ export default function Screen1A() {
       setShowEligible(true);
       setTimeout(() => navigate('/duration'), 1800);
     }, 420);
-  }
-
-  function handleLanguageNo() {
-    stopTick();
-    dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
-    pixelDisqualifiedLead('language_mismatch', state.utm);
-    setExitUp(false);
-    setPopupLeaving(true);
-    setTimeout(() => {
-      setExpanded(false);
-      setPopupStep('sugar');
-      navigate('/language-mismatch');
-    }, 420);
+    return;
   }
 
   function handleClose() {
@@ -377,10 +340,10 @@ export default function Screen1A() {
           {/* Glass card — in front, covers lower part of image, minimal top padding */}
           <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1 }}>
             <h1 style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.45rem, 7vw, 1.9rem)', color: '#3B0764', lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 10 }}>
-              {lang === 'tamil' ? t.screen1A.headline[lang] : (<>REVERSE DIABETES<br />WITHOUT TABLETS</>)}
+              <>REVERSE DIABETES<br />WITHOUT TABLETS</>
             </h1>
             <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: '#5B21B6', lineHeight: 1.55, fontWeight: 500 }}>
-              {t.screen1A.subheadline[lang]}
+              {t.screen1A.subheadline.english}
             </p>
           </div>
         </motion.div>
@@ -437,11 +400,11 @@ export default function Screen1A() {
                 alignItems: 'center', justifyContent: 'center', gap: 8,
               }}
             >
-              {t.screen1A.cta[lang]}
+              {t.screen1A.cta.english}
             </motion.button>
           </div>
 
-          <p className="text-center font-sans text-xs text-purple-400 mt-3">{t.screen1A.seats[lang]}</p>
+          <p className="text-center font-sans text-xs text-purple-400 mt-3">{t.screen1A.seats.english}</p>
           <TrustBar />
         </motion.div>
 
@@ -514,7 +477,7 @@ export default function Screen1A() {
                   transition={{ delay: 0.25, duration: 0.35 }}
                   style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1.15rem', color: '#3B0764', lineHeight: 1.25, marginBottom: 8 }}
                 >
-                  {lang === 'tamil' ? 'நீங்கள் தகுதியானவர்!' : 'You are Eligible!'}
+                  You are Eligible!
                 </motion.p>
                 <motion.p
                   initial={{ opacity: 0, y: 6 }}
@@ -522,7 +485,7 @@ export default function Screen1A() {
                   transition={{ delay: 0.38, duration: 0.3 }}
                   style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: '#059669', fontWeight: 600 }}
                 >
-                  {lang === 'tamil' ? 'இலவச வெபினாருக்கு உங்கள் இடம் காத்திருக்கிறது' : 'Your spot for the FREE Webinar is waiting'}
+                  Your spot for the FREE Webinar is waiting
                 </motion.p>
               </div>
             </motion.div>
@@ -536,7 +499,7 @@ export default function Screen1A() {
               key="expanded-overlay"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
-              exit={{ y: exitUp ? '-100%' : '100%', transition: { duration: 0.42, ease: [0.32, 0, 0.67, 0] } }}
+              exit={{ y: '100%', transition: { duration: 0.42, ease: [0.32, 0, 0.67, 0] } }}
               transition={{ type: 'spring', stiffness: 320, damping: 30 }}
               style={{
                 position: 'fixed', bottom: 0, left: 0, right: 0,
@@ -620,7 +583,7 @@ export default function Screen1A() {
                           fontWeight: 700, fontSize: '1.45rem',
                           color: '#3B0764', margin: 0,
                         }}>
-                          {lang === 'tamil' ? 'உங்கள் சர்க்கரை அளவு?' : 'your sugar level?'}
+                          your sugar level?
                         </p>
                       </div>
 
@@ -636,72 +599,10 @@ export default function Screen1A() {
                             whileTap={{ scale: 0.97 }}
                             style={pillStyle}
                           >
-                            {lang === 'tamil' ? opt.labelTa : opt.labelEn}
+                            {opt.label}
                           </motion.button>
                         ))}
                       </div>
-
-                    </motion.div>
-                  )}
-
-                  {/* ── Step 2: Language qualifier ── */}
-                  {popupStep === 'language' && (
-                    <motion.div
-                      key="language-step"
-                      initial={{ opacity: 0, y: 60 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 60, transition: { duration: 0.22 } }}
-                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                      style={{ padding: '20px 16px 28px' }}
-                    >
-                      {/* Header note — no back button, no mic emoji */}
-                      <div style={{ marginBottom: 10 }}>
-                        <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)', margin: 0 }}>
-                          {t.screen2.note[lang]}
-                        </p>
-                      </div>
-
-                      {/* Question */}
-                      <h2 style={{
-                        fontFamily: 'Outfit, sans-serif',
-                        fontWeight: 700, fontSize: '1.45rem',
-                        color: '#3B0764',
-                        marginBottom: 18, lineHeight: 1.2,
-                      }}>
-                        {t.screen2.question[lang]}
-                      </h2>
-
-                      {/* Options */}
-                      {!popupLeaving && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          {[
-                            { label: t.screen2.yes[lang], action: handleLanguageYes },
-                            { label: t.screen2.no[lang],  action: handleLanguageNo  },
-                          ].map(({ label, action }, i) => (
-                            <motion.button
-                              key={i}
-                              onClick={action}
-                              initial={{ opacity: 0, y: 12 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: 0.12 + i * 0.08 }}
-                              whileTap={{ scale: 0.97 }}
-                              style={pillStyle}
-                            >
-                              {label}
-                            </motion.button>
-                          ))}
-                        </div>
-                      )}
-
-                      {popupLeaving && (
-                        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 16 }}>
-                          <motion.div
-                            animate={{ rotate: 360 }}
-                            transition={{ repeat: Infinity, duration: 0.7, ease: 'linear' }}
-                            style={{ width: 28, height: 28, border: '3px solid rgba(91,33,182,0.15)', borderTopColor: '#5B21B6', borderRadius: '50%' }}
-                          />
-                        </div>
-                      )}
 
                     </motion.div>
                   )}
