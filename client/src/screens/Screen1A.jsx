@@ -636,7 +636,7 @@ export default function Screen1A() {
                         fontSize: '0.78rem', color: 'rgba(91,33,182,0.50)',
                         fontWeight: 500, margin: '0 0 6px',
                       }}>
-                        This webinar is conducted on Zoom
+                        This webinar is conducted in English
                       </p>
 
                       {/* Big question */}
@@ -645,7 +645,7 @@ export default function Screen1A() {
                         fontWeight: 700, fontSize: '1.45rem',
                         color: '#3B0764', margin: '0 0 16px', lineHeight: 1.2,
                       }}>
-                        Can you attend on Zoom?
+                        Do you understand English?
                       </p>
 
                       {/* Yes / No buttons */}
@@ -658,7 +658,7 @@ export default function Screen1A() {
                           whileTap={{ scale: 0.97 }}
                           style={pillStyle}
                         >
-                          Yes, I can attend on Zoom
+                          Yes, I understand English
                         </motion.button>
                         <motion.button
                           onClick={handleZoomNo}
@@ -668,7 +668,7 @@ export default function Screen1A() {
                           whileTap={{ scale: 0.97 }}
                           style={pillStyle}
                         >
-                          No, I can't attend on Zoom
+                          No, I don't understand English
                         </motion.button>
                       </div>
 
