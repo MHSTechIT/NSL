@@ -459,9 +459,9 @@ export default function Screen4() {
       }}>
         <div style={{ position: 'relative' }}>
           <motion.div
-            animate={{ scale: [1, 1.06, 1], opacity: [0.5, 0.15, 0.5] }}
+            animate={{ scale: [1, 1.12, 1], opacity: [0.7, 0.2, 0.7] }}
             transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
-            style={{ position: 'absolute', inset: 0, borderRadius: 50, background: 'rgba(139,92,246,0.55)', filter: 'blur(12px)', zIndex: 0 }}
+            style={{ position: 'absolute', inset: -10, borderRadius: 50, background: 'rgba(139,92,246,0.70)', filter: 'blur(18px)', zIndex: 0 }}
           />
           <motion.button
             type="submit"
