@@ -4,9 +4,9 @@ import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 
 const slideIn = {
-  initial: { x: '100%', opacity: 0 },
-  animate: { x: 0, opacity: 1, transition: { duration: 0.3, ease: 'easeOut' } },
-  exit: { x: '-100%', opacity: 0, transition: { duration: 0.25, ease: 'easeIn' } },
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: 'easeOut' } },
+  exit: { opacity: 0, y: -8, transition: { duration: 0.18, ease: 'easeIn' } },
 };
 
 const SHARE_URL = window.location.origin;
