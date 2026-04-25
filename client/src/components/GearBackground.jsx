@@ -17,6 +17,9 @@ const gears = [
 ];
 
 export default function GearBackground() {
+  // Disable on mobile — rotating SVGs are expensive on low-end devices
+  if (window.innerWidth < 768) return null;
+
   return (
     <>
       {gears.map((g, i) => (

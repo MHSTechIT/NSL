@@ -582,7 +582,7 @@ export default function Screen4() {
                 href={waLink || '#'}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={() => setTimeout(() => navigate('/thankyou'), 800)}
+                onClick={() => {}}
                 whileTap={{ scale: 0.97 }}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
