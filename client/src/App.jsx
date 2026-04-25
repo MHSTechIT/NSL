@@ -15,7 +15,7 @@ function FunnelRoutes() {
   return (
     <>
     <GearBackground />
-    <AnimatePresence mode="wait" initial={false}>
+    <AnimatePresence mode="sync" initial={false}>
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={<Screen1A />} />
         <Route path="/language" element={<Navigate to="/" replace />} />
