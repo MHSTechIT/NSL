@@ -5,7 +5,6 @@ import GearBackground from './components/GearBackground';
 
 import Screen1A from './screens/Screen1A';
 import Screen4 from './screens/Screen4';
-import Screen5 from './screens/Screen5';
 import Disqualified from './screens/Disqualified';
 import LanguageDisqualified from './screens/LanguageDisqualified';
 import AdminPage from './admin/AdminPage';
@@ -22,7 +21,6 @@ function FunnelRoutes() {
         <Route path="/language" element={<Navigate to="/" replace />} />
         <Route path="/duration" element={<Navigate to="/register" replace />} />
         <Route path="/register" element={<Screen4 />} />
-        <Route path="/thankyou" element={<Screen5 />} />
         <Route path="/not-eligible" element={<Disqualified />} />
         <Route path="/language-mismatch" element={<LanguageDisqualified />} />
         <Route path="*" element={<Navigate to="/" replace />} />

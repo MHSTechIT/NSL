@@ -8,6 +8,16 @@
     box-sizing: border-box;
   }
 
+  /* GPU-accelerate all animated elements */
+  canvas,
+  [style*="animation"],
+  [style*="transform"],
+  [style*="transition"] {
+    will-change: transform;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
+
   html {
     background-color: #0f0520;
     background-image:
