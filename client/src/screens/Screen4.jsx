@@ -229,21 +229,20 @@ export default function Screen4() {
   };
 
   return (
-    <motion.div variants={slideIn} initial="initial" animate="animate" exit="exit"
-      style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-
-      {/* ── Fixed top: urgency countdown ── */}
+    <>
+      {/* ── Fixed top: urgency countdown — outside animated wrapper ── */}
       <div style={{
         position: 'fixed', top: 0, left: 0, right: 0,
         maxWidth: 480, margin: '0 auto',
         padding: '10px 16px',
         background: 'transparent',
-        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
         zIndex: 50,
       }}>
         <UrgencyTimer />
       </div>
 
+    <motion.div variants={slideIn} initial="initial" animate="animate" exit="exit"
+      style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
       {/* ── Scrollable body ── */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '80px 16px 120px' }}>
@@ -448,8 +447,9 @@ export default function Screen4() {
 
       </form>
       </div>{/* end scrollable body */}
+    </motion.div>
 
-      {/* ── Fixed bottom: submit button ── */}
+      {/* ── Fixed bottom: submit button — outside animated wrapper ── */}
       <div style={{
         position: 'fixed', bottom: 0, left: 0, right: 0,
         maxWidth: 480, margin: '0 auto',
@@ -608,6 +608,6 @@ export default function Screen4() {
         @keyframes spin { to { transform: rotate(360deg); } }
         input::placeholder { color: rgba(139,92,246,0.35) !important; }
       `}</style>
-    </motion.div>
+    </>
   );
 }
