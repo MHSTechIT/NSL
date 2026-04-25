@@ -12,7 +12,7 @@ export function stopTick() {
   if (_audio) { _audio.pause(); _audio.currentTime = 0; }
 }
 
-export default function CountdownTimer() {
+export default function CountdownTimer({ floating = false }) {
   const { state } = useFunnel();
   const lang = state.lang;
   const [parts, setParts] = useState(getCountdownParts(state.webinarConfig.next_webinar_at));
@@ -49,17 +49,17 @@ export default function CountdownTimer() {
   }
 
   const isNear = parts.isNearStart;
-  /* Convert days → extra hours so we only show 3 units */
-  const totalHrs = parts.days * 24 + parts.hrs;
+  const totalSec = parts.hrs * 3600 + parts.min * 60 + parts.sec;
+  const isUrgent = totalSec > 0 && totalSec < 12 * 3600;
   const units = [
-    { val: totalHrs,  label: t.screen1A.hrs[lang] },
-    { val: parts.min, label: t.screen1A.min[lang] },
-    { val: parts.sec, label: t.screen1A.sec[lang] },
+    { val: parts.hrs,  label: t.screen1A.hrs[lang] },
+    { val: parts.min,  label: t.screen1A.min[lang] },
+    { val: parts.sec,  label: t.screen1A.sec[lang] },
   ];
 
   return (
-    <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: 'rgba(255,255,255,0.45)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 24px rgba(91,33,182,0.07)' }}>
-      <p className="font-sans text-center text-xs font-semibold mb-4 tracking-widest uppercase text-purple-700">
+    <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 4px 24px rgba(91,33,182,0.10), 0 0 30px 6px rgba(139,92,246,0.18)' }}>
+      <p className="font-sans text-center text-xs font-semibold mb-4 tracking-widest uppercase" style={{ color: 'rgba(200,180,255,0.80)' }} >
         {isNear ? t.screen1A.nearStart[lang] : t.screen1A.timerLabel[lang]}
       </p>
 
@@ -73,9 +73,9 @@ export default function CountdownTimer() {
                 fontFamily: 'Outfit, sans-serif',
                 fontWeight: 700,
                 fontSize: '1.4rem',
-                color: 'rgba(91,33,182,0.5)',
+                color: 'rgba(200,180,255,0.55)',
                 lineHeight: 1,
-                marginTop: 6,
+                marginTop: 14,
                 userSelect: 'none',
               }}>:</span>
             )}

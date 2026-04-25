@@ -13,24 +13,24 @@ function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
 /* Build particles that burst outward from the center */
 function makeParticles(cx, cy, count) {
   return Array.from({ length: count }, (_, i) => {
-    // Evenly distribute angles across 360° with slight jitter
-    const angle = (i / count) * Math.PI * 2 + rand(-0.12, 0.12);
-    const speed = rand(4, 11);
-    const type  = i % 4 === 0 ? 0 : i % 8 === 1 ? 1 : 2; // ~75% ribbons, 12.5% circles, 12.5% rects
+    const angle = (i / count) * Math.PI * 2 + rand(-0.15, 0.15);
+    const speed = rand(14, 26); // fast initial burst
+    const type  = i % 3 === 0 ? 0 : i % 5 === 1 ? 1 : 2; // more ribbons
 
     return {
       x:       cx,
       y:       cy,
       vx:      Math.cos(angle) * speed,
       vy:      Math.sin(angle) * speed,
-      gravity: rand(0.05, 0.10),
-      drag:    rand(0.978, 0.990),
+      gravity: rand(0.03, 0.07),   // low gravity → slow drift down
+      drag:    rand(0.88, 0.93),   // heavy drag → rapid horizontal deceleration
       rot:     rand(0, 360),
-      rotVel:  rand(-3.5, 3.5),
+      rotVel:  rand(-4, 4),
       color:   COLORS[Math.floor(Math.random() * COLORS.length)],
       type,
-      w: type === 2 ? rand(4, 8)   : type === 1 ? rand(14, 22) : rand(8, 14),
-      h: type === 2 ? rand(18, 32) : type === 1 ? rand(18, 28) : rand(8, 14),
+      // smaller pieces
+      w: type === 2 ? rand(2, 4)  : type === 1 ? rand(6, 10) : rand(4, 7),
+      h: type === 2 ? rand(8, 16) : type === 1 ? rand(10, 16) : rand(4, 7),
       opacity: 1,
     };
   });
@@ -93,7 +93,7 @@ function drawParticle(ctx, p) {
   ctx.restore();
 }
 
-export default function Confetti({ active, count = 140, duration = 4000, onDone }) {
+export default function Confetti({ active, count = 140, duration = 4000, speedScale = 1, onDone }) {
   const canvasRef = useRef(null);
   const rafRef    = useRef(null);
   const [show, setShow]   = useState(false);
@@ -129,7 +129,7 @@ export default function Confetti({ active, count = 140, duration = 4000, onDone 
     /* ── Burst from content-column center ── */
     const cx    = maxW / 2;
     const cy    = canvas.height / 2;
-    const parts = makeParticles(cx, cy, count);
+    const parts = makeParticles(cx, cy, count, speedScale);
     const start = performance.now();
 
     function frame(now) {

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import CountdownTimer, { stopTick } from '../components/CountdownTimer';
+import Confetti from '../components/Confetti';
 import TrustBar from '../components/TrustBar';
 import {
   pixelPageView, pixelViewContent, pixelInitiateQualification,
@@ -21,42 +22,94 @@ const sugarOptions = [
   { id: 'none',   label: "I Don't Have Diabetes", disqualify: true  },
 ];
 
-/* ── Social Proof Card (merged seats + live feed) ─────────────────────── */
-function SocialProofCard({ count, visibleMsgs }) {
+/* ── Phase styles (used in merged card) ──────────────────────────────── */
+const PHASE_STYLES = {
+  open:    { dot: '#F59E0B', glow: 'rgba(245,158,11,0.35)', border: 'rgba(245,158,11,0.35)', textSub: 'rgba(253,211,77,0.85)' },
+  closing: { dot: '#FB923C', glow: 'rgba(251,146,60,0.38)', border: 'rgba(251,146,60,0.38)', textSub: 'rgba(253,186,116,0.85)' },
+  filling: { dot: '#F87171', glow: 'rgba(248,113,113,0.40)', border: 'rgba(248,113,113,0.40)', textSub: 'rgba(252,165,165,0.85)' },
+  almost:  { dot: '#EF4444', glow: 'rgba(239,68,68,0.50)',  border: 'rgba(239,68,68,0.50)',  textSub: 'rgba(252,165,165,0.90)' },
+  last:    { dot: '#EF4444', glow: 'rgba(239,68,68,0.60)',  border: 'rgba(239,68,68,0.60)',  textSub: 'rgba(252,165,165,0.95)' },
+  ended:   { dot: '#EF4444', glow: 'rgba(239,68,68,0.60)',  border: 'rgba(239,68,68,0.60)',  textSub: 'rgba(252,165,165,0.95)' },
+};
+
+/* ── Merged Social Proof + Seat Badge card ────────────────────────────── */
+const MAX_SEATS = 2000;
+
+function SocialProofCard({ count, visibleMsgs, seatInfo }) {
+  const progress = Math.min(count / MAX_SEATS, 1);
+  const s = seatInfo ? PHASE_STYLES[seatInfo.styleKey] : PHASE_STYLES.open;
+  const isLastChance = seatInfo?.phase === 5;
+
   return (
     <div style={{
-      background: 'rgba(255,255,255,0.55)',
-      backdropFilter: 'blur(16px)',
-      WebkitBackdropFilter: 'blur(16px)',
-      border: '1px solid rgba(91,33,182,0.13)',
+      background: 'rgba(255,255,255,0.08)',
+      backdropFilter: 'blur(24px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+      border: `1px solid ${s.border}`,
       borderRadius: 16,
       padding: '14px 16px',
-      boxShadow: '0 2px 16px rgba(91,33,182,0.08)',
+      boxShadow: `0 2px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.12)`,
     }}>
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.7rem', color: '#3B0764', lineHeight: 1 }}>
-            {count.toLocaleString('en-IN')}
-          </span>
-          <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem', color: '#6D28D9' }}>
-            Seats Reserved
+
+      {/* ── Phase + seats row ── */}
+      {seatInfo && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          {/* Left: pulsing dot + label */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <div style={{ width: 9, height: 9, borderRadius: '50%', background: s.dot }} />
+              <motion.div
+                animate={{ scale: [1, 2.2, 1], opacity: [0.7, 0, 0.7] }}
+                transition={{ repeat: Infinity, duration: 1.5, ease: 'easeOut' }}
+                style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: s.dot }}
+              />
+            </div>
+            <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.85rem', color: s.dot, margin: 0 }}>
+              {seatInfo.label}
+            </p>
+          </div>
+          {/* Right: seats left — plain text, no card */}
+          <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.80rem', color: '#ffffff', whiteSpace: 'nowrap' }}>
+            {seatInfo?.seats != null ? `${seatInfo.seats} left` : 'Almost full'}
           </span>
         </div>
-        {/* Live updating badge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <motion.div
-            animate={{ opacity: [1, 0.3, 1] }}
-            transition={{ repeat: Infinity, duration: 1.2 }}
-            style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}
-          />
-          <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.72rem', color: '#065f46' }}>
-            Live updating
-          </span>
-        </div>
+      )}
+
+      {/* ── Count row ── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.7rem', color: '#ffffff', lineHeight: 1 }}>
+          {count.toLocaleString('en-IN')}
+        </span>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem', color: 'rgba(200,180,255,0.80)' }}>
+          Seats Reserved
+        </span>
       </div>
 
-      {/* Message rows — each in its own card, new one slides in from bottom */}
+      {/* ── Progress label (2000 cap) ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', color: 'rgba(200,180,255,0.55)' }}>
+          {Math.round(progress * 100)}% filled
+        </span>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', fontWeight: 700, color: 'rgba(200,180,255,0.70)' }}>
+          2,000
+        </span>
+      </div>
+
+      {/* ── Progress bar ── */}
+      <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.10)', marginBottom: 12, overflow: 'hidden' }}>
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${progress * 100}%` }}
+          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+          style={{
+            height: '100%', borderRadius: 3,
+            background: `linear-gradient(90deg, ${s.dot}, rgba(167,139,250,0.90))`,
+            boxShadow: `0 0 8px 1px ${s.glow}`,
+          }}
+        />
+      </div>
+
+      {/* ── Live feed rows ── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <AnimatePresence initial={false} mode="popLayout">
           {visibleMsgs.map((msg) => {
@@ -72,25 +125,23 @@ function SocialProofCard({ count, visibleMsgs }) {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -20, scale: 0.94 }}
                 transition={{ type: 'spring', stiffness: 340, damping: 26 }}
-                whileHover={{ scale: 1.02, boxShadow: '0 4px 18px rgba(91,33,182,0.13)' }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '10px 12px',
-                  background: 'rgba(255,255,255,0.80)',
-                  border: '1px solid rgba(91,33,182,0.12)',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.12)',
                   borderRadius: 10,
                   overflow: 'hidden',
-                  boxShadow: '0 2px 8px rgba(91,33,182,0.07)',
-                  cursor: 'default',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.20)',
                 }}
               >
-                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>
-                  <span style={{ fontWeight: 700, color: '#3B0764' }}>{name}</span>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: 'rgba(255,255,255,0.80)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>
+                  <span style={{ fontWeight: 700, color: '#ffffff' }}>{name}</span>
                   {` from ${city} joined`}
                 </span>
-                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.72rem', color: '#9CA3AF', flexShrink: 0 }}>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.72rem', color: 'rgba(200,180,255,0.55)', flexShrink: 0 }}>
                   {time}
                 </span>
               </motion.div>
@@ -98,6 +149,7 @@ function SocialProofCard({ count, visibleMsgs }) {
           })}
         </AnimatePresence>
       </div>
+
     </div>
   );
 }
@@ -111,95 +163,20 @@ function getSeatInfo(nextWebinarAt) {
   if (diff <= 0) return null;
 
   if (h < 2) {
-    return { phase: 5, styleKey: 'last', seats: null, label: 'LAST CHANCE — Starting Soon!' };
+    return { phase: 5, styleKey: 'last', seats: null, label: 'LAST CHANCE' };
   } else if (h < 12) {
     const seats = Math.max(3, Math.round(3 + (h - 2) / 10 * 9));
-    return { phase: 4, styleKey: 'almost', seats, label: `Almost Full — Only ${seats} Seats Left` };
+    return { phase: 4, styleKey: 'almost', seats, label: 'Almost Full' };
   } else if (h < 24) {
     const seats = Math.max(12, Math.round(12 + (h - 12) / 12 * 6));
-    return { phase: 3, styleKey: 'filling', seats, label: `Filling Fast — Only ${seats} Seats Left` };
+    return { phase: 3, styleKey: 'filling', seats, label: 'Filling Fast' };
   } else if (h < 36) {
     const seats = Math.max(18, Math.round(18 + (h - 24) / 12 * 29));
-    return { phase: 2, styleKey: 'closing', seats, label: `Closing Soon — Only ${seats} Seats Left` };
+    return { phase: 2, styleKey: 'closing', seats, label: 'Closing Soon' };
   } else {
     const seats = Math.min(187, Math.max(47, Math.round(47 + Math.min(h - 36, 36) / 36 * 140)));
-    return { phase: 1, styleKey: 'open', seats, label: `Live Registration Open — Only ${seats} Seats Left` };
+    return { phase: 1, styleKey: 'open', seats, label: 'Live Registration Open' };
   }
-}
-
-/* ── SeatBadge component ──────────────────────────────────────────────── */
-const PHASE_STYLES = {
-  open:    { bg: 'rgba(255,251,235,0.90)', border: 'rgba(245,158,11,0.50)',  dot: '#F59E0B', textMain: '#92400E', textSub: '#B45309', shadow: 'rgba(245,158,11,0.14)' },
-  closing: { bg: 'rgba(255,237,213,0.90)', border: 'rgba(234,88,12,0.50)',   dot: '#EA580C', textMain: '#7C2D12', textSub: '#9A3412', shadow: 'rgba(234,88,12,0.14)' },
-  filling: { bg: 'rgba(254,226,226,0.90)', border: 'rgba(220,38,38,0.50)',   dot: '#DC2626', textMain: '#7F1D1D', textSub: '#991B1B', shadow: 'rgba(220,38,38,0.14)' },
-  almost:  { bg: 'rgba(254,215,215,0.92)', border: 'rgba(153,27,27,0.55)',   dot: '#991B1B', textMain: '#450A0A', textSub: '#7F1D1D', shadow: 'rgba(153,27,27,0.18)' },
-  last:    { bg: 'rgba(254,202,202,0.95)', border: 'rgba(127,29,29,0.60)',   dot: '#7F1D1D', textMain: '#3B0000', textSub: '#7F1D1D', shadow: 'rgba(127,29,29,0.22)' },
-  ended:   { bg: 'rgba(254,202,202,0.95)', border: 'rgba(127,29,29,0.60)',   dot: '#7F1D1D', textMain: '#3B0000', textSub: '#7F1D1D', shadow: 'rgba(127,29,29,0.22)' },
-};
-
-function SeatBadge({ info }) {
-  const s = PHASE_STYLES[info.styleKey];
-  const isLastChance = info.phase === 5;
-
-  return (
-    <motion.div
-      animate={isLastChance ? { scale: [1, 1.015, 1] } : {}}
-      transition={isLastChance ? { repeat: Infinity, duration: 1.2, ease: 'easeInOut' } : {}}
-      style={{
-        background: s.bg,
-        border: `1.5px solid ${s.border}`,
-        borderRadius: 16,
-        padding: '10px 14px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        boxShadow: `0 2px 12px ${s.shadow}`,
-      }}
-    >
-      {/* Pulsing dot */}
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <div style={{
-          width: 10, height: 10, borderRadius: '50%',
-          background: s.dot,
-        }} />
-        <motion.div
-          animate={{ scale: [1, 2.2, 1], opacity: [0.7, 0, 0.7] }}
-          transition={{ repeat: Infinity, duration: 1.5, ease: 'easeOut' }}
-          style={{
-            position: 'absolute', inset: 0,
-            borderRadius: '50%',
-            background: s.dot,
-          }}
-        />
-      </div>
-
-      {/* Text */}
-      <div style={{ flex: 1 }}>
-        <p style={{
-          fontFamily: 'Outfit, sans-serif',
-          fontWeight: 700,
-          fontSize: isLastChance ? '0.88rem' : '0.82rem',
-          color: s.textMain,
-          margin: 0,
-          lineHeight: 1.25,
-          letterSpacing: isLastChance ? '0.02em' : 0,
-        }}>
-          {info.label}
-        </p>
-        {!isLastChance && (
-          <p style={{
-            fontFamily: 'Outfit, sans-serif',
-            fontSize: '0.68rem',
-            color: s.textSub,
-            margin: '2px 0 0',
-            opacity: 0.75,
-          }}>
-            Register now to secure your spot
-          </p>
-        )}
-      </div>
-    </motion.div>
-  );
 }
 
 export default function Screen1A() {
@@ -207,8 +184,8 @@ export default function Screen1A() {
   const navigate = useNavigate();
   const [seatInfo, setSeatInfo] = useState(() => getSeatInfo(state.webinarConfig?.next_webinar_at));
   const [seatsReserved, setSeatsReserved] = useState(1813);
-  const [visibleMsgs, setVisibleMsgs] = useState(() => LIVE_MSGS.slice(0, 3));
-  const nextMsgIdxRef = useRef(3);
+  const [visibleMsgs, setVisibleMsgs] = useState(() => LIVE_MSGS.slice(0, 2));
+  const nextMsgIdxRef = useRef(2);
   const seatTimerRef = useRef(null);
   const [expanded, setExpanded] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -268,7 +245,7 @@ export default function Screen1A() {
     const id = setInterval(() => {
       const next = nextMsgIdxRef.current % LIVE_MSGS.length;
       nextMsgIdxRef.current = next + 1;
-      setVisibleMsgs(prev => [...prev, LIVE_MSGS[next]].slice(-3));
+      setVisibleMsgs(prev => [...prev, LIVE_MSGS[next]].slice(-2));
     }, 3500);
     return () => clearInterval(id);
   }, []);
@@ -298,7 +275,7 @@ export default function Screen1A() {
       setPopupStep('sugar');
       setPopupLeaving(false);
       setShowEligible(true);
-      setTimeout(() => navigate('/duration'), 1800);
+      setTimeout(() => navigate('/register'), 1800);
     }, 420);
   }
 
@@ -326,22 +303,23 @@ export default function Screen1A() {
   const pillStyle = {
     width: '100%', padding: '13px 16px',
     borderRadius: 50,
-    background: 'rgba(237,234,248,0.75)',
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
-    color: '#3B0764',
-    border: '1px solid rgba(255,255,255,0.8)',
+    background: 'rgba(255,255,255,0.10)',
+    backdropFilter: 'blur(20px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+    color: '#ffffff',
+    border: '1px solid rgba(255,255,255,0.22)',
     fontFamily: 'Outfit, sans-serif', fontWeight: 700,
     fontSize: '0.95rem', cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    boxShadow: '0 2px 8px rgba(91,33,182,0.10)',
+    boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.35), inset 0 -1px 0 rgba(0,0,0,0.10), 0 4px 16px rgba(0,0,0,0.20)',
+    transition: 'all 180ms',
   };
 
   return (
     <div className="flex flex-col min-h-screen">
       {/* Top bar — removed */}
 
-      <div className="flex-1 px-4 pb-8 flex flex-col gap-4" style={{ overflowY: 'auto' }}>
+      <div className="flex-1 px-4 flex flex-col gap-4" style={{ overflowY: 'auto', paddingBottom: 100 }}>
 
 
         {/* Hero — image behind the card, card overlaps image bottom */}
@@ -351,11 +329,11 @@ export default function Screen1A() {
             <img src="/person.png" alt="" style={{ width: '55%', maxWidth: 200, display: 'block' }} />
           </div>
           {/* Glass card — in front, covers lower part of image, minimal top padding */}
-          <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1 }}>
-            <h1 style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.45rem, 7vw, 1.9rem)', color: '#3B0764', lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 10 }}>
+          <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1, background: 'rgba(20,0,50,0.55)' }}>
+            <h1 className="heading-shine" style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.45rem, 7vw, 1.9rem)', lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 10 }}>
               <>REVERSE DIABETES<br />WITHOUT TABLETS</>
             </h1>
-            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: '#5B21B6', lineHeight: 1.55, fontWeight: 500 }}>
+            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: 'rgba(220,210,255,0.85)', lineHeight: 1.55, fontWeight: 500 }}>
               {t.screen1A.subheadline.english}
             </p>
           </div>
@@ -364,61 +342,9 @@ export default function Screen1A() {
         {/* Countdown */}
         <motion.div {...cardAnim(2)}><CountdownTimer /></motion.div>
 
-        {/* Seat Badge */}
-        {seatInfo && (
-          <motion.div {...cardAnim(3)}>
-            <SeatBadge info={seatInfo} />
-          </motion.div>
-        )}
-
-        {/* Social Proof Card */}
-        <motion.div {...cardAnim(4)}>
-          <SocialProofCard count={seatsReserved} visibleMsgs={visibleMsgs} />
-        </motion.div>
-
-        {/* ── CTA section ── */}
-        <motion.div className="mt-auto pt-2 pb-2" {...cardAnim(6)}>
-          <div style={{ position: 'relative' }}>
-            {/* Glow ring — pulses behind the button */}
-            <motion.div
-              animate={{ scale: [1, 1.08, 1], opacity: [0.55, 0.15, 0.55] }}
-              transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
-              style={{
-                position: 'absolute', inset: 0,
-                borderRadius: 50,
-                background: 'rgba(139,92,246,0.55)',
-                filter: 'blur(12px)',
-                zIndex: 0,
-              }}
-            />
-            <motion.button
-              onClick={() => { stopTick(); setExpanded(true); }}
-              animate={{
-                scale: [1, 1.04, 1],
-                boxShadow: [
-                  '0 4px 20px rgba(91,33,182,0.45)',
-                  '0 6px 36px rgba(139,92,246,0.85)',
-                  '0 4px 20px rgba(91,33,182,0.45)',
-                ],
-              }}
-              transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
-              style={{
-                position: 'relative', zIndex: 1,
-                width: '100%', height: '3.5rem',
-                background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
-                border: 'none', borderRadius: 50,
-                color: '#fff', fontFamily: 'Outfit, sans-serif',
-                fontWeight: 700, fontSize: '1.1rem',
-                cursor: 'pointer', display: 'flex',
-                alignItems: 'center', justifyContent: 'center', gap: 8,
-              }}
-            >
-              {t.screen1A.cta.english}
-            </motion.button>
-          </div>
-
-          <p className="text-center font-sans text-xs text-purple-400 mt-3">{t.screen1A.seats.english}</p>
-          <TrustBar />
+        {/* Merged Social Proof + Seat Badge Card */}
+        <motion.div {...cardAnim(3)}>
+          <SocialProofCard count={seatsReserved} visibleMsgs={visibleMsgs} seatInfo={seatInfo} />
         </motion.div>
 
         {/* ── Blur backdrop ── */}
@@ -432,9 +358,9 @@ export default function Screen1A() {
               transition={{ duration: 0.25 }}
               style={{
                 position: 'fixed', inset: 0, zIndex: 40,
-                backdropFilter: 'blur(6px)',
-                WebkitBackdropFilter: 'blur(6px)',
-                background: 'rgba(15,0,40,0.35)',
+                backdropFilter: 'blur(18px)',
+                WebkitBackdropFilter: 'blur(18px)',
+                background: 'rgba(10,0,30,0.60)',
               }}
             />
           )}
@@ -456,13 +382,15 @@ export default function Screen1A() {
               }}
             >
               <div style={{
-                background: 'rgba(255,255,255,0.96)',
-                borderRadius: 20,
-                padding: '28px 24px',
+                background: 'rgba(255,255,255,0.10)',
+                backdropFilter: 'blur(32px) saturate(200%)',
+                WebkitBackdropFilter: 'blur(32px) saturate(200%)',
+                borderRadius: 24,
+                padding: '32px 28px',
                 textAlign: 'center',
-                boxShadow: '0 12px 48px rgba(91,33,182,0.22)',
-                border: '1.5px solid rgba(91,33,182,0.15)',
-                maxWidth: 320,
+                boxShadow: '0 0 60px 20px rgba(34,197,94,0.25), 0 0 120px 40px rgba(91,33,182,0.20), inset 0 1px 0 rgba(255,255,255,0.35)',
+                border: '1px solid rgba(255,255,255,0.22)',
+                maxWidth: 300,
                 width: '100%',
               }}>
                 {/* Animated check */}
@@ -471,14 +399,14 @@ export default function Screen1A() {
                   animate={{ scale: 1 }}
                   transition={{ type: 'spring', stiffness: 350, damping: 20, delay: 0.1 }}
                   style={{
-                    width: 64, height: 64, borderRadius: '50%',
+                    width: 68, height: 68, borderRadius: '50%',
                     background: 'linear-gradient(135deg, #22C55E, #16A34A)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    margin: '0 auto 16px',
-                    boxShadow: '0 6px 24px rgba(34,197,94,0.40)',
+                    margin: '0 auto 18px',
+                    boxShadow: '0 0 0 10px rgba(34,197,94,0.12), 0 8px 32px rgba(34,197,94,0.50)',
                   }}
                 >
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
                     <motion.path d="M5 13l4 4L19 7" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
                       initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
                       transition={{ delay: 0.3, duration: 0.4, ease: [0.16, 1, 0.3, 1] }} />
@@ -488,7 +416,7 @@ export default function Screen1A() {
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.25, duration: 0.35 }}
-                  style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1.15rem', color: '#3B0764', lineHeight: 1.25, marginBottom: 8 }}
+                  style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1.2rem', color: '#ffffff', lineHeight: 1.25, marginBottom: 8 }}
                 >
                   You are Eligible!
                 </motion.p>
@@ -496,7 +424,7 @@ export default function Screen1A() {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.38, duration: 0.3 }}
-                  style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: '#059669', fontWeight: 600 }}
+                  style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: '#4ADE80', fontWeight: 600 }}
                 >
                   Your spot for the FREE Webinar is waiting
                 </motion.p>
@@ -567,15 +495,14 @@ export default function Screen1A() {
 
               {/* ── Card ── */}
               <div style={{
-                background: 'rgba(255,255,255,0.55)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
+                background: 'rgba(255,255,255,0.12)',
+                backdropFilter: 'blur(24px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
                 borderRadius: '22px 22px 0 0',
-                border: '1px solid rgba(255,255,255,0.75)',
+                border: '1px solid rgba(255,255,255,0.28)',
                 borderBottom: 'none',
-                boxShadow: '0 -8px 32px rgba(91,33,182,0.14)',
+                boxShadow: '0 -8px 80px 30px rgba(91,33,182,0.90), 0 0 120px 50px rgba(139,92,246,0.70), inset 0 1px 0 rgba(255,255,255,0.50)',
                 position: 'relative', zIndex: 2,
-                overflow: 'hidden',
               }}>
                 <AnimatePresence mode="wait">
 
@@ -594,7 +521,7 @@ export default function Screen1A() {
                         <p style={{
                           fontFamily: 'Outfit, sans-serif',
                           fontWeight: 700, fontSize: '1.45rem',
-                          color: '#3B0764', margin: 0,
+                          color: '#ffffff', margin: 0,
                         }}>
                           your sugar level?
                         </p>
@@ -633,7 +560,7 @@ export default function Screen1A() {
                       {/* Small label */}
                       <p style={{
                         fontFamily: 'Outfit, sans-serif',
-                        fontSize: '0.78rem', color: 'rgba(91,33,182,0.50)',
+                        fontSize: '0.78rem', color: 'rgba(200,180,255,0.65)',
                         fontWeight: 500, margin: '0 0 6px',
                       }}>
                         This webinar is conducted in Tamil
@@ -643,7 +570,7 @@ export default function Screen1A() {
                       <p style={{
                         fontFamily: 'Outfit, sans-serif',
                         fontWeight: 700, fontSize: '1.45rem',
-                        color: '#3B0764', margin: '0 0 16px', lineHeight: 1.2,
+                        color: '#ffffff', margin: '0 0 16px', lineHeight: 1.2,
                       }}>
                         Do you understand Tamil?
                       </p>
@@ -682,6 +609,59 @@ export default function Screen1A() {
         </AnimatePresence>
 
       </div>
+
+      {/* ── Fixed bottom CTA ── */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0,
+        maxWidth: 480, margin: '0 auto',
+        padding: '12px 16px 20px',
+        background: 'transparent',
+        zIndex: 30,
+      }}>
+        <div style={{ position: 'relative' }}>
+          {/* Glow ring — pulses behind the button */}
+          <motion.div
+            animate={{ scale: [1, 1.08, 1], opacity: [0.55, 0.15, 0.55] }}
+            transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+            style={{
+              position: 'absolute', inset: 0,
+              borderRadius: 50,
+              background: 'rgba(139,92,246,0.55)',
+              filter: 'blur(12px)',
+              zIndex: 0,
+            }}
+          />
+          <motion.button
+            onClick={() => { stopTick(); setExpanded(true); }}
+            animate={{
+              scale: [1, 1.04, 1],
+              boxShadow: [
+                '0 4px 20px rgba(91,33,182,0.45)',
+                '0 6px 36px rgba(139,92,246,0.85)',
+                '0 4px 20px rgba(91,33,182,0.45)',
+              ],
+            }}
+            transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+            style={{
+              position: 'relative', zIndex: 1,
+              width: '100%', height: '3.5rem',
+              background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
+              border: 'none', borderRadius: 50,
+              color: '#fff', fontFamily: 'Outfit, sans-serif',
+              fontWeight: 700, fontSize: '1.1rem',
+              cursor: 'pointer', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}
+          >
+            {t.screen1A.cta.english}
+          </motion.button>
+        </div>
+        <TrustBar />
+      </div>
+
+      {/* ── Confetti burst on eligible ── */}
+      <Confetti active={showEligible} count={260} duration={5500} />
+
     </div>
   );
 }

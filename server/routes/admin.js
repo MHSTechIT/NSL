@@ -5,6 +5,7 @@ const router   = express.Router();
 const supabase = require('../supabase');
 const { adminAuth }              = require('../middleware/adminAuth');
 const { getPassword, writeConfig } = require('../utils/adminConfig');
+const cache = require('../utils/webinarConfigCache');
 
 router.use(adminAuth);
 
@@ -52,6 +53,7 @@ router.put('/webinar-config', configValidators, async (req, res) => {
     .eq('id', 1);
 
   if (error) return res.status(500).json({ error: 'Failed to update config' });
+  cache.invalidate();
   res.json({ success: true, updated_at: updates.updated_at });
 });
 

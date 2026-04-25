@@ -17,14 +17,13 @@ export default function CountdownTimerCompact() {
   if (parts.isDuringSession) return null;
 
   const units = [
-    { val: parts.days, label: 'd' },
     { val: parts.hrs,  label: 'h' },
     { val: parts.min,  label: 'm' },
     { val: parts.sec,  label: 's' },
   ];
 
   return (
-    <div className="inline-flex items-end gap-2 rounded-pill px-4 py-2" style={{ background: 'rgba(255,255,255,0.45)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 16px rgba(91,33,182,0.07)' }}>
+    <div className="inline-flex items-end gap-2 rounded-pill px-4 py-2" style={{ background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.6)', boxShadow: '0 4px 16px rgba(91,33,182,0.07)' }}>
       <span className="text-purple-400 text-xs mb-0.5">⏱</span>
       <div className="flex items-end gap-1.5">
         {units.map(({ val, label }, i) => (
