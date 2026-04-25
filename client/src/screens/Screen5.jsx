@@ -5,9 +5,6 @@ import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import { formatISTDateTime } from '../utils/time';
 import { pixelPurchase, pixelGroupJoinInitiated } from '../utils/pixel';
-import TopBar from '../components/TopBar';
-
-
 const slideIn = {
   initial: { x: '100%', opacity: 0 },
   animate: { x: 0, opacity: 1, transition: { duration: 0.3, ease: 'easeOut' } },
@@ -45,9 +42,6 @@ export default function Screen5() {
 
   return (
     <motion.div variants={slideIn} initial="initial" animate="animate" exit="exit" className="flex flex-col min-h-screen">
-      <TopBar step={4} />
-      
-
       <div className="flex-1 px-4 pb-8 flex flex-col items-center gap-5 text-center">
 
         {/* Success icon */}
