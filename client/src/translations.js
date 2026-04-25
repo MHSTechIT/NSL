@@ -6,13 +6,13 @@ export const t = {
     badge: { tamil: '🔴 நேரலை பதிவு திறந்துள்ளது', english: '🔴 Live Registration Open' },
     headline: {
       tamil: 'சர்க்கரை நோயால் கஷ்டப்படுகிறீர்களா?',
-      english: 'Are You Struggling With Diabetes?',
+      english: 'Reverse Diabetes Without Tablets',
     },
     subheadline: {
       tamil: 'இலவச வெபினாரில் சேர்ந்து சர்க்கரை நோயை மாற்றும் ரகசியத்தை அறியுங்கள்!',
-      english: 'Join our FREE webinar and discover how to reverse diabetes naturally!',
+      english: 'In 90 minutes, Dr. Prabhakar Raj will show you the exact science behind diabetes reversal — the same method 15,000+ of his students used to stop medicines permanently.',
     },
-    cta: { tamil: 'ஆம், என்னிடம் சர்க்கரை நோய் உள்ளது →', english: 'Yes, I Have Diabetes →' },
+    cta: { tamil: 'ஆம், என்னிடம் சர்க்கரை நோய் உள்ளது →', english: 'Check Your Eligibility' },
     seats: { tamil: 'இன்று மட்டும் இடங்கள் வரையறுக்கப்பட்டுள்ளன', english: 'Limited seats available today' },
     timerLabel: { tamil: 'அடுத்த வெபினார் தொடங்க:', english: 'Next Webinar Starts In:' },
     days: { tamil: 'நாட்கள்', english: 'DAYS' },

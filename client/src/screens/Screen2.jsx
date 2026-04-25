@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import TopBar from '../components/TopBar';
+import CountdownTimerCompact from '../components/CountdownTimerCompact';
 import { pixelLanguageQualified, pixelDisqualifiedLead } from '../utils/pixel';
 
 const slideIn = {
@@ -41,8 +42,10 @@ export default function Screen2() {
     >
       <TopBar showBack backPath="/" step={1} />
 
-      {/* Spacer pushes card to bottom */}
-      <div className="flex-1" />
+      {/* Spacer pushes card to bottom — floating timer centered inside */}
+      <div className="flex-1" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CountdownTimerCompact />
+      </div>
 
       {/* Bottom area: zoom image + card, same pattern as sugar level */}
       <div style={{ position: 'relative', padding: '0 16px 32px' }}>
@@ -74,7 +77,7 @@ export default function Screen2() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ type: 'spring', stiffness: 300, damping: 30, delay: 0.08 }}
           style={{
-            background: 'rgba(255,255,255,0.55)',
+            background: 'rgba(255,255,255,0.82)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             borderRadius: 22,

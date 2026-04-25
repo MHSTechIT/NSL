@@ -9,15 +9,21 @@
   }
 
   html {
-    background-color: #EDEAF8;
+    background-color: #0f0520;
+    background-image:
+      radial-gradient(ellipse at top right, rgba(139,92,246,0.18) 0%, transparent 55%),
+      radial-gradient(ellipse at bottom left, rgba(91,33,182,0.14) 0%, transparent 55%);
   }
 
   body {
     font-family: 'Outfit', 'Noto Sans Tamil', Inter, sans-serif;
-    color: #111827;
+    color: #ffffff;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #EDEAF8;
+    background-color: #0f0520;
+    background-image:
+      radial-gradient(ellipse at top right, rgba(139,92,246,0.18) 0%, transparent 55%),
+      radial-gradient(ellipse at bottom left, rgba(91,33,182,0.14) 0%, transparent 55%);
     max-width: 480px;
     margin: 0 auto;
     min-height: 100vh;
@@ -32,7 +38,7 @@
 
   /* ── Cards ── */
   .card {
-    background: rgba(255,255,255,0.45);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-radius: 18px;
@@ -50,7 +56,7 @@
 
   /* ── Frosted glass hero ── */
   .glass-card {
-    background: rgba(255,255,255,0.45);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-radius: 18px;
@@ -185,7 +191,7 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    background: rgba(255,255,255,0.45);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-radius: 18px;
@@ -213,7 +219,7 @@
     padding-right: 1rem;
     border-radius: 14px;
     border: 1px solid rgba(255,255,255,0.80);
-    background: rgba(255,255,255,0.55);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     box-shadow: 0 2px 10px rgba(91,33,182,0.07);
@@ -228,7 +234,7 @@
   }
   .field-input:focus {
     border-color: rgba(91,33,182,0.45);
-    background: rgba(255,255,255,0.70);
+    background: rgba(255,255,255,0.92);
     box-shadow: 0 0 0 3px rgba(91,33,182,0.10), 0 2px 10px rgba(91,33,182,0.08);
   }
 
@@ -300,6 +306,40 @@
 }
 
 /* Morph digit animation handled by Framer Motion */
+
+@keyframes headingShine {
+  0%, 50% { background-position: 100% center; }
+  100%     { background-position: 0% center; }
+}
+.heading-shine {
+  background: linear-gradient(
+    105deg,
+    rgba(210,205,235,1) 0%,
+    rgba(210,205,235,1) 42%,
+    rgba(255,255,255,0.55) 47%,
+    #ffffff 50%,
+    rgba(255,255,255,0.55) 53%,
+    rgba(210,205,235,1) 58%,
+    rgba(210,205,235,1) 100%
+  ) 100% center / 300% 100% no-repeat;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: headingShine 8s linear infinite;
+}
+
+@keyframes pressMarquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.press-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: pressMarquee 35s linear infinite;
+}
+.press-marquee-track:hover {
+  animation-play-state: paused;
+}
 
 @keyframes successGlowPulse {
   0%   { box-shadow: 0 0 0 0 rgba(147,51,234,0.55), 0 8px 40px rgba(91,33,182,0.22); }

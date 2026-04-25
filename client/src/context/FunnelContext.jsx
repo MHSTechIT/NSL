@@ -3,30 +3,71 @@ import { parseUTMParams } from '../utils/utm';
 
 const FunnelContext = createContext(null);
 
+const STATE_KEY  = 'funnel_state';
+const CONFIG_KEY = 'webinar_config_cache';
+
+/* ── localStorage helpers ───────────────────────────────────────────────── */
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveState(state) {
+  try {
+    // Persist only the fields that are worth restoring
+    const { lang, sugarLevel, diabetesDuration, languageQualified,
+            fullName, whatsappNumber, email,
+            leadScore, submittedLeadId, whatsappGroupLink, utm } = state;
+    localStorage.setItem(STATE_KEY, JSON.stringify({
+      lang, sugarLevel, diabetesDuration, languageQualified,
+      fullName, whatsappNumber, email,
+      leadScore, submittedLeadId, whatsappGroupLink, utm,
+    }));
+  } catch {}
+}
+
+function loadConfig() {
+  try {
+    const raw = localStorage.getItem(CONFIG_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveConfig(data) {
+  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(data)); } catch {}
+}
+
+/* ── Build initial state from cache ─────────────────────────────────────── */
+const savedState  = loadState();
+const cachedConfig = loadConfig();
+
 const initialState = {
-  lang: 'english',
-  navDirection: 'forward',
-  sugarLevel: null,
-  diabetesDuration: null,
-  languageQualified: null,
-  fullName: '',
-  whatsappNumber: '',
-  email: '',
-  leadScore: null,
-  utm: { utm_source: null, utm_campaign: null, utm_content: null, fbclid: null },
-  webinarConfig: {
-    next_webinar_at: null,
-    backup_webinar_at: null,
-    tuesday_whatsapp_link: null,
-    friday_whatsapp_link: null,
-    kill_switch: false,
+  lang:               savedState?.lang               ?? 'english',
+  navDirection:       'forward',
+  sugarLevel:         savedState?.sugarLevel         ?? null,
+  diabetesDuration:   savedState?.diabetesDuration   ?? null,
+  languageQualified:  savedState?.languageQualified  ?? null,
+  fullName:           savedState?.fullName           ?? '',
+  whatsappNumber:     savedState?.whatsappNumber     ?? '',
+  email:              savedState?.email              ?? '',
+  leadScore:          savedState?.leadScore          ?? null,
+  submittedLeadId:    savedState?.submittedLeadId    ?? null,
+  whatsappGroupLink:  savedState?.whatsappGroupLink  ?? null,
+  utm:                savedState?.utm ?? { utm_source: null, utm_campaign: null, utm_content: null, fbclid: null },
+  webinarConfig: cachedConfig ?? {
+    next_webinar_at:        null,
+    backup_webinar_at:      null,
+    tuesday_whatsapp_link:  null,
+    friday_whatsapp_link:   null,
+    kill_switch:            false,
   },
-  webinarConfigLoading: true,
-  webinarConfigError: null,
-  whatsappGroupLink: null,
-  submittedLeadId: null,
+  webinarConfigLoading: !cachedConfig,
+  webinarConfigError:   null,
 };
 
+/* ── Reducer ─────────────────────────────────────────────────────────────── */
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_LANG':
@@ -50,26 +91,52 @@ function reducer(state, action) {
     case 'SET_SUBMITTED':
       return {
         ...state,
-        submittedLeadId: action.payload.leadId,
-        leadScore: action.payload.leadScore,
+        submittedLeadId:   action.payload.leadId,
+        leadScore:         action.payload.leadScore,
         whatsappGroupLink: action.payload.whatsappGroupLink,
       };
     case 'RESET':
-      return { ...initialState, lang: state.lang, utm: state.utm, webinarConfig: state.webinarConfig, webinarConfigLoading: false };
+      try { localStorage.removeItem(STATE_KEY); } catch {}
+      return {
+        ...initialState,
+        lang:                'english',
+        utm:                 state.utm,
+        webinarConfig:       state.webinarConfig,
+        webinarConfigLoading: false,
+        sugarLevel:          null,
+        diabetesDuration:    null,
+        languageQualified:   null,
+        fullName:            '',
+        whatsappNumber:      '',
+        email:               '',
+        leadScore:           null,
+        submittedLeadId:     null,
+        whatsappGroupLink:   null,
+      };
     default:
       return state;
   }
 }
 
+/* ── Provider ────────────────────────────────────────────────────────────── */
 export function FunnelProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
+  // Persist state to localStorage on every change
+  useEffect(() => {
+    saveState(state);
+  }, [state]);
+
+  // On mount: refresh UTM + webinar config
   useEffect(() => {
     dispatch({ type: 'SET_UTM', payload: parseUTMParams() });
 
     fetch('/api/webinar-config')
       .then(r => r.json())
-      .then(data => dispatch({ type: 'SET_WEBINAR_CONFIG', payload: data }))
+      .then(data => {
+        saveConfig(data);
+        dispatch({ type: 'SET_WEBINAR_CONFIG', payload: data });
+      })
       .catch(err => dispatch({ type: 'SET_WEBINAR_CONFIG_ERROR', payload: err.message }));
   }, []);
 

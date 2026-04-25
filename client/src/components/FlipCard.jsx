@@ -16,16 +16,12 @@ function MorphDigit({ value, size = 'lg', urgent = false }) {
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
-      background: urgent
-        ? 'linear-gradient(160deg, rgba(255,255,255,0.60) 0%, rgba(254,226,226,0.40) 100%)'
-        : 'linear-gradient(160deg, rgba(255,255,255,0.60) 0%, rgba(237,234,248,0.35) 100%)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
+      background: 'rgba(255,255,255,0.08)',
+      backdropFilter: 'blur(20px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
       borderRadius: r,
-      border: urgent ? '1px solid rgba(255,255,255,0.72)' : '1px solid rgba(255,255,255,0.72)',
-      boxShadow: urgent
-        ? 'inset 0 1.5px 0 rgba(255,255,255,0.92), inset 0 -1px 0 rgba(239,68,68,0.10), inset 0 0 12px rgba(239,68,68,0.12)'
-        : 'inset 0 1.5px 0 rgba(255,255,255,0.92), inset 0 -1px 0 rgba(91,33,182,0.08), inset 0 0 10px rgba(91,33,182,0.07)',
+      border: '1px solid rgba(255,255,255,0.18)',
+      boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.25), 0 0 12px rgba(139,92,246,0.20)',
       overflow: 'hidden',
       transition: 'all 0.5s',
     }}>
@@ -40,7 +36,7 @@ function MorphDigit({ value, size = 'lg', urgent = false }) {
             fontFamily: '"Outfit", "Noto Sans Tamil", sans-serif',
             fontWeight: 800,
             fontSize: fs,
-            color: urgent ? '#991B1B' : '#3B0764',
+            color: '#ffffff',
             lineHeight: 1,
             userSelect: 'none',
             letterSpacing: '-0.02em',
@@ -55,9 +51,10 @@ function MorphDigit({ value, size = 'lg', urgent = false }) {
   );
 }
 
-/* ─── Two-or-three-digit unit with label ─── */
+/* ─── Two-or-more-digit unit with label ─── */
 export function FlipUnit({ value, label, size = 'lg', urgent = false }) {
-  const digits = value >= 100 ? 3 : 2;
+  // Always show at least 2 digits; show 3 if the value needs it (e.g. 100+ hrs)
+  const digits = Math.max(2, String(Math.abs(value)).length);
   const str = String(value).padStart(digits, '0');
   const gap = size === 'lg' ? 3 : 2;
 
@@ -73,7 +70,7 @@ export function FlipUnit({ value, label, size = 'lg', urgent = false }) {
         <span style={{
           fontFamily: 'Outfit, "Noto Sans Tamil", sans-serif',
           fontSize: 9, fontWeight: 600,
-          color: urgent ? 'rgba(153,27,27,0.70)' : 'rgba(91,33,182,0.55)',
+          color: 'rgba(200,180,255,0.65)',
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
           userSelect: 'none',

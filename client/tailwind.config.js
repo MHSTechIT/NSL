@@ -39,10 +39,10 @@ export default {
         pill: '50px',
       },
       boxShadow: {
-        card: '0 4px 24px rgba(91,33,182,0.08)',
-        'card-hover': '0 8px 40px rgba(91,33,182,0.18)',
+        card: '0 4px 24px rgba(91,33,182,0.08), 0 0 30px 6px rgba(139,92,246,0.30)',
+        'card-hover': '0 8px 40px rgba(91,33,182,0.18), 0 0 40px 10px rgba(139,92,246,0.40)',
         gold: '0 4px 24px rgba(245,197,24,0.25)',
-        glass: '0 8px 32px rgba(91,33,182,0.12)',
+        glass: '0 8px 32px rgba(91,33,182,0.12), 0 0 30px 6px rgba(139,92,246,0.30)',
       },
       backgroundImage: {
         'purple-radial': 'radial-gradient(ellipse at top right, rgba(245,197,24,0.15) 0%, transparent 60%), radial-gradient(ellipse at bottom left, rgba(176,158,242,0.25) 0%, transparent 60%)',
