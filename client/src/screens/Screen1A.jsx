@@ -42,13 +42,13 @@ function SocialProofCard({ count, visibleMsgs, seatInfo }) {
 
   return (
     <div style={{
-      background: 'rgba(255,255,255,0.08)',
+      background: 'rgba(255,255,255,0.55)',
       backdropFilter: 'blur(24px) saturate(180%)',
       WebkitBackdropFilter: 'blur(24px) saturate(180%)',
       border: `1px solid ${s.border}`,
       borderRadius: 16,
       padding: '14px 16px',
-      boxShadow: `0 2px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.12)`,
+      boxShadow: `0 2px 16px rgba(91,33,182,0.10), inset 0 1px 0 rgba(255,255,255,0.60)`,
     }}>
 
       {/* ── Phase + seats row ── */}
@@ -69,7 +69,7 @@ function SocialProofCard({ count, visibleMsgs, seatInfo }) {
             </p>
           </div>
           {/* Right: seats left — plain text, no card */}
-          <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.80rem', color: '#ffffff', whiteSpace: 'nowrap' }}>
+          <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.80rem', color: '#3b1f6e', whiteSpace: 'nowrap' }}>
             {seatInfo?.seats != null ? `${seatInfo.seats} left` : 'Almost full'}
           </span>
         </div>
@@ -77,20 +77,20 @@ function SocialProofCard({ count, visibleMsgs, seatInfo }) {
 
       {/* ── Count row ── */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 8 }}>
-        <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.7rem', color: '#ffffff', lineHeight: 1 }}>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.7rem', color: '#2d0a6e', lineHeight: 1 }}>
           {count.toLocaleString('en-IN')}
         </span>
-        <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem', color: 'rgba(200,180,255,0.80)' }}>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem', color: '#5b3fa0' }}>
           Seats Reserved
         </span>
       </div>
 
       {/* ── Progress label (2000 cap) ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-        <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', color: 'rgba(200,180,255,0.55)' }}>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', color: '#7c5cbf' }}>
           {Math.round(progress * 100)}% filled
         </span>
-        <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', fontWeight: 700, color: 'rgba(200,180,255,0.70)' }}>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', fontWeight: 700, color: '#5b3fa0' }}>
           2,000
         </span>
       </div>
@@ -130,18 +130,18 @@ function SocialProofCard({ count, visibleMsgs, seatInfo }) {
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '10px 12px',
-                  background: 'rgba(255,255,255,0.08)',
-                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.50)',
+                  border: '1px solid rgba(139,92,246,0.15)',
                   borderRadius: 10,
                   overflow: 'hidden',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.20)',
+                  boxShadow: '0 2px 8px rgba(91,33,182,0.08)',
                 }}
               >
-                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: 'rgba(255,255,255,0.80)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>
-                  <span style={{ fontWeight: 700, color: '#ffffff' }}>{name}</span>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#5b3fa0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>
+                  <span style={{ fontWeight: 700, color: '#2d0a6e' }}>{name}</span>
                   {` from ${city} joined`}
                 </span>
-                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.72rem', color: 'rgba(200,180,255,0.55)', flexShrink: 0 }}>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.72rem', color: '#7c5cbf', flexShrink: 0 }}>
                   {time}
                 </span>
               </motion.div>
@@ -303,15 +303,15 @@ export default function Screen1A() {
   const pillStyle = {
     width: '100%', padding: '13px 16px',
     borderRadius: 50,
-    background: 'rgba(255,255,255,0.10)',
+    background: 'rgba(255,255,255,0.60)',
     backdropFilter: 'blur(20px) saturate(180%)',
     WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-    color: '#ffffff',
-    border: '1px solid rgba(255,255,255,0.22)',
+    color: '#2d0a6e',
+    border: '1px solid rgba(139,92,246,0.22)',
     fontFamily: 'Outfit, sans-serif', fontWeight: 700,
     fontSize: '0.95rem', cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.35), inset 0 -1px 0 rgba(0,0,0,0.10), 0 4px 16px rgba(0,0,0,0.20)',
+    boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.80), 0 2px 8px rgba(91,33,182,0.10)',
     transition: 'all 180ms',
   };
 
@@ -326,14 +326,14 @@ export default function Screen1A() {
         <motion.div {...cardAnim(1)} style={{ position: 'relative' }}>
           {/* Person image — behind card */}
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: -50, position: 'relative', zIndex: 0, pointerEvents: 'none', userSelect: 'none' }}>
-            <img src="/person.png" alt="" style={{ width: '55%', maxWidth: 200, display: 'block' }} />
+            <img src="/person.webp" alt="" style={{ width: '55%', maxWidth: 200, display: 'block' }} />
           </div>
           {/* Glass card — in front, covers lower part of image, minimal top padding */}
-          <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1, background: 'rgba(20,0,50,0.55)' }}>
+          <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1, background: 'rgba(255,255,255,0.55)' }}>
             <h1 className="heading-shine" style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.45rem, 7vw, 1.9rem)', lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 10 }}>
               <>REVERSE DIABETES<br />WITHOUT TABLETS</>
             </h1>
-            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: 'rgba(220,210,255,0.85)', lineHeight: 1.55, fontWeight: 500 }}>
+            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: '#3b1f6e', lineHeight: 1.55, fontWeight: 500 }}>
               {t.screen1A.subheadline.english}
             </p>
           </div>
@@ -360,7 +360,7 @@ export default function Screen1A() {
                 position: 'fixed', inset: 0, zIndex: 40,
                 backdropFilter: 'blur(18px)',
                 WebkitBackdropFilter: 'blur(18px)',
-                background: 'rgba(10,0,30,0.60)',
+                background: 'rgba(100,70,180,0.15)',
               }}
             />
           )}
@@ -382,14 +382,14 @@ export default function Screen1A() {
               }}
             >
               <div style={{
-                background: 'rgba(255,255,255,0.10)',
+                background: 'rgba(255,255,255,0.75)',
                 backdropFilter: 'blur(32px) saturate(200%)',
                 WebkitBackdropFilter: 'blur(32px) saturate(200%)',
                 borderRadius: 24,
                 padding: '32px 28px',
                 textAlign: 'center',
-                boxShadow: '0 0 60px 20px rgba(34,197,94,0.25), 0 0 120px 40px rgba(91,33,182,0.20), inset 0 1px 0 rgba(255,255,255,0.35)',
-                border: '1px solid rgba(255,255,255,0.22)',
+                boxShadow: '0 4px 32px rgba(91,33,182,0.12), inset 0 1px 0 rgba(255,255,255,0.90)',
+                border: '1px solid rgba(139,92,246,0.18)',
                 maxWidth: 300,
                 width: '100%',
               }}>
@@ -416,7 +416,7 @@ export default function Screen1A() {
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.25, duration: 0.35 }}
-                  style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1.2rem', color: '#ffffff', lineHeight: 1.25, marginBottom: 8 }}
+                  style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1.2rem', color: '#2d0a6e', lineHeight: 1.25, marginBottom: 8 }}
                 >
                   You are Eligible!
                 </motion.p>
@@ -424,7 +424,7 @@ export default function Screen1A() {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.38, duration: 0.3 }}
-                  style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: '#4ADE80', fontWeight: 600 }}
+                  style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: '#15803d', fontWeight: 600, textShadow: '0 1px 4px rgba(0,0,0,0.15)' }}
                 >
                   Your spot for the FREE Webinar is waiting
                 </motion.p>
@@ -470,7 +470,7 @@ export default function Screen1A() {
                   {popupStep === 'sugar' ? (
                     <motion.img
                       key="gmeter"
-                      src="/gmeter.png"
+                      src="/gmeter.webp"
                       alt=""
                       initial={{ opacity: 0, y: 30, scale: 0.8 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -481,7 +481,7 @@ export default function Screen1A() {
                   ) : (
                     <motion.img
                       key="zoom"
-                      src="/zoom.png"
+                      src="/zoom.webp"
                       alt=""
                       initial={{ opacity: 0, scale: 0.75, y: 20 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -495,13 +495,13 @@ export default function Screen1A() {
 
               {/* ── Card ── */}
               <div style={{
-                background: 'rgba(255,255,255,0.12)',
+                background: 'rgba(255,255,255,0.55)',
                 backdropFilter: 'blur(24px) saturate(180%)',
                 WebkitBackdropFilter: 'blur(24px) saturate(180%)',
                 borderRadius: '22px 22px 0 0',
-                border: '1px solid rgba(255,255,255,0.28)',
+                border: '1px solid rgba(139,92,246,0.18)',
                 borderBottom: 'none',
-                boxShadow: '0 -8px 80px 30px rgba(91,33,182,0.90), 0 0 120px 50px rgba(139,92,246,0.70), inset 0 1px 0 rgba(255,255,255,0.50)',
+                boxShadow: '0 -4px 24px rgba(91,33,182,0.10), inset 0 1px 0 rgba(255,255,255,0.80)',
                 position: 'relative', zIndex: 2,
               }}>
                 <AnimatePresence mode="wait">
@@ -521,9 +521,9 @@ export default function Screen1A() {
                         <p style={{
                           fontFamily: 'Outfit, sans-serif',
                           fontWeight: 700, fontSize: '1.45rem',
-                          color: '#ffffff', margin: 0,
+                          color: '#2d0a6e', margin: 0,
                         }}>
-                          your sugar level?
+                          Your Sugar Level?
                         </p>
                       </div>
 
@@ -560,7 +560,7 @@ export default function Screen1A() {
                       {/* Small label */}
                       <p style={{
                         fontFamily: 'Outfit, sans-serif',
-                        fontSize: '0.78rem', color: 'rgba(200,180,255,0.65)',
+                        fontSize: '0.78rem', color: '#7c5cbf',
                         fontWeight: 500, margin: '0 0 6px',
                       }}>
                         This webinar is conducted in Tamil
@@ -570,7 +570,7 @@ export default function Screen1A() {
                       <p style={{
                         fontFamily: 'Outfit, sans-serif',
                         fontWeight: 700, fontSize: '1.45rem',
-                        color: '#ffffff', margin: '0 0 16px', lineHeight: 1.2,
+                        color: '#2d0a6e', margin: '0 0 16px', lineHeight: 1.2,
                       }}>
                         Do you understand Tamil?
                       </p>

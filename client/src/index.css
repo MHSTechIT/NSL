@@ -19,21 +19,21 @@
   }
 
   html {
-    background-color: #0f0520;
+    background-color: #ede8ff;
     background-image:
-      radial-gradient(ellipse at top right, rgba(139,92,246,0.18) 0%, transparent 55%),
-      radial-gradient(ellipse at bottom left, rgba(91,33,182,0.14) 0%, transparent 55%);
+      radial-gradient(ellipse at top right, rgba(167,139,250,0.22) 0%, transparent 55%),
+      radial-gradient(ellipse at bottom left, rgba(139,92,246,0.15) 0%, transparent 55%);
   }
 
   body {
     font-family: 'Outfit', 'Noto Sans Tamil', Inter, sans-serif;
-    color: #ffffff;
+    color: #1a0a3c;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #0f0520;
+    background-color: #ede8ff;
     background-image:
-      radial-gradient(ellipse at top right, rgba(139,92,246,0.18) 0%, transparent 55%),
-      radial-gradient(ellipse at bottom left, rgba(91,33,182,0.14) 0%, transparent 55%);
+      radial-gradient(ellipse at top right, rgba(167,139,250,0.22) 0%, transparent 55%),
+      radial-gradient(ellipse at bottom left, rgba(139,92,246,0.15) 0%, transparent 55%);
     max-width: 480px;
     margin: 0 auto;
     min-height: 100vh;
@@ -324,13 +324,13 @@
 .heading-shine {
   background: linear-gradient(
     105deg,
-    rgba(210,205,235,1) 0%,
-    rgba(210,205,235,1) 42%,
-    rgba(255,255,255,0.55) 47%,
-    #ffffff 50%,
-    rgba(255,255,255,0.55) 53%,
-    rgba(210,205,235,1) 58%,
-    rgba(210,205,235,1) 100%
+    #2d0a6e 0%,
+    #2d0a6e 42%,
+    #7c3aed 47%,
+    #5b21b6 50%,
+    #7c3aed 53%,
+    #2d0a6e 58%,
+    #2d0a6e 100%
   ) 100% center / 300% 100% no-repeat;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;

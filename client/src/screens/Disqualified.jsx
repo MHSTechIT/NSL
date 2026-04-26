@@ -40,28 +40,28 @@ export default function Disqualified() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
         style={{
-          background: 'rgba(255,255,255,0.08)',
+          background: 'rgba(255,255,255,0.55)',
           backdropFilter: 'blur(24px) saturate(180%)',
           WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-          border: '1px solid rgba(255,255,255,0.15)',
+          border: '1px solid rgba(139,92,246,0.18)',
           borderRadius: 20,
           padding: '24px 20px',
           textAlign: 'center',
-          boxShadow: '0 4px 24px rgba(91,33,182,0.20), inset 0 1px 0 rgba(255,255,255,0.12)',
+          boxShadow: '0 4px 24px rgba(91,33,182,0.10), inset 0 1px 0 rgba(255,255,255,0.80)',
           marginBottom: 28,
         }}
       >
         <h2 style={{
           fontFamily: '"Montserrat", Outfit, sans-serif',
           fontWeight: 900, fontSize: '1.4rem',
-          color: '#ffffff', marginBottom: 10, lineHeight: 1.2,
+          color: '#2d0a6e', marginBottom: 10, lineHeight: 1.2,
         }}>
           {t.disqualified.headline[lang]}
         </h2>
         <p style={{
           fontFamily: 'Outfit, sans-serif',
           fontSize: '0.88rem',
-          color: 'rgba(220,210,255,0.80)',
+          color: '#5b3fa0',
           lineHeight: 1.6,
         }}>
           {t.disqualified.subheadline[lang]}
@@ -101,15 +101,15 @@ export default function Disqualified() {
           whileTap={{ scale: 0.97 }}
           style={{
             width: '100%', height: '3.3rem', borderRadius: 50,
-            background: 'rgba(255,255,255,0.10)',
+            background: 'rgba(255,255,255,0.60)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-            border: '1px solid rgba(255,255,255,0.22)',
+            border: '1px solid rgba(139,92,246,0.22)',
             cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
             fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem',
-            color: '#ffffff',
-            boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.35), 0 4px 16px rgba(0,0,0,0.20)',
+            color: '#2d0a6e',
+            boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.80), 0 2px 8px rgba(91,33,182,0.08)',
           }}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.90)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -131,7 +131,7 @@ export default function Disqualified() {
             cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
             fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem',
-            color: copied ? '#4ADE80' : '#ffffff',
+            color: copied ? '#15803d' : '#2d0a6e',
             boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.35), 0 4px 16px rgba(0,0,0,0.20)',
             transition: 'color 300ms',
           }}

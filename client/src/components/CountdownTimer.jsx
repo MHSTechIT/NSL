@@ -58,8 +58,8 @@ export default function CountdownTimer({ floating = false }) {
   ];
 
   return (
-    <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 4px 24px rgba(91,33,182,0.10), 0 0 30px 6px rgba(139,92,246,0.18)' }}>
-      <p className="font-sans text-center text-xs font-semibold mb-4 tracking-widest uppercase" style={{ color: 'rgba(200,180,255,0.80)' }} >
+    <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: 'rgba(255,255,255,0.55)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', border: '1px solid rgba(139,92,246,0.18)', boxShadow: '0 4px 24px rgba(91,33,182,0.10)' }}>
+      <p className="font-sans text-center text-xs font-semibold mb-4 tracking-widest uppercase" style={{ color: '#5b3fa0' }} >
         {isNear ? t.screen1A.nearStart[lang] : t.screen1A.timerLabel[lang]}
       </p>
 
@@ -73,7 +73,7 @@ export default function CountdownTimer({ floating = false }) {
                 fontFamily: 'Outfit, sans-serif',
                 fontWeight: 700,
                 fontSize: '1.4rem',
-                color: 'rgba(200,180,255,0.55)',
+                color: '#5b3fa0',
                 lineHeight: 1,
                 marginTop: 14,
                 userSelect: 'none',

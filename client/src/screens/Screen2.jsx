@@ -52,7 +52,7 @@ export default function Screen2() {
 
         {/* Zoom image — center, sits behind card */}
         <motion.img
-          src="/zoom.png"
+          src="/zoom.webp"
           alt="Zoom"
           initial={{ opacity: 0, scale: 0.85, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
