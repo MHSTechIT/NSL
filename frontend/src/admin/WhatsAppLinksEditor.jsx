@@ -2,16 +2,19 @@ import { useEffect, useState } from 'react';
 import DateTimePicker from './DateTimePicker';
 
 export default function WhatsAppLinksEditor({ token }) {
-  const [waLink,   setWaLink]   = useState('');
-  const [datetime, setDatetime] = useState('');
-  const [saving,   setSaving]   = useState(false);
-  const [toast,    setToast]    = useState(null);
+  const [waLink,    setWaLink]    = useState('');
+  const [liveLink,  setLiveLink]  = useState('');   // current saved link (editable display)
+  const [datetime,  setDatetime]  = useState('');
+  const [saving,    setSaving]    = useState(false);
+  const [toast,     setToast]     = useState(null);
+  const [copied,    setCopied]    = useState(false);
 
   useEffect(() => {
     fetch('/api/webinar-config')
       .then(r => r.json())
       .then(d => {
         setWaLink(d.tuesday_whatsapp_link || '');
+        setLiveLink(d.tuesday_whatsapp_link || '');
         if (d.next_webinar_at) {
           const dt = new Date(d.next_webinar_at);
           const pad = n => String(n).padStart(2, '0');
@@ -39,6 +42,7 @@ export default function WhatsAppLinksEditor({ token }) {
       body: JSON.stringify(body),
     });
     setSaving(false);
+    if (res.ok) setLiveLink(cleanLink);
     setToast({ ok: res.ok, msg: res.ok ? 'Saved successfully!' : 'Failed to save. Try again.' });
     setTimeout(() => setToast(null), 3500);
   }
@@ -67,10 +71,55 @@ export default function WhatsAppLinksEditor({ token }) {
           <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.70rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Currently Active</span>
         </div>
 
+        {/* Current live link — editable inline */}
+        <div style={{
+          background: 'rgba(37,211,102,0.07)', borderRadius: 12,
+          border: '1px solid rgba(37,211,102,0.25)', padding: '10px 14px',
+        }}>
+          <label style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.70rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', marginBottom: 7 }}>
+            Current Link
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="url"
+              value={liveLink}
+              onChange={e => { setLiveLink(e.target.value); setWaLink(e.target.value); }}
+              placeholder="https://chat.whatsapp.com/..."
+              style={{
+                flex: 1, height: '2.4rem', padding: '0 10px',
+                borderRadius: 10, border: '1px solid rgba(37,211,102,0.35)',
+                background: 'rgba(255,255,255,0.80)',
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
+                color: '#15803d', fontWeight: 500, outline: 'none',
+                transition: 'border 200ms',
+              }}
+              onFocus={e => e.target.style.borderColor = 'rgba(37,211,102,0.70)'}
+              onBlur={e => e.target.style.borderColor = 'rgba(37,211,102,0.35)'}
+            />
+            {/* Copy button */}
+            <button
+              type="button"
+              onClick={() => { navigator.clipboard.writeText(liveLink); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+              title="Copy link"
+              style={{
+                width: 34, height: 34, borderRadius: 9, border: '1px solid rgba(37,211,102,0.35)',
+                background: copied ? '#22c55e' : 'rgba(255,255,255,0.80)',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0, transition: 'all 200ms',
+              }}
+            >
+              {copied
+                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              }
+            </button>
+          </div>
+        </div>
+
         {/* WhatsApp Link */}
         <div>
           <label style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.75rem', fontWeight: 700, color: '#4A1A94', display: 'block', marginBottom: 7 }}>
-            WhatsApp Group Link
+            Update Link
           </label>
           <div style={{ position: 'relative' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="#25D366"
