@@ -9,6 +9,7 @@ export default function LeadsTable({ token }) {
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState('created_at');
   const [sortAsc, setSortAsc] = useState(false);
+  const [activeFilter, setActiveFilter] = useState('all');
 
   useEffect(() => {
     fetch('/api/admin/leads', { headers: { Authorization: `Bearer ${token}` } })
@@ -22,7 +23,15 @@ export default function LeadsTable({ token }) {
     else { setSortKey(key); setSortAsc(true); }
   }
 
-  const sorted = [...leads].sort((a, b) => {
+  const filtered = leads.filter(l => {
+    if (activeFilter === 'all')        return true;
+    if (activeFilter === 'high_sugar') return l.sugar_level === '250+';
+    if (activeFilter === 'wa_clicked') return l.wa_clicked === true;
+    if (activeFilter === 'wa_not')     return !l.wa_clicked;
+    return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
     const va = a[sortKey] ?? '';
     const vb = b[sortKey] ?? '';
     return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
@@ -78,7 +87,10 @@ export default function LeadsTable({ token }) {
         <div>
           <h3 className="font-sans text-xl font-bold text-purple-900">Lead Registry</h3>
           <p className="font-sans text-sm text-purple-400 mt-0.5">
-            <span className="font-semibold text-purple-700">{total}</span> total registrations
+            {activeFilter === 'all'
+              ? <><span className="font-semibold text-purple-700">{total}</span> total registrations</>
+              : <><span className="font-semibold text-purple-700">{sorted.length}</span> of {total} shown &mdash; <button onClick={() => setActiveFilter('all')} className="text-purple-500 underline font-semibold">Clear filter</button></>
+            }
           </p>
         </div>
         <button
@@ -89,19 +101,33 @@ export default function LeadsTable({ token }) {
         </button>
       </div>
 
-      {/* Stats summary */}
+      {/* Stats summary — click to filter */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         {[
-          { label: 'Total Leads',     value: total,       color: 'text-purple-700 bg-purple-50' },
-          { label: 'High Sugar (250+)',value: leads.filter(l => l.sugar_level === '250+').length,   color: 'text-red-700 bg-red-50' },
-          { label: 'WA Clicked',      value: waClicked,   color: 'text-green-700 bg-green-50' },
-          { label: 'WA Not Clicked',  value: waNotClicked,color: 'text-gray-600 bg-gray-50' },
-        ].map((s, i) => (
-          <div key={i} className={`rounded-card px-4 py-3 ${s.color} border border-current/10`}>
-            <p className="font-sans font-bold text-2xl">{s.value}</p>
-            <p className="font-sans text-xs mt-0.5 opacity-80">{s.label}</p>
-          </div>
-        ))}
+          { label: 'Total Leads',      value: total,                                               filterId: 'all',        color: 'text-purple-700 bg-purple-50', ring: 'ring-purple-400' },
+          { label: 'High Sugar (250+)', value: leads.filter(l => l.sugar_level === '250+').length,  filterId: 'high_sugar', color: 'text-red-700 bg-red-50',       ring: 'ring-red-400' },
+          { label: 'WA Clicked',        value: waClicked,                                           filterId: 'wa_clicked', color: 'text-green-700 bg-green-50',    ring: 'ring-green-400' },
+          { label: 'WA Not Clicked',    value: waNotClicked,                                        filterId: 'wa_not',     color: 'text-gray-600 bg-gray-50',      ring: 'ring-gray-400' },
+        ].map((s, i) => {
+          const isActive = activeFilter === s.filterId;
+          return (
+            <button
+              key={i}
+              onClick={() => setActiveFilter(isActive ? 'all' : s.filterId)}
+              className={`rounded-card px-4 py-3 text-left border transition-all duration-150 w-full
+                ${s.color} border-current/10
+                ${isActive ? `ring-2 ${s.ring} scale-[1.03] shadow-md` : 'hover:scale-[1.02] hover:shadow-sm'}
+              `}
+              style={{ cursor: 'pointer' }}
+            >
+              <p className="font-sans font-bold text-2xl">{s.value}</p>
+              <p className="font-sans text-xs mt-0.5 opacity-80">{s.label}</p>
+              {isActive && (
+                <p className="font-sans text-[10px] font-semibold mt-1 opacity-60 uppercase tracking-wide">● Filtered</p>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Table */}
