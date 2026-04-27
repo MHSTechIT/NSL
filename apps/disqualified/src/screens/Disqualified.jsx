@@ -36,24 +36,21 @@ export default function Disqualified() {
           textAlign: 'center',
         }}
       >
-        {/* YouTube play icon */}
-        <motion.div
+        {/* YouTube icon image */}
+        <motion.img
+          src="/yt.png"
+          alt="YouTube"
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ type: 'spring', stiffness: 320, damping: 20, delay: 0.2 }}
           style={{
             width: 80, height: 80, borderRadius: '50%',
-            background: 'linear-gradient(135deg, #FF0000, #CC0000)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            objectFit: 'cover',
+            display: 'block',
             margin: '0 auto 24px',
             boxShadow: '0 6px 28px rgba(255,0,0,0.30)',
           }}
-        >
-          {/* YouTube logo */}
-          <svg width="38" height="38" viewBox="0 0 24 24" fill="#ffffff">
-            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-          </svg>
-        </motion.div>
+        />
 
         {/* Heading */}
         <h2 style={{
