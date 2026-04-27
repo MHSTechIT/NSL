@@ -9,6 +9,7 @@ import Screen1A from './screens/Screen1A';
 const Screen4 = lazy(() => import('./screens/Screen4'));
 const Disqualified = lazy(() => import('./screens/Disqualified'));
 const LanguageDisqualified = lazy(() => import('./screens/LanguageDisqualified'));
+const WhatsAppPage = lazy(() => import('./screens/WhatsAppPage'));
 const AdminPage = lazy(() => import('./admin/AdminPage'));
 const AdminResetPassword = lazy(() => import('./admin/AdminResetPassword'));
 
@@ -41,6 +42,9 @@ export default function App() {
   }
   if (isAdmin) {
     return <Suspense fallback={null}><AdminPage /></Suspense>;
+  }
+  if (location.pathname === '/whatsapp') {
+    return <Suspense fallback={null}><WhatsAppPage /></Suspense>;
   }
 
   return (
