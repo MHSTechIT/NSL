@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import DateTimePicker from './DateTimePicker';
 
 function toLocalDatetimeValue(isoString) {
   if (!isoString) return '';
@@ -54,12 +55,7 @@ export default function TimerConfig({ token }) {
       <div className="bg-white rounded-card border border-purple-100 p-5 hover:border-purple-300 transition-colors">
         <label className="block font-sans font-semibold text-purple-900 text-sm mb-1">Next Webinar</label>
         <p className="font-sans text-xs text-purple-400 mb-3">Countdown timer target date &amp; time</p>
-        <input
-          type="datetime-local"
-          value={nextWebinar}
-          onChange={e => setNextWebinar(e.target.value)}
-          className="w-full border border-purple-100 rounded-xl px-3 py-2.5 font-sans text-sm text-gray-700 outline-none focus:border-purple focus:shadow-[0_0_0_3px_rgba(91,33,182,0.08)] transition-all bg-purple-50/30"
-        />
+        <DateTimePicker value={nextWebinar} onChange={setNextWebinar} />
         {nextWebinar && (
           <p className="font-sans text-xs text-purple-400 mt-2">
             {new Date(fromLocalDatetimeValue(nextWebinar)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST

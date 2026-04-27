@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import DateTimePicker from './DateTimePicker';
 
 export default function WhatsAppLinksEditor({ token }) {
   const [waLink,   setWaLink]   = useState('');
@@ -110,32 +111,10 @@ export default function WhatsAppLinksEditor({ token }) {
           <label style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 700, color: '#4A1A94', display: 'block', marginBottom: 8 }}>
             Webinar Date &amp; Time
           </label>
-          <div style={{ position: 'relative' }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.45)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
-              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-            </svg>
-            <input
-              type="datetime-local"
-              value={datetime}
-              onChange={e => setDatetime(e.target.value)}
-              style={{
-                width: '100%', height: '2.8rem',
-                paddingLeft: 38, paddingRight: 12,
-                borderRadius: 12,
-                border: '1px solid rgba(139,92,246,0.22)',
-                background: 'rgba(237,234,248,0.30)',
-                fontFamily: 'Outfit, sans-serif', fontSize: '0.88rem',
-                color: '#3B0764', outline: 'none', boxSizing: 'border-box',
-                cursor: 'pointer', transition: 'border 200ms',
-              }}
-              onFocus={e => e.target.style.borderColor = 'rgba(91,33,182,0.55)'}
-              onBlur={e => e.target.style.borderColor = 'rgba(139,92,246,0.22)'}
-            />
-          </div>
+          <DateTimePicker value={datetime} onChange={setDatetime} />
           {datetime && (
             <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.73rem', color: 'rgba(91,33,182,0.50)', marginTop: 6 }}>
-              Saved as: {new Date(datetime).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
+              {new Date(datetime).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
             </p>
           )}
         </div>
