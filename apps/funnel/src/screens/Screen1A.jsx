@@ -6,7 +6,6 @@ import { t } from '../translations';
 import CountdownTimer, { stopTick } from '../components/CountdownTimer';
 import Confetti from '../components/Confetti';
 import TrustBar from '../components/TrustBar';
-import { pixelLead, pixelLanguageQualified } from '../utils/pixel';
 
 /* ── Live social proof messages ───────────────────────────────────────── */
 const LIVE_MSGS = [
@@ -255,8 +254,6 @@ export default function Screen1A() {
   }
 
   function handleZoomYes() {
-    pixelLanguageQualified();
-    pixelLead({ content_name: 'tamil_qualified', content_category: 'language_screen' });
     setPopupLeaving(true);
     setTimeout(() => {
       setExpanded(false);
