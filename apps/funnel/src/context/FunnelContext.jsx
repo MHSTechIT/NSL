@@ -4,7 +4,7 @@ import { parseUTMParams } from '../utils/utm';
 const FunnelContext = createContext(null);
 
 const STATE_KEY  = 'funnel_state';
-const CONFIG_KEY = 'webinar_config_cache';
+const CONFIG_KEY = 'webinar_config_cache'; // kept only for saveConfig (SSE writes fresh data here)
 
 /* ── localStorage helpers ───────────────────────────────────────────────── */
 function loadState() {
@@ -28,20 +28,12 @@ function saveState(state) {
   } catch {}
 }
 
-function loadConfig() {
-  try {
-    const raw = localStorage.getItem(CONFIG_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
 function saveConfig(data) {
   try { localStorage.setItem(CONFIG_KEY, JSON.stringify(data)); } catch {}
 }
 
-/* ── Build initial state from cache ─────────────────────────────────────── */
-const savedState  = loadState();
-const cachedConfig = loadConfig();
+/* ── Build initial state ─────────────────────────────────────────────────── */
+const savedState = loadState();
 
 const initialState = {
   lang:               savedState?.lang               ?? 'english',
@@ -56,14 +48,14 @@ const initialState = {
   submittedLeadId:    savedState?.submittedLeadId    ?? null,
   whatsappGroupLink:  savedState?.whatsappGroupLink  ?? null,
   utm:                savedState?.utm ?? { utm_source: null, utm_campaign: null, utm_content: null, fbclid: null },
-  webinarConfig: cachedConfig ?? {
+  webinarConfig: {
     next_webinar_at:        null,
     backup_webinar_at:      null,
     tuesday_whatsapp_link:  null,
     friday_whatsapp_link:   null,
     kill_switch:            false,
   },
-  webinarConfigLoading: !cachedConfig,
+  webinarConfigLoading: true,
   webinarConfigError:   null,
 };
 
@@ -130,6 +122,7 @@ export function FunnelProvider({ children }) {
   // On mount: fetch config once, then listen for live updates via SSE
   useEffect(() => {
     dispatch({ type: 'SET_UTM', payload: parseUTMParams() });
+    try { localStorage.removeItem(CONFIG_KEY); } catch {}
 
     fetch('/api/webinar-config')
       .then(r => r.json())
