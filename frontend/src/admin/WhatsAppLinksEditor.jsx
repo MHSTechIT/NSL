@@ -2,23 +2,26 @@ import { useEffect, useState } from 'react';
 import DateTimePicker from './DateTimePicker';
 
 export default function WhatsAppLinksEditor({ token }) {
-  const [waLink,   setWaLink]   = useState('');
-  const [datetime, setDatetime] = useState('');
-  const [saving,   setSaving]   = useState(false);
-  const [toast,    setToast]    = useState(null);
+  const [waLink,       setWaLink]       = useState('');
+  const [datetime,     setDatetime]     = useState('');
+  const [savedLink,    setSavedLink]    = useState('');   // read-only "currently live"
+  const [savedDatetime,setSavedDatetime]= useState('');
+  const [saving,       setSaving]       = useState(false);
+  const [toast,        setToast]        = useState(null);
 
   useEffect(() => {
     fetch('/api/webinar-config')
       .then(r => r.json())
       .then(d => {
-        setWaLink(d.tuesday_whatsapp_link || '');
-        // Convert stored UTC datetime to local datetime-local input format
+        const link = d.tuesday_whatsapp_link || '';
+        setWaLink(link);
+        setSavedLink(link);
         if (d.next_webinar_at) {
           const dt = new Date(d.next_webinar_at);
-          // Format as YYYY-MM-DDTHH:mm for datetime-local input (local time)
           const pad = n => String(n).padStart(2, '0');
           const local = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
           setDatetime(local);
+          setSavedDatetime(dt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }));
         }
       });
   }, []);
@@ -43,6 +46,13 @@ export default function WhatsAppLinksEditor({ token }) {
       body: JSON.stringify(body),
     });
     setSaving(false);
+    if (res.ok) {
+      setSavedLink(cleanLink);
+      if (datetime) {
+        const dt = new Date(datetime);
+        setSavedDatetime(dt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }));
+      }
+    }
     setToast({ ok: res.ok, msg: res.ok ? 'Saved successfully!' : 'Failed to save. Try again.' });
     setTimeout(() => setToast(null), 3500);
   }
@@ -55,6 +65,38 @@ export default function WhatsAppLinksEditor({ token }) {
           Set the WhatsApp group invite link and webinar date &amp; time. The Join button on the confirmation page will use this link.
         </p>
       </div>
+
+      {/* Currently active — read only */}
+      {savedLink && (
+        <div style={{
+          background: 'rgba(37,211,102,0.07)',
+          border: '1px solid rgba(37,211,102,0.25)',
+          borderRadius: 14, padding: '14px 16px', marginBottom: 16,
+          display: 'flex', flexDirection: 'column', gap: 6,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block', flexShrink: 0 }} />
+            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.72rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Currently Active</span>
+          </div>
+          <a
+            href={savedLink}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#15803d',
+              fontWeight: 600, wordBreak: 'break-all',
+              textDecoration: 'underline', textDecorationColor: 'rgba(22,163,74,0.40)',
+            }}
+          >
+            {savedLink}
+          </a>
+          {savedDatetime && (
+            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.75rem', color: 'rgba(21,128,61,0.65)' }}>
+              📅 {savedDatetime} IST
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Single card */}
       <div style={{
