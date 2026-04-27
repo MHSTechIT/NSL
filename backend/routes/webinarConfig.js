@@ -22,7 +22,7 @@ router.get('/webinar-config', async (req, res) => {
   try {
     const [configResult, countResult] = await Promise.all([
       pool.query(
-        'SELECT next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch FROM webinar_config WHERE id = 1'
+        'SELECT next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch, pending_whatsapp_link, whatsapp_link_swap_at FROM webinar_config WHERE id = 1'
       ),
       pool.query('SELECT COUNT(*) FROM leads'),
     ]);

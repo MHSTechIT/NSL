@@ -1,26 +1,34 @@
 import { useEffect, useState } from 'react';
 import DateTimePicker from './DateTimePicker';
 
+function toISTValue(isoString) {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+  return ist.toISOString().slice(0, 16);
+}
+
+function fromISTValue(localVal) {
+  if (!localVal) return null;
+  const istMs = new Date(localVal + ':00').getTime();
+  return new Date(istMs - 5.5 * 60 * 60 * 1000).toISOString();
+}
+
 export default function WhatsAppLinksEditor({ token }) {
-  const [waLink,    setWaLink]    = useState('');
-  const [liveLink,  setLiveLink]  = useState('');   // current saved link (editable display)
-  const [datetime,  setDatetime]  = useState('');
-  const [saving,    setSaving]    = useState(false);
-  const [toast,     setToast]     = useState(null);
-  const [copied,    setCopied]    = useState(false);
+  const [currentLink,   setCurrentLink]   = useState('');
+  const [pendingLink,   setPendingLink]   = useState('');
+  const [swapAt,        setSwapAt]        = useState('');
+  const [saving,        setSaving]        = useState(false);
+  const [toast,         setToast]         = useState(null);
+  const [copied,        setCopied]        = useState(false);
 
   useEffect(() => {
     fetch('/api/webinar-config')
       .then(r => r.json())
       .then(d => {
-        setWaLink(d.tuesday_whatsapp_link || '');
-        setLiveLink(d.tuesday_whatsapp_link || '');
-        if (d.next_webinar_at) {
-          const dt = new Date(d.next_webinar_at);
-          const pad = n => String(n).padStart(2, '0');
-          const local = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-          setDatetime(local);
-        }
+        setCurrentLink(d.tuesday_whatsapp_link || '');
+        setPendingLink(d.pending_whatsapp_link || '');
+        setSwapAt(d.whatsapp_link_swap_at ? toISTValue(d.whatsapp_link_swap_at) : '');
       });
   }, []);
 
@@ -32,31 +40,36 @@ export default function WhatsAppLinksEditor({ token }) {
   async function handleSave() {
     setSaving(true);
     setToast(null);
-    const cleanLink = extractURL(waLink);
-    setWaLink(cleanLink);
-    const body = { tuesday_whatsapp_link: cleanLink, friday_whatsapp_link: cleanLink };
-    if (datetime) body.next_webinar_at = new Date(datetime).toISOString();
+    const cleanPending = extractURL(pendingLink);
+    setPendingLink(cleanPending);
+
+    const body = {
+      pending_whatsapp_link: cleanPending,
+      whatsapp_link_swap_at: swapAt ? fromISTValue(swapAt) : null,
+    };
+
     const res = await fetch('/api/admin/webinar-config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
     });
     setSaving(false);
-    if (res.ok) setLiveLink(cleanLink);
-    setToast({ ok: res.ok, msg: res.ok ? 'Saved successfully!' : 'Failed to save. Try again.' });
-    setTimeout(() => setToast(null), 3500);
+    setToast({ ok: res.ok, msg: res.ok ? 'Scheduled! Link will auto-update at the set time.' : 'Failed to save. Try again.' });
+    setTimeout(() => setToast(null), 4000);
   }
+
+  const hasSchedule = pendingLink && swapAt;
+  const swapDate = swapAt ? new Date(fromISTValue(swapAt)) : null;
 
   return (
     <div style={{ maxWidth: 520 }}>
       <div style={{ marginBottom: 20 }}>
         <h3 className="font-sans text-xl font-bold text-purple-900">WhatsApp Group Link</h3>
         <p className="font-sans text-sm text-purple-400 mt-1">
-          Edit the link and webinar date &amp; time below, then hit Save.
+          Set the update link and the time — it will auto-activate on schedule.
         </p>
       </div>
 
-      {/* Single editable card */}
       <div style={{
         background: '#fff', borderRadius: 16,
         border: '1.5px solid rgba(37,211,102,0.35)',
@@ -65,13 +78,15 @@ export default function WhatsAppLinksEditor({ token }) {
         display: 'flex', flexDirection: 'column', gap: 18,
       }}>
 
-        {/* Active indicator */}
+        {/* Currently Active indicator */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
-          <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.70rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Currently Active</span>
+          <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.70rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Currently Active
+          </span>
         </div>
 
-        {/* Current live link — editable inline */}
+        {/* Current live link — read-only */}
         <div style={{
           background: 'rgba(37,211,102,0.07)', borderRadius: 12,
           border: '1px solid rgba(37,211,102,0.25)', padding: '10px 14px',
@@ -82,24 +97,19 @@ export default function WhatsAppLinksEditor({ token }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="url"
-              value={liveLink}
-              onChange={e => { setLiveLink(e.target.value); setWaLink(e.target.value); }}
-              placeholder="https://chat.whatsapp.com/..."
+              value={currentLink}
+              readOnly
               style={{
                 flex: 1, height: '2.4rem', padding: '0 10px',
                 borderRadius: 10, border: '1px solid rgba(37,211,102,0.35)',
-                background: 'rgba(255,255,255,0.80)',
+                background: 'rgba(240,255,244,0.80)',
                 fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
-                color: '#15803d', fontWeight: 500, outline: 'none',
-                transition: 'border 200ms',
+                color: '#15803d', fontWeight: 500, outline: 'none', cursor: 'default',
               }}
-              onFocus={e => e.target.style.borderColor = 'rgba(37,211,102,0.70)'}
-              onBlur={e => e.target.style.borderColor = 'rgba(37,211,102,0.35)'}
             />
-            {/* Copy button */}
             <button
               type="button"
-              onClick={() => { navigator.clipboard.writeText(liveLink); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+              onClick={() => { navigator.clipboard.writeText(currentLink); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
               title="Copy link"
               style={{
                 width: 34, height: 34, borderRadius: 9, border: '1px solid rgba(37,211,102,0.35)',
@@ -116,7 +126,9 @@ export default function WhatsAppLinksEditor({ token }) {
           </div>
         </div>
 
-        {/* WhatsApp Link */}
+        <div style={{ height: 1, background: 'rgba(139,92,246,0.10)' }} />
+
+        {/* Update Link — pending */}
         <div>
           <label style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.75rem', fontWeight: 700, color: '#4A1A94', display: 'block', marginBottom: 7 }}>
             Update Link
@@ -128,8 +140,8 @@ export default function WhatsAppLinksEditor({ token }) {
             </svg>
             <input
               type="url"
-              value={waLink}
-              onChange={e => setWaLink(e.target.value)}
+              value={pendingLink}
+              onChange={e => setPendingLink(e.target.value)}
               placeholder="https://chat.whatsapp.com/..."
               style={{
                 width: '100%', height: '2.8rem',
@@ -145,29 +157,45 @@ export default function WhatsAppLinksEditor({ token }) {
               onBlur={e => e.target.style.borderColor = 'rgba(139,92,246,0.22)'}
             />
           </div>
-          {waLink && (
-            <a href={waLink} target="_blank" rel="noreferrer"
+          {pendingLink && (
+            <a href={pendingLink} target="_blank" rel="noreferrer"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontFamily: 'Outfit, sans-serif', fontSize: '0.75rem', color: '#5B21B6', textDecoration: 'underline' }}>
               Preview link ↗
             </a>
           )}
         </div>
 
-        {/* Divider */}
-        <div style={{ height: 1, background: 'rgba(139,92,246,0.10)' }} />
-
-        {/* Date & Time */}
+        {/* Auto-swap date & time */}
         <div>
           <label style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.75rem', fontWeight: 700, color: '#4A1A94', display: 'block', marginBottom: 7 }}>
-            Webinar Date &amp; Time
+            Auto-activate at (IST)
           </label>
-          <DateTimePicker value={datetime} onChange={setDatetime} />
-          {datetime && (
-            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.73rem', color: 'rgba(91,33,182,0.50)', marginTop: 6 }}>
-              {new Date(datetime).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
+          <DateTimePicker value={swapAt} onChange={setSwapAt} />
+          {swapDate && (
+            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.73rem', color: 'rgba(91,33,182,0.55)', marginTop: 6 }}>
+              {swapDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
             </p>
           )}
         </div>
+
+        {/* Scheduled status banner */}
+        {hasSchedule && (
+          <div style={{
+            background: 'rgba(245,243,255,1)', borderRadius: 10,
+            border: '1px solid rgba(139,92,246,0.25)', padding: '10px 14px',
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+          }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: '#5B21B6', lineHeight: 1.4 }}>
+              New link will auto-activate on{' '}
+              <strong>
+                {swapDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
+              </strong>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Save */}

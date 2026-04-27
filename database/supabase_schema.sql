@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS leads (
 -- 3. Index for fast admin queries
 CREATE INDEX IF NOT EXISTS leads_created_at_idx ON leads (created_at DESC);
 
+-- 3b. Add scheduled link swap columns (run if upgrading existing DB)
+ALTER TABLE webinar_config ADD COLUMN IF NOT EXISTS pending_whatsapp_link TEXT NOT NULL DEFAULT '';
+ALTER TABLE webinar_config ADD COLUMN IF NOT EXISTS whatsapp_link_swap_at TIMESTAMPTZ;
+
 -- 4. Seed the initial config row
 INSERT INTO webinar_config (id, next_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link)
 VALUES (1, NOW() + INTERVAL '4 days', '', '')

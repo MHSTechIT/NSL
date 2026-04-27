@@ -10,6 +10,7 @@ const webinarConfigRouter = require('./routes/webinarConfig');
 const leadsRouter = require('./routes/leads');
 const adminRouter = require('./routes/admin');
 const authRouter  = require('./routes/auth');
+const { startLinkSwapScheduler } = require('./utils/linkSwapScheduler');
 
 const app = express();
 
@@ -24,4 +25,7 @@ app.use('/api/auth', authRouter);   /* public: forgot-password, reset-password *
 app.use('/api/admin', adminRouter); /* protected: requires Bearer token */
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`MHS server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`MHS server running on port ${PORT}`);
+  startLinkSwapScheduler();
+});
