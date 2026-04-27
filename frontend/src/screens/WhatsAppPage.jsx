@@ -27,24 +27,13 @@ function LinkExpiryTimer() {
   );
 }
 
-function getISTDayOfWeek() {
-  return new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' });
-}
-
 export default function WhatsAppPage() {
   const [waLink, setWaLink] = useState('');
 
   useEffect(() => {
-    // Fetch the correct WhatsApp link from config
     fetch('/api/webinar-config')
       .then(r => r.json())
-      .then(data => {
-        const day = getISTDayOfWeek();
-        const link = (day === 'Mon' || day === 'Tue')
-          ? data.tuesday_whatsapp_link
-          : data.friday_whatsapp_link;
-        setWaLink(link || '');
-      })
+      .then(data => setWaLink(data.tuesday_whatsapp_link || ''))
       .catch(() => {});
   }, []);
 
