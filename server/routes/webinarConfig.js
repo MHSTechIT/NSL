@@ -18,20 +18,29 @@ router.get('/webinar-config', async (req, res) => {
     return res.json(hit);
   }
 
-  const { data, error } = await supabase
-    .from('webinar_config')
-    .select('next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch')
-    .eq('id', 1)
-    .maybeSingle();
+  // Run both queries in parallel — zero extra delay
+  const [configResult, countResult] = await Promise.all([
+    supabase
+      .from('webinar_config')
+      .select('next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch')
+      .eq('id', 1)
+      .maybeSingle(),
+    supabase
+      .from('leads')
+      .select('*', { count: 'exact', head: true }),
+  ]);
 
-  if (error || !data) {
+  if (configResult.error || !configResult.data) {
     res.set('Cache-Control', 'no-cache');
-    return res.json(DEFAULT_CONFIG);
+    return res.json({ ...DEFAULT_CONFIG, seats_reserved: 1813 });
   }
 
-  cache.set(data);
+  const seats_reserved = 1813 + (countResult.count ?? 0);
+  const payload = { ...configResult.data, seats_reserved };
+
+  cache.set(payload);
   res.set('Cache-Control', 'public, max-age=60');
-  res.json(data);
+  res.json(payload);
 });
 
 module.exports = router;

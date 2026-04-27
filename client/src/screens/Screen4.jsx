@@ -21,7 +21,7 @@ function validate(fullName, whatsappNumber, email) {
 
 /* ── Link expiry countdown for success sheet ────────────────────────── */
 function LinkExpiryTimer() {
-  const [secs, setSecs] = useState(5 * 60);
+  const [secs, setSecs] = useState(179);
   useEffect(() => {
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
@@ -47,7 +47,7 @@ function LinkExpiryTimer() {
 
 /* ── 5-minute urgency countdown ─────────────────────────────────────── */
 function UrgencyTimer() {
-  const [secs, setSecs] = useState(5 * 60); // 5 minutes
+  const [secs, setSecs] = useState(179); // 2:59 minutes
   useEffect(() => {
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
@@ -309,28 +309,42 @@ export default function Screen4() {
       {/* ── Based on your answers ── */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
         style={{
-          background: 'rgba(255,255,255,0.55)', borderRadius: 12, padding: '10px 14px', marginBottom: 16,
-          border: '1px solid rgba(139,92,246,0.18)',
-          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+          background: '#FFFDE7', borderRadius: 12, padding: '12px 14px', marginBottom: 16,
+          border: '1px solid #F0D080',
         }}>
-        <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', fontWeight: 700, color: '#7c5cbf', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-          Based on your answers:
-        </p>
+        {/* Header row with clipboard icon */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7c5c00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+            <rect x="9" y="3" width="6" height="4" rx="1"/>
+            <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/>
+          </svg>
+          <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', fontWeight: 700, color: '#7c5c00', letterSpacing: '0.08em', textTransform: 'uppercase', margin: 0 }}>
+            Based on your answers:
+          </p>
+        </div>
+
+        {/* Checklist items */}
         {[
-          `You have diabetes (${state.sugarLevel === '250+' ? '250+ mg/dL' : '150–250 mg/dL'} sugar level)`,
-          'Tamil is comfortable for you',
-          'This session is built for YOU.',
+          <span>You have diabetes (<strong style={{ color: '#5b21b6' }}>{state.sugarLevel === '250+' ? '250+ sugar level' : '150–250 mg/dL sugar level'}</strong>)</span>,
+          <span><strong style={{ color: '#5b21b6' }}>Tamil</strong> is comfortable for you</span>,
         ].map((line, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: i < 2 ? 6 : 0 }}>
-            <span style={{ color: '#34D399', fontWeight: 700, flexShrink: 0, marginTop: 1 }}>✓</span>
-            <span style={{
-              fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
-              color: i === 2 ? '#5b21b6' : '#3b1f6e',
-              fontWeight: i === 2 ? 700 : 500,
-              fontStyle: i === 2 ? 'italic' : 'normal',
-            }}>{line}</span>
+          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+            <span style={{ color: '#22c55e', fontWeight: 700, flexShrink: 0, marginTop: 1 }}>✓</span>
+            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#3b1f00', fontWeight: 500 }}>{line}</span>
           </div>
         ))}
+
+        {/* Dashed divider */}
+        <div style={{ borderTop: '1.5px dashed #D4B800', margin: '10px 0' }} />
+
+        {/* Final line */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ color: '#5b21b6', fontWeight: 700, fontSize: '0.9rem' }}>→</span>
+          <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.84rem', color: '#3b1f00', fontWeight: 700, fontStyle: 'italic' }}>
+            This session is built for <em style={{ fontStyle: 'italic', color: '#5b21b6' }}>YOU.</em>
+          </span>
+        </div>
       </motion.div>
 
       {/* ── Social proof ── */}

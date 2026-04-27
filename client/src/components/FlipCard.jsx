@@ -3,10 +3,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 /* ─── Single morphing digit ─── */
 function MorphDigit({ value, size = 'lg', urgent = false }) {
   const isLg = size === 'lg';
-  const W  = isLg ? 38 : 28;
-  const H  = isLg ? 50 : 36;
-  const fs = isLg ? '1.65rem' : '1.05rem';
-  const r  = isLg ? 10 : 7;
+  const W  = isLg ? 34 : 28;
+  const H  = isLg ? 46 : 36;
+  const fs = isLg ? '1.45rem' : '1.05rem';
+  const r  = isLg ? 9 : 7;
 
   return (
     <div style={{
@@ -56,7 +56,7 @@ export function FlipUnit({ value, label, size = 'lg', urgent = false }) {
   // Always show at least 2 digits; show 3 if the value needs it (e.g. 100+ hrs)
   const digits = Math.max(2, String(Math.abs(value)).length);
   const str = String(value).padStart(digits, '0');
-  const gap = size === 'lg' ? 3 : 2;
+  const gap = size === 'lg' ? 2 : 2;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
