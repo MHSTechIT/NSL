@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
-import { pixelInitiateRegistration, pixelLead, pixelCompleteRegistration, pixelFormAbandoned } from '../utils/pixel';
+import { pixelPageView, pixelInitiateRegistration, pixelLead, pixelCompleteRegistration, pixelFormAbandoned } from '../utils/pixel';
 
 const slideIn = {
   initial: { opacity: 0, y: 12 },
@@ -88,6 +88,7 @@ export default function Screen4() {
 
   useEffect(() => {
     if (!state.sugarLevel) navigate('/', { replace: true });
+    else pixelPageView(); // qualified lead reached register form
   }, []);
 
   useEffect(() => {
