@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
-import { pixelLead, pixelCompleteRegistration } from '../utils/pixel';
 
 const slideIn = {
   initial: { opacity: 0, y: 12 },
@@ -135,9 +134,6 @@ export default function Screen4() {
         setSubmitting(false);
         return;
       }
-
-      pixelLead({ full_name: fullName, email, whatsapp_number: whatsappNumber });
-      pixelCompleteRegistration({ lead_score: data.lead_score });
 
       dispatch({ type: 'SET_FORM_FIELD', field: 'fullName', value: fullName });
       dispatch({ type: 'SET_FORM_FIELD', field: 'whatsappNumber', value: whatsappNumber });
