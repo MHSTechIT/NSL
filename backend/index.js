@@ -16,6 +16,8 @@ const app = express();
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
 app.use(express.json());
 
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
 app.use('/api', webinarConfigRouter);
 app.use('/api', leadsRouter);
 app.use('/api/auth', authRouter);   /* public: forgot-password, reset-password */

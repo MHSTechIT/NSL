@@ -84,7 +84,9 @@ export default function Screen4() {
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
   useEffect(() => {
-    if (!state.sugarLevel) navigate('/', { replace: true });
+    if (!state.sugarLevel) { navigate('/', { replace: true }); return; }
+    // Pre-warm Render backend so it's ready when user submits
+    fetch('/api/health').catch(() => {});
   }, []);
 
   function handlePhoneInput(e) {
