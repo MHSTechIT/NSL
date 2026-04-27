@@ -100,12 +100,15 @@ export default function Screen4() {
 
     setSubmitting(true);
     setServerError('');
-    clearTimeout(abandonRef.current);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
     try {
       const res = await fetch('/api/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           full_name: fullName.trim(),
           whatsapp_number: whatsappNumber,
@@ -116,6 +119,7 @@ export default function Screen4() {
           ...state.utm,
         }),
       });
+      clearTimeout(timeout);
 
       const data = await res.json();
 
@@ -143,8 +147,13 @@ export default function Screen4() {
 
       setSubmitting(false);
       window.location.href = import.meta.env.VITE_WHATSAPP_URL || '/whatsapp';
-    } catch {
-      setServerError('Network error. Please try again.');
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError') {
+        setServerError('Server is taking too long. Please try again in a moment.');
+      } else {
+        setServerError('Network error. Please try again.');
+      }
       setSubmitting(false);
     }
   }
