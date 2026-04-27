@@ -36,19 +36,19 @@ export default function Disqualified() {
           textAlign: 'center',
         }}
       >
-        {/* YouTube icon image */}
+        {/* Profile image with gradient ring */}
         <motion.img
           src="/yt.png"
-          alt="YouTube"
+          alt="Doctor"
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ type: 'spring', stiffness: 320, damping: 20, delay: 0.2 }}
           style={{
-            width: 80, height: 80, borderRadius: '50%',
-            objectFit: 'cover',
+            width: 120,
+            height: 120,
+            objectFit: 'contain',
             display: 'block',
             margin: '0 auto 24px',
-            boxShadow: '0 6px 28px rgba(255,0,0,0.30)',
           }}
         />
 
