@@ -6,10 +6,7 @@ import { t } from '../translations';
 import CountdownTimer, { stopTick } from '../components/CountdownTimer';
 import Confetti from '../components/Confetti';
 import TrustBar from '../components/TrustBar';
-import {
-  pixelPageView, pixelViewContent, pixelInitiateQualification,
-  pixelDisqualifiedLead, pixelSugarLevelSelected,
-} from '../utils/pixel';
+import { pixelLead, pixelLanguageQualified } from '../utils/pixel';
 
 /* ── Live social proof messages ───────────────────────────────────────── */
 const LIVE_MSGS = [
@@ -196,11 +193,6 @@ export default function Screen1A() {
   const [popupLeaving, setPopupLeaving] = useState(false);
   const [showEligible, setShowEligible] = useState(false);
 
-  useEffect(() => {
-    pixelPageView();
-    pixelViewContent(state.utm);
-  }, []);
-
   // Track viewport width for desktop split layout
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 900px)');
@@ -253,19 +245,18 @@ export default function Screen1A() {
       dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
       setLeaving(true);
       setTimeout(() => {
-        pixelDisqualifiedLead('no_diabetes', state.utm);
         window.location.href = import.meta.env.VITE_DISQUALIFIED_URL || '/not-eligible';
       }, 420);
       return;
     }
     dispatch({ type: 'SET_SUGAR_LEVEL', payload: opt.id });
-    pixelSugarLevelSelected(opt.id);
-    pixelInitiateQualification(state.utm);
     // Transition to zoom question step
     setPopupStep('zoom');
   }
 
   function handleZoomYes() {
+    pixelLanguageQualified();
+    pixelLead({ content_name: 'tamil_qualified', content_category: 'language_screen' });
     setPopupLeaving(true);
     setTimeout(() => {
       setExpanded(false);
@@ -280,7 +271,6 @@ export default function Screen1A() {
     dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
     setLeaving(true);
     setTimeout(() => {
-      pixelDisqualifiedLead('no_zoom', state.utm);
       window.location.href = import.meta.env.VITE_DISQUALIFIED_URL || '/not-eligible';
     }, 420);
   }
