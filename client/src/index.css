@@ -39,6 +39,14 @@
     min-height: 100vh;
   }
 
+  /* Desktop — remove the 480px mobile cap so layout fills the screen */
+  @media (min-width: 900px) {
+    body {
+      max-width: 100%;
+      margin: 0;
+    }
+  }
+
   h1, h2, h3 {
     font-family: 'Outfit', 'Noto Sans Tamil', Inter, sans-serif;
   }

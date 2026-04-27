@@ -49,13 +49,22 @@ export default function CountdownTimer({ floating = false }) {
   }
 
   const isNear = parts.isNearStart;
-  const totalSec = parts.hrs * 3600 + parts.min * 60 + parts.sec;
+  const totalSec = parts.days * 86400 + parts.hrs * 3600 + parts.min * 60 + parts.sec;
   const isUrgent = totalSec > 0 && totalSec < 12 * 3600;
-  const units = [
-    { val: parts.hrs,  label: t.screen1A.hrs[lang] },
-    { val: parts.min,  label: t.screen1A.min[lang] },
-    { val: parts.sec,  label: t.screen1A.sec[lang] },
-  ];
+  const showDays = parts.days > 0;
+
+  const units = showDays
+    ? [
+        { val: parts.days, label: t.screen1A.days[lang] },
+        { val: parts.hrs,  label: t.screen1A.hrs[lang] },
+        { val: parts.min,  label: t.screen1A.min[lang] },
+        { val: parts.sec,  label: t.screen1A.sec[lang] },
+      ]
+    : [
+        { val: parts.hrs,  label: t.screen1A.hrs[lang] },
+        { val: parts.min,  label: t.screen1A.min[lang] },
+        { val: parts.sec,  label: t.screen1A.sec[lang] },
+      ];
 
   return (
     <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: 'rgba(255,255,255,0.55)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', border: '1px solid rgba(139,92,246,0.18)', boxShadow: '0 4px 24px rgba(91,33,182,0.10)' }}>
@@ -64,18 +73,18 @@ export default function CountdownTimer({ floating = false }) {
       </p>
 
       {/* Single row — all 4 units */}
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 3 }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 2 }}>
         {units.map(({ val, label }, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 3 }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
             <FlipUnit value={val} label={label} size="lg" />
             {i < units.length - 1 && (
               <span style={{
                 fontFamily: 'Outfit, sans-serif',
                 fontWeight: 700,
-                fontSize: '1.4rem',
+                fontSize: '1.2rem',
                 color: '#5b3fa0',
                 lineHeight: 1,
-                marginTop: 14,
+                marginTop: 12,
                 userSelect: 'none',
               }}>:</span>
             )}

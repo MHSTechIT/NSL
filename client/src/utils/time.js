@@ -14,11 +14,12 @@ export function getCountdownParts(targetISO) {
   }
 
   const totalSec = Math.max(0, Math.floor(diff / 1000));
-  const hrs = Math.floor(totalSec / 3600);
+  const days = Math.floor(totalSec / 86400);
+  const hrs = Math.floor((totalSec % 86400) / 3600);
   const min = Math.floor((totalSec % 3600) / 60);
   const sec = totalSec % 60;
 
-  return { days: 0, hrs, min, sec, isNearStart, isDuringSession };
+  return { days, hrs, min, sec, isNearStart, isDuringSession };
 }
 
 export function isCurrentDayMonOrTue() {

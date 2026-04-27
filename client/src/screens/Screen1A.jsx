@@ -35,8 +35,11 @@ const PHASE_STYLES = {
 /* ── Merged Social Proof + Seat Badge card ────────────────────────────── */
 const MAX_SEATS = 2000;
 
-function SocialProofCard({ count, visibleMsgs, seatInfo }) {
-  const progress = Math.min(count / MAX_SEATS, 1);
+function SocialProofCard({ visibleMsgs, seatInfo }) {
+  // seats left from time-based logic; reserved = total - left
+  const seatsLeft = seatInfo?.seats ?? 0;
+  const reserved = seatsLeft > 0 ? MAX_SEATS - seatsLeft : MAX_SEATS;
+  const progress = Math.min(reserved / MAX_SEATS, 1);
   const s = seatInfo ? PHASE_STYLES[seatInfo.styleKey] : PHASE_STYLES.open;
   const isLastChance = seatInfo?.phase === 5;
 
@@ -78,7 +81,7 @@ function SocialProofCard({ count, visibleMsgs, seatInfo }) {
       {/* ── Count row ── */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 8 }}>
         <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.7rem', color: '#2d0a6e', lineHeight: 1 }}>
-          {count.toLocaleString('en-IN')}
+          {reserved.toLocaleString('en-IN')}
         </span>
         <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem', color: '#5b3fa0' }}>
           Seats Reserved
@@ -88,7 +91,7 @@ function SocialProofCard({ count, visibleMsgs, seatInfo }) {
       {/* ── Progress label (2000 cap) ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
         <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', color: '#7c5cbf' }}>
-          {Math.round(progress * 100)}% filled
+          {Math.round((reserved / MAX_SEATS) * 100)}% filled
         </span>
         <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', fontWeight: 700, color: '#5b3fa0' }}>
           2,000
@@ -183,10 +186,9 @@ export default function Screen1A() {
   const { state, dispatch } = useFunnel();
   const navigate = useNavigate();
   const [seatInfo, setSeatInfo] = useState(() => getSeatInfo(state.webinarConfig?.next_webinar_at));
-  const [seatsReserved, setSeatsReserved] = useState(1813);
   const [visibleMsgs, setVisibleMsgs] = useState(() => LIVE_MSGS.slice(0, 2));
   const nextMsgIdxRef = useRef(2);
-  const seatTimerRef = useRef(null);
+  const [isDesktop, setIsDesktop] = useState(() => window.innerWidth >= 900);
   const [expanded, setExpanded] = useState(false);
   const [leaving, setLeaving] = useState(false);
   // 'sugar' → first question, 'language' → second question inline
@@ -197,6 +199,14 @@ export default function Screen1A() {
   useEffect(() => {
     pixelPageView();
     pixelViewContent(state.utm);
+  }, []);
+
+  // Track viewport width for desktop split layout
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 900px)');
+    const handler = (e) => setIsDesktop(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
   }, []);
 
   // Intercept browser/device back button while popup is open
@@ -226,19 +236,6 @@ export default function Screen1A() {
     }, 1000);
     return () => clearInterval(id);
   }, [state.webinarConfig?.next_webinar_at]);
-
-  // Seats reserved — increments every 45–90 seconds
-  useEffect(() => {
-    const schedule = () => {
-      const delay = 45000 + Math.random() * 45000;
-      seatTimerRef.current = setTimeout(() => {
-        setSeatsReserved(p => p + 1);
-        schedule();
-      }, delay);
-    };
-    schedule();
-    return () => clearTimeout(seatTimerRef.current);
-  }, []);
 
   // Cycle live messages every 3.5 seconds — prepend new, drop oldest
   useEffect(() => {
@@ -315,129 +312,330 @@ export default function Screen1A() {
     transition: 'all 180ms',
   };
 
-  return (
-    <div className="flex flex-col min-h-screen">
-      {/* Top bar — removed */}
+  /* ── Shared: CTA button (used in both layouts) ── */
+  const ctaButton = (
+    <div style={{ position: 'relative' }}>
+      <motion.div
+        animate={{ scale: [1, 1.08, 1], opacity: [0.55, 0.15, 0.55] }}
+        transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+        style={{ position: 'absolute', inset: 0, borderRadius: 50, background: 'rgba(139,92,246,0.55)', filter: 'blur(12px)', zIndex: 0 }}
+      />
+      <motion.button
+        onClick={() => { stopTick(); setExpanded(true); }}
+        animate={{
+          scale: [1, 1.04, 1],
+          boxShadow: ['0 4px 20px rgba(91,33,182,0.45)', '0 6px 36px rgba(139,92,246,0.85)', '0 4px 20px rgba(91,33,182,0.45)'],
+        }}
+        transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+        style={{
+          position: 'relative', zIndex: 1,
+          width: '100%', height: '3.5rem',
+          background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
+          border: 'none', borderRadius: 50,
+          color: '#fff', fontFamily: 'Outfit, sans-serif',
+          fontWeight: 700, fontSize: '1.1rem',
+          cursor: 'pointer', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}
+      >
+        {t.screen1A.cta.english}
+      </motion.button>
+    </div>
+  );
 
-      <div className="flex-1 px-4 flex flex-col gap-4" style={{ overflowY: 'auto', paddingBottom: 100 }}>
-
-
-        {/* Hero — image behind the card, card overlaps image bottom */}
-        <motion.div {...cardAnim(1)} style={{ position: 'relative' }}>
-          {/* Person image — behind card */}
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: -50, position: 'relative', zIndex: 0, pointerEvents: 'none', userSelect: 'none' }}>
-            <img src="/person.webp" alt="" style={{ width: '55%', maxWidth: 200, display: 'block' }} />
-          </div>
-          {/* Glass card — in front, covers lower part of image, minimal top padding */}
-          <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1, background: 'rgba(255,255,255,0.55)' }}>
-            <h1 className="heading-shine" style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.45rem, 7vw, 1.9rem)', lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 10 }}>
-              <>REVERSE DIABETES<br />WITHOUT TABLETS</>
-            </h1>
-            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: '#3b1f6e', lineHeight: 1.55, fontWeight: 500 }}>
-              {t.screen1A.subheadline.english}
+  /* ── Shared: popup card content ── */
+  const popupCardContent = (
+    <div style={{
+      background: 'rgba(255,255,255,0.72)',
+      backdropFilter: 'blur(28px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+      borderRadius: isDesktop ? 22 : '22px 22px 0 0',
+      border: '1px solid rgba(139,92,246,0.18)',
+      borderBottom: isDesktop ? undefined : 'none',
+      boxShadow: isDesktop
+        ? '0 8px 40px rgba(91,33,182,0.18), inset 0 1px 0 rgba(255,255,255,0.80)'
+        : '0 -4px 24px rgba(91,33,182,0.10), inset 0 1px 0 rgba(255,255,255,0.80)',
+      position: 'relative', zIndex: 2,
+      width: '100%',
+    }}>
+      <AnimatePresence mode="wait">
+        {popupStep === 'sugar' && (
+          <motion.div
+            key="sugar-step"
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50, transition: { duration: 0.25, ease: [0.32, 0, 0.67, 0] } }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            style={{ padding: '20px 20px 28px' }}
+          >
+            <div style={{ marginBottom: 14 }}>
+              <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.45rem', color: '#2d0a6e', margin: 0 }}>
+                Your Current Sugar Level?
+              </p>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+              {sugarOptions.map((opt, i) => (
+                <motion.button
+                  key={opt.id}
+                  onClick={() => handleSugarSelect(opt)}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.15 + i * 0.07 }}
+                  whileTap={{ scale: 0.97 }}
+                  style={pillStyle}
+                >
+                  {opt.label}
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+        {popupStep === 'zoom' && (
+          <motion.div
+            key="zoom-step"
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50, transition: { duration: 0.25, ease: [0.32, 0, 0.67, 0] } }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            style={{ padding: '20px 20px 28px' }}
+          >
+            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: '#7c5cbf', fontWeight: 500, margin: '0 0 6px' }}>
+              This webinar is conducted in Tamil
             </p>
+            <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.45rem', color: '#2d0a6e', margin: '0 0 16px', lineHeight: 1.2 }}>
+              Do you understand Tamil?
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+              <motion.button onClick={handleZoomYes} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} whileTap={{ scale: 0.97 }} style={pillStyle}>
+                Yes, I understand Tamil
+              </motion.button>
+              <motion.button onClick={handleZoomNo} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} whileTap={{ scale: 0.97 }} style={pillStyle}>
+                No, I don't understand Tamil
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+
+  /* ── Shared: eligible overlay ── */
+  const eligibleOverlay = (
+    <AnimatePresence>
+      {showEligible && (
+        <motion.div
+          key="eligible-overlay"
+          initial={{ opacity: 0, scale: 0.88, y: 24 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.92, y: -16 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 55, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 32px' }}
+        >
+          <div style={{
+            background: 'rgba(255,255,255,0.75)',
+            backdropFilter: 'blur(32px) saturate(200%)',
+            WebkitBackdropFilter: 'blur(32px) saturate(200%)',
+            borderRadius: 24, padding: '32px 28px', textAlign: 'center',
+            boxShadow: '0 4px 32px rgba(91,33,182,0.12), inset 0 1px 0 rgba(255,255,255,0.90)',
+            border: '1px solid rgba(139,92,246,0.18)', maxWidth: 300, width: '100%',
+          }}>
+            <motion.div
+              initial={{ scale: 0 }} animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 20, delay: 0.1 }}
+              style={{ width: 68, height: 68, borderRadius: '50%', background: 'linear-gradient(135deg, #22C55E, #16A34A)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', boxShadow: '0 0 0 10px rgba(34,197,94,0.12), 0 8px 32px rgba(34,197,94,0.50)' }}
+            >
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <motion.path d="M5 13l4 4L19 7" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+                  transition={{ delay: 0.3, duration: 0.4, ease: [0.16, 1, 0.3, 1] }} />
+              </svg>
+            </motion.div>
+            <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.35 }}
+              style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1.2rem', color: '#2d0a6e', lineHeight: 1.25, marginBottom: 8 }}>
+              You are Eligible!
+            </motion.p>
+            <motion.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.38, duration: 0.3 }}
+              style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: '#15803d', fontWeight: 600, textShadow: '0 1px 4px rgba(0,0,0,0.15)' }}>
+              Your spot for the FREE Webinar is waiting
+            </motion.p>
           </div>
         </motion.div>
+      )}
+    </AnimatePresence>
+  );
 
-        {/* Countdown */}
-        <motion.div {...cardAnim(2)}><CountdownTimer /></motion.div>
+  /* ── Blur backdrop ── */
+  const blurBackdrop = (
+    <AnimatePresence>
+      {(expanded || showEligible) && (
+        <motion.div
+          key="blur-backdrop"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          transition={{ duration: 0.25 }}
+          onClick={isDesktop && expanded ? handleClose : undefined}
+          style={{ position: 'fixed', inset: 0, zIndex: 40, backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', background: 'rgba(100,70,180,0.15)', cursor: isDesktop && expanded ? 'pointer' : 'default' }}
+        />
+      )}
+    </AnimatePresence>
+  );
 
-        {/* Merged Social Proof + Seat Badge Card */}
-        <motion.div {...cardAnim(3)}>
-          <SocialProofCard count={seatsReserved} visibleMsgs={visibleMsgs} seatInfo={seatInfo} />
-        </motion.div>
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
-        {/* ── Blur backdrop ── */}
-        <AnimatePresence>
-          {(expanded || showEligible) && (
+      {isDesktop ? (
+        /* ════════════════════════════════════════════
+           DESKTOP — two-column split layout
+           Left: hero image + headline card
+           Right: countdown + social proof + CTA
+           ════════════════════════════════════════════ */
+        <div style={{
+          flex: 1,
+          display: 'grid',
+          gridTemplateColumns: '3fr 2fr',
+          gap: '32px',
+          width: '100%',
+          padding: '48px 48px',
+          alignItems: 'stretch',
+          boxSizing: 'border-box',
+        }}>
+
+          {/* ── LEFT: Hero — stretches to full right-column height ── */}
+          <motion.div {...cardAnim(1)} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            {/* Person image floats above the card */}
+            <div style={{ marginBottom: -64, position: 'relative', zIndex: 0, pointerEvents: 'none', userSelect: 'none', width: '100%', display: 'flex', justifyContent: 'flex-start', paddingLeft: 36, flexShrink: 0 }}>
+              <img src="/person.webp" alt="" style={{ width: '50%', maxWidth: 300, display: 'block' }} />
+            </div>
+            {/* Card fills remaining height */}
+            <div className="glass-card" style={{
+              paddingTop: 28, paddingBottom: 28, paddingLeft: 36, paddingRight: 36,
+              textAlign: 'left', position: 'relative', zIndex: 1,
+              background: 'rgba(255,255,255,0.60)', width: '100%',
+              flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            }}>
+              <h1 className="heading-shine" style={{
+                fontFamily: '"Montserrat", sans-serif', fontWeight: 900,
+                fontSize: 'clamp(2rem, 3.5vw, 3.2rem)', lineHeight: 1.1,
+                textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 14,
+              }}>
+                REVERSE DIABETES<br />WITHOUT TABLETS
+              </h1>
+              <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.05rem', color: '#3b1f6e', lineHeight: 1.65, fontWeight: 500 }}>
+                {t.screen1A.subheadline.english}
+              </p>
+            </div>
+          </motion.div>
+
+          {/* ── RIGHT: Countdown + Social Proof + CTA ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <motion.div {...cardAnim(2)}><CountdownTimer /></motion.div>
+            <motion.div {...cardAnim(3)}>
+              <SocialProofCard visibleMsgs={visibleMsgs} seatInfo={seatInfo} />
+            </motion.div>
+            <motion.div {...cardAnim(4)}>
+              {ctaButton}
+              <TrustBar />
+            </motion.div>
+          </div>
+
+        </div>
+      ) : (
+        /* ════════════════════════════════════════════
+           MOBILE — original stacked layout
+           ════════════════════════════════════════════ */
+        <div className="flex-1 px-4 flex flex-col gap-4" style={{ overflowY: 'auto', paddingBottom: 100 }}>
+
+          {/* Hero */}
+          <motion.div {...cardAnim(1)} style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: -50, position: 'relative', zIndex: 0, pointerEvents: 'none', userSelect: 'none' }}>
+              <img src="/person.webp" alt="" style={{ width: '55%', maxWidth: 200, display: 'block' }} />
+            </div>
+            <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1, background: 'rgba(255,255,255,0.55)' }}>
+              <h1 className="heading-shine" style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.45rem, 7vw, 1.9rem)', lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 10 }}>
+                REVERSE DIABETES<br />WITHOUT TABLETS
+              </h1>
+              <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: '#3b1f6e', lineHeight: 1.55, fontWeight: 500 }}>
+                {t.screen1A.subheadline.english}
+              </p>
+            </div>
+          </motion.div>
+
+          <motion.div {...cardAnim(2)}><CountdownTimer /></motion.div>
+
+          <motion.div {...cardAnim(3)}>
+            <SocialProofCard visibleMsgs={visibleMsgs} seatInfo={seatInfo} />
+          </motion.div>
+
+        </div>
+      )}
+
+      {/* ══ Shared overlays (both layouts) ══ */}
+      {blurBackdrop}
+      {eligibleOverlay}
+
+      {/* ── Popup panel ── */}
+      <AnimatePresence>
+        {expanded && (
+          isDesktop ? (
+            /* Desktop: centered modal */
             <motion.div
-              key="blur-backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.25 }}
+              key="expanded-desktop"
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.94, transition: { duration: 0.22 } }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
               style={{
-                position: 'fixed', inset: 0, zIndex: 40,
-                backdropFilter: 'blur(18px)',
-                WebkitBackdropFilter: 'blur(18px)',
-                background: 'rgba(100,70,180,0.15)',
-              }}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* ── Eligible message ── */}
-        <AnimatePresence>
-          {showEligible && (
-            <motion.div
-              key="eligible-overlay"
-              initial={{ opacity: 0, scale: 0.88, y: 24 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: -16 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 24 }}
-              style={{
-                position: 'fixed', inset: 0, zIndex: 55,
+                position: 'fixed', inset: 0, zIndex: 50,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: '0 32px',
+                padding: '24px',
               }}
             >
-              <div style={{
-                background: 'rgba(255,255,255,0.75)',
-                backdropFilter: 'blur(32px) saturate(200%)',
-                WebkitBackdropFilter: 'blur(32px) saturate(200%)',
-                borderRadius: 24,
-                padding: '32px 28px',
-                textAlign: 'center',
-                boxShadow: '0 4px 32px rgba(91,33,182,0.12), inset 0 1px 0 rgba(255,255,255,0.90)',
-                border: '1px solid rgba(139,92,246,0.18)',
-                maxWidth: 300,
-                width: '100%',
-              }}>
-                {/* Animated check */}
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 350, damping: 20, delay: 0.1 }}
+              <div style={{ width: '100%', maxWidth: 480, position: 'relative' }}>
+                {/* Close button */}
+                <button
+                  onClick={handleClose}
                   style={{
-                    width: 68, height: 68, borderRadius: '50%',
-                    background: 'linear-gradient(135deg, #22C55E, #16A34A)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    margin: '0 auto 18px',
-                    boxShadow: '0 0 0 10px rgba(34,197,94,0.12), 0 8px 32px rgba(34,197,94,0.50)',
+                    position: 'absolute', top: -12, right: -12, zIndex: 60,
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.85)',
+                    backdropFilter: 'blur(12px)',
+                    border: '1px solid rgba(139,92,246,0.20)',
+                    boxShadow: '0 2px 12px rgba(91,33,182,0.15)',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#5b3fa0', fontSize: '1.1rem', lineHeight: 1,
                   }}
-                >
-                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
-                    <motion.path d="M5 13l4 4L19 7" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                      initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
-                      transition={{ delay: 0.3, duration: 0.4, ease: [0.16, 1, 0.3, 1] }} />
-                  </svg>
+                >✕</button>
+                {/* Timer above modal */}
+                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12, duration: 0.28 }} style={{ marginBottom: 12 }}>
+                  <CountdownTimer />
                 </motion.div>
-                <motion.p
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.25, duration: 0.35 }}
-                  style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1.2rem', color: '#2d0a6e', lineHeight: 1.25, marginBottom: 8 }}
-                >
-                  You are Eligible!
-                </motion.p>
-                <motion.p
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.38, duration: 0.3 }}
-                  style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: '#15803d', fontWeight: 600, textShadow: '0 1px 4px rgba(0,0,0,0.15)' }}
-                >
-                  Your spot for the FREE Webinar is waiting
-                </motion.p>
+
+                {/* Floating image — top-right corner */}
+                <div style={{ position: 'relative', zIndex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-40px', pointerEvents: 'none' }}>
+                    <AnimatePresence mode="wait">
+                      {popupStep === 'sugar' ? (
+                        <motion.img key="gmeter-d" src="/gmeter.webp" alt=""
+                          initial={{ opacity: 0, y: 20, scale: 0.8 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.7, y: -10, transition: { duration: 0.2 } }}
+                          transition={{ duration: 0.3 }}
+                          style={{ width: '46%', maxWidth: 200, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.35))' }} />
+                      ) : (
+                        <motion.img key="zoom-d" src="/zoom.webp" alt=""
+                          initial={{ opacity: 0, scale: 0.75, y: 15 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.7, y: -10, transition: { duration: 0.2 } }}
+                          transition={{ duration: 0.35 }}
+                          style={{ width: '30%', maxWidth: 120, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.25))' }} />
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  {popupCardContent}
+                </div>
               </div>
             </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Popup panel ── */}
-        <AnimatePresence>
-          {expanded && (
+          ) : (
+            /* Mobile: bottom sheet */
             <motion.div
-              key="expanded-overlay"
+              key="expanded-mobile"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%', transition: { duration: 0.42, ease: [0.32, 0, 0.67, 0] } }}
@@ -448,216 +646,39 @@ export default function Screen1A() {
                 zIndex: 50, padding: '0 20px', paddingBottom: 0,
               }}
             >
-              {/* ── Floating countdown timer — full card above popup ── */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.18, duration: 0.3 }}
-                style={{ marginBottom: 10 }}
-              >
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18, duration: 0.3 }} style={{ marginBottom: 10 }}>
                 <CountdownTimer />
               </motion.div>
-
-              {/* ── Floating image — swaps between gmeter and zoom ── */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                marginBottom: '-40px',
-                pointerEvents: 'none',
-                position: 'relative', zIndex: 1,
-              }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-40px', pointerEvents: 'none', position: 'relative', zIndex: 1 }}>
                 <AnimatePresence mode="wait">
                   {popupStep === 'sugar' ? (
-                    <motion.img
-                      key="gmeter"
-                      src="/gmeter.webp"
-                      alt=""
-                      initial={{ opacity: 0, y: 30, scale: 0.8 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                    <motion.img key="gmeter" src="/gmeter.webp" alt=""
+                      initial={{ opacity: 0, y: 30, scale: 0.8 }} animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.7, y: -10, transition: { duration: 0.25 } }}
                       transition={{ duration: 0.35, delay: 0.05 }}
-                      style={{ width: '58%', maxWidth: 220, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.45))' }}
-                    />
+                      style={{ width: '58%', maxWidth: 220, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.45))' }} />
                   ) : (
-                    <motion.img
-                      key="zoom"
-                      src="/zoom.webp"
-                      alt=""
-                      initial={{ opacity: 0, scale: 0.75, y: 20 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                    <motion.img key="zoom" src="/zoom.webp" alt=""
+                      initial={{ opacity: 0, scale: 0.75, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.7, y: -10, transition: { duration: 0.25 } }}
                       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                      style={{ width: '38%', maxWidth: 140, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.30))' }}
-                    />
+                      style={{ width: '38%', maxWidth: 140, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.30))' }} />
                   )}
                 </AnimatePresence>
               </div>
-
-              {/* ── Card ── */}
-              <div style={{
-                background: 'rgba(255,255,255,0.55)',
-                backdropFilter: 'blur(24px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-                borderRadius: '22px 22px 0 0',
-                border: '1px solid rgba(139,92,246,0.18)',
-                borderBottom: 'none',
-                boxShadow: '0 -4px 24px rgba(91,33,182,0.10), inset 0 1px 0 rgba(255,255,255,0.80)',
-                position: 'relative', zIndex: 2,
-              }}>
-                <AnimatePresence mode="wait">
-
-                  {/* ── Step 1: Sugar level ── */}
-                  {popupStep === 'sugar' && (
-                    <motion.div
-                      key="sugar-step"
-                      initial={{ opacity: 0, y: 40 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -50, transition: { duration: 0.25, ease: [0.32, 0, 0.67, 0] } }}
-                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                      style={{ padding: '20px 16px 28px' }}
-                    >
-                      {/* Header */}
-                      <div style={{ marginBottom: 14 }}>
-                        <p style={{
-                          fontFamily: 'Outfit, sans-serif',
-                          fontWeight: 700, fontSize: '1.45rem',
-                          color: '#2d0a6e', margin: 0,
-                        }}>
-                          Your Sugar Level?
-                        </p>
-                      </div>
-
-                      {/* Options */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                        {sugarOptions.map((opt, i) => (
-                          <motion.button
-                            key={opt.id}
-                            onClick={() => handleSugarSelect(opt)}
-                            initial={{ opacity: 0, y: 12 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.15 + i * 0.07 }}
-                            whileTap={{ scale: 0.97 }}
-                            style={pillStyle}
-                          >
-                            {opt.label}
-                          </motion.button>
-                        ))}
-                      </div>
-
-                    </motion.div>
-                  )}
-
-                  {/* ── Step 2: Zoom question ── */}
-                  {popupStep === 'zoom' && (
-                    <motion.div
-                      key="zoom-step"
-                      initial={{ opacity: 0, y: 50 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -50, transition: { duration: 0.25, ease: [0.32, 0, 0.67, 0] } }}
-                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                      style={{ padding: '20px 16px 28px' }}
-                    >
-                      {/* Small label */}
-                      <p style={{
-                        fontFamily: 'Outfit, sans-serif',
-                        fontSize: '0.78rem', color: '#7c5cbf',
-                        fontWeight: 500, margin: '0 0 6px',
-                      }}>
-                        This webinar is conducted in Tamil
-                      </p>
-
-                      {/* Big question */}
-                      <p style={{
-                        fontFamily: 'Outfit, sans-serif',
-                        fontWeight: 700, fontSize: '1.45rem',
-                        color: '#2d0a6e', margin: '0 0 16px', lineHeight: 1.2,
-                      }}>
-                        Do you understand Tamil?
-                      </p>
-
-                      {/* Yes / No buttons */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                        <motion.button
-                          onClick={handleZoomYes}
-                          initial={{ opacity: 0, y: 12 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.1 }}
-                          whileTap={{ scale: 0.97 }}
-                          style={pillStyle}
-                        >
-                          Yes, I understand Tamil
-                        </motion.button>
-                        <motion.button
-                          onClick={handleZoomNo}
-                          initial={{ opacity: 0, y: 12 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.18 }}
-                          whileTap={{ scale: 0.97 }}
-                          style={pillStyle}
-                        >
-                          No, I don't understand Tamil
-                        </motion.button>
-                      </div>
-
-                    </motion.div>
-                  )}
-
-                </AnimatePresence>
-              </div>
+              {popupCardContent}
             </motion.div>
-          )}
-        </AnimatePresence>
+          )
+        )}
+      </AnimatePresence>
 
-      </div>
-
-      {/* ── Fixed bottom CTA ── */}
-      <div style={{
-        position: 'fixed', bottom: 0, left: 0, right: 0,
-        maxWidth: 480, margin: '0 auto',
-        padding: '12px 16px 20px',
-        background: 'transparent',
-        zIndex: 30,
-      }}>
-        <div style={{ position: 'relative' }}>
-          {/* Glow ring — pulses behind the button */}
-          <motion.div
-            animate={{ scale: [1, 1.08, 1], opacity: [0.55, 0.15, 0.55] }}
-            transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
-            style={{
-              position: 'absolute', inset: 0,
-              borderRadius: 50,
-              background: 'rgba(139,92,246,0.55)',
-              filter: 'blur(12px)',
-              zIndex: 0,
-            }}
-          />
-          <motion.button
-            onClick={() => { stopTick(); setExpanded(true); }}
-            animate={{
-              scale: [1, 1.04, 1],
-              boxShadow: [
-                '0 4px 20px rgba(91,33,182,0.45)',
-                '0 6px 36px rgba(139,92,246,0.85)',
-                '0 4px 20px rgba(91,33,182,0.45)',
-              ],
-            }}
-            transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
-            style={{
-              position: 'relative', zIndex: 1,
-              width: '100%', height: '3.5rem',
-              background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
-              border: 'none', borderRadius: 50,
-              color: '#fff', fontFamily: 'Outfit, sans-serif',
-              fontWeight: 700, fontSize: '1.1rem',
-              cursor: 'pointer', display: 'flex',
-              alignItems: 'center', justifyContent: 'center', gap: 8,
-            }}
-          >
-            {t.screen1A.cta.english}
-          </motion.button>
+      {/* ── Mobile-only fixed bottom CTA ── */}
+      {!isDesktop && (
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto', padding: '12px 16px 20px', background: 'transparent', zIndex: 30 }}>
+          {ctaButton}
+          <TrustBar />
         </div>
-        <TrustBar />
-      </div>
+      )}
 
       {/* ── Confetti burst on eligible ── */}
       <Confetti active={showEligible} count={260} duration={5500} />
