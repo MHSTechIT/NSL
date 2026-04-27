@@ -10,8 +10,10 @@ function toISTValue(isoString) {
 
 function fromISTValue(localVal) {
   if (!localVal) return null;
-  const istMs = new Date(localVal + ':00').getTime();
-  return new Date(istMs - 5.5 * 60 * 60 * 1000).toISOString();
+  const [date, time] = localVal.split('T');
+  const [y, mo, d]  = date.split('-').map(Number);
+  const [h, m]      = time.split(':').map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, h, m) - 5.5 * 60 * 60 * 1000).toISOString();
 }
 
 export default function WhatsAppLinksEditor({ token }) {
