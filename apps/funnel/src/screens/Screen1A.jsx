@@ -254,7 +254,7 @@ export default function Screen1A() {
       setLeaving(true);
       setTimeout(() => {
         pixelDisqualifiedLead('no_diabetes', state.utm);
-        navigate('/not-eligible');
+        window.location.href = import.meta.env.VITE_DISQUALIFIED_URL || '/not-eligible';
       }, 420);
       return;
     }
@@ -281,7 +281,7 @@ export default function Screen1A() {
     setLeaving(true);
     setTimeout(() => {
       pixelDisqualifiedLead('no_zoom', state.utm);
-      navigate('/not-eligible');
+      window.location.href = import.meta.env.VITE_DISQUALIFIED_URL || '/not-eligible';
     }, 420);
   }
 

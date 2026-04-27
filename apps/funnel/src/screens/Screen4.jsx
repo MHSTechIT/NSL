@@ -160,7 +160,7 @@ export default function Screen4() {
       });
 
       setSubmitting(false);
-      navigate('/whatsapp', { replace: true });
+      window.location.href = import.meta.env.VITE_WHATSAPP_URL || '/whatsapp';
     } catch {
       setServerError('Network error. Please try again.');
       setSubmitting(false);

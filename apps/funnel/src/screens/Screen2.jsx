@@ -32,7 +32,7 @@ export default function Screen2() {
   function handleNo() {
     dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
     pixelDisqualifiedLead('language_mismatch', state.utm);
-    navigate('/language-mismatch');
+    window.location.href = (import.meta.env.VITE_DISQUALIFIED_URL || '') + '/language';
   }
 
   return (
