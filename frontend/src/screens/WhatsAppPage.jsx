@@ -50,26 +50,25 @@ export default function WhatsAppPage() {
 
   return (
     <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '24px 16px',
+      position: 'fixed',
+      bottom: 0, left: 0, right: 0,
+      maxWidth: 480,
+      margin: '0 auto',
     }}>
       <motion.div
-        initial={{ opacity: 0, y: 28, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 26 }}
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         style={{
           width: '100%',
-          maxWidth: 420,
           background: 'rgba(255,255,255,0.55)',
           backdropFilter: 'blur(24px) saturate(180%)',
           WebkitBackdropFilter: 'blur(24px) saturate(180%)',
           border: '1px solid rgba(139,92,246,0.18)',
-          borderRadius: 24,
-          padding: '28px 24px 36px',
-          boxShadow: '0 8px 40px rgba(91,33,182,0.12), inset 0 1px 0 rgba(255,255,255,0.80)',
+          borderBottom: 'none',
+          borderRadius: '24px 24px 0 0',
+          padding: '12px 24px 44px',
+          boxShadow: '0 -4px 24px rgba(91,33,182,0.10), inset 0 1px 0 rgba(255,255,255,0.80)',
         }}
       >
         {/* Drag handle style top bar */}
