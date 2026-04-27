@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
-import { pixelPageView, pixelInitiateRegistration, pixelLead, pixelCompleteRegistration, pixelFormAbandoned } from '../utils/pixel';
+import { pixelLead, pixelCompleteRegistration } from '../utils/pixel';
 
 const slideIn = {
   initial: { opacity: 0, y: 12 },
@@ -83,31 +83,13 @@ export default function Screen4() {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
-  const hasStartedRef = useRef(false);
-  const abandonRef = useRef(null);
-
   useEffect(() => {
     if (!state.sugarLevel) navigate('/', { replace: true });
   }, []);
 
-  useEffect(() => {
-    abandonRef.current = setTimeout(() => {
-      if (!submitting) pixelFormAbandoned();
-    }, 30000);
-    return () => clearTimeout(abandonRef.current);
-  }, []);
-
-  function handleFirstInput() {
-    if (!hasStartedRef.current) {
-      hasStartedRef.current = true;
-      pixelInitiateRegistration();
-    }
-  }
-
   function handlePhoneInput(e) {
     const val = e.target.value.replace(/\D/g, '').slice(0, 10);
     setWhatsappNumber(val);
-    handleFirstInput();
   }
 
   async function handleSubmit(e) {
@@ -339,7 +321,7 @@ export default function Screen4() {
           <input
             type="text"
             value={fullName}
-            onChange={e => { setFullName(e.target.value); handleFirstInput(); }}
+            onChange={e => { setFullName(e.target.value); }}
             placeholder="Ramaswamy"
             autoCapitalize="words"
             style={inputStyle(errors.fullName)}
@@ -400,7 +382,7 @@ export default function Screen4() {
           <input
             type="email"
             value={email}
-            onChange={e => { setEmail(e.target.value); handleFirstInput(); }}
+            onChange={e => { setEmail(e.target.value); }}
             placeholder="yourname@gmail.com"
             style={inputStyle(errors.email)}
             onFocus={e => { e.target.style.borderColor = 'rgba(139,92,246,0.55)'; e.target.style.boxShadow = '0 0 0 3px rgba(91,33,182,0.15), inset 0 1.5px 0 rgba(255,255,255,0.12)'; }}
