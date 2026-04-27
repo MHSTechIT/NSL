@@ -40,11 +40,14 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
     }
   }, [value]);
 
+  const pad = n => String(n).padStart(2, '0');
+
   function commit(date, h, m) {
     if (!date) return;
     const d = new Date(date);
-    d.setHours(h, m, 0, 0);
-    onChange(d.toISOString().slice(0, 16)); // local-like string
+    // Build local datetime string — avoids UTC shift from toISOString()
+    const local = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(h)}:${pad(m)}`;
+    onChange(local);
   }
 
   function prevMonth() {
