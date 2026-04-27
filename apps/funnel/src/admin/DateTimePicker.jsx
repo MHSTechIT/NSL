@@ -19,14 +19,31 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
   const [selDate, setSelDate] = useState(() => value ? new Date(value) : null);
   const [hour, setHour]       = useState(() => value ? new Date(value).getHours()   : 19);
   const [minute, setMinute]   = useState(() => value ? new Date(value).getMinutes() : 0);
+  const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 });
   const ref = useRef(null);
+  const triggerRef = useRef(null);
 
-  /* close on outside click */
+  /* close on outside click or scroll */
   useEffect(() => {
     function h(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    document.addEventListener('scroll', () => setOpen(false), true);
+    return () => {
+      document.removeEventListener('mousedown', h);
+      document.removeEventListener('scroll', () => setOpen(false), true);
+    };
   }, []);
+
+  function openPicker() {
+    if (triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      const dropH = 420;
+      const spaceBelow = window.innerHeight - r.bottom;
+      const top = spaceBelow >= dropH ? r.bottom + 8 : r.top - dropH - 8;
+      setDropPos({ top, left: r.left, width: r.width });
+    }
+    setOpen(o => !o);
+  }
 
   /* sync value prop → state */
   useEffect(() => {
@@ -103,19 +120,22 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
   };
 
   const dropdown = {
-    position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
+    position: 'fixed',
+    top: dropPos.top,
+    left: dropPos.left,
+    width: dropPos.width,
     background: '#fff',
     border: '1px solid rgba(139,92,246,0.18)',
     borderRadius: 18,
     boxShadow: '0 12px 48px rgba(91,33,182,0.16)',
-    zIndex: 999, padding: '18px 16px 16px',
+    zIndex: 9999, padding: '18px 16px 16px',
     fontFamily: 'Outfit, sans-serif',
   };
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       {/* Trigger button */}
-      <button type="button" style={pill} onClick={() => setOpen(o => !o)}>
+      <button ref={triggerRef} type="button" style={pill} onClick={openPicker}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.50)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="4" width="18" height="18" rx="2"/>
