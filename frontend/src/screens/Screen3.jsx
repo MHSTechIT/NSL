@@ -39,11 +39,6 @@ const labelStyle = {
 /* ─────────────────────────── Birthday confetti: burst + slow fall ── */
 
 /* ─────────────────────────────────────── Webinar countdown ── */
-let _urgencyAudio = null;
-function stopUrgencyTick() {
-  if (_urgencyAudio) { _urgencyAudio.pause(); _urgencyAudio.currentTime = 0; }
-}
-
 function UrgencyTimer() {
   const [total, setTotal] = useState(300);
   const urgent = total <= 60;
@@ -51,16 +46,7 @@ function UrgencyTimer() {
   const secs   = total % 60;
 
   useEffect(() => {
-    const audio = new Audio('/tick.mp3');
-    audio.volume = 0.5;
-    audio.preload = 'auto';
-    _urgencyAudio = audio;
-    return () => { stopUrgencyTick(); _urgencyAudio = null; };
-  }, []);
-
-  useEffect(() => {
     if (total <= 0) return;
-    try { if (_urgencyAudio) { _urgencyAudio.currentTime = 0; _urgencyAudio.play().catch(() => {}); } } catch {}
     const id = setTimeout(() => setTotal(t => t - 1), 1000);
     return () => clearTimeout(id);
   }, [total]);
