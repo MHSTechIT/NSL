@@ -16,27 +16,20 @@ function fromLocalDatetimeValue(localVal) {
 
 export default function TimerConfig({ token }) {
   const [nextWebinar, setNextWebinar] = useState('');
-  const [backupWebinar, setBackupWebinar] = useState('');
-  const [killSwitch, setKillSwitch] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
     fetch('/api/webinar-config')
       .then(r => r.json())
-      .then(d => {
-        setNextWebinar(toLocalDatetimeValue(d.next_webinar_at));
-        setBackupWebinar(toLocalDatetimeValue(d.backup_webinar_at));
-        setKillSwitch(d.kill_switch || false);
-      });
+      .then(d => setNextWebinar(toLocalDatetimeValue(d.next_webinar_at)));
   }, []);
 
   async function handleSave() {
     setSaving(true);
     setToast(null);
-    const body = { kill_switch: killSwitch };
+    const body = {};
     if (nextWebinar) body.next_webinar_at = fromLocalDatetimeValue(nextWebinar);
-    if (backupWebinar) body.backup_webinar_at = fromLocalDatetimeValue(backupWebinar);
 
     const res = await fetch('/api/admin/webinar-config', {
       method: 'PUT',
@@ -48,76 +41,29 @@ export default function TimerConfig({ token }) {
     setTimeout(() => setToast(null), 3500);
   }
 
-  const DateCard = ({ label, value, onChange, hint }) => (
-    <div className="bg-white rounded-card border border-purple-100 p-5 hover:border-purple-300 transition-colors">
-      <label className="block font-sans font-semibold text-purple-900 text-sm mb-1">{label}</label>
-      <p className="font-sans text-xs text-purple-400 mb-3">{hint}</p>
-      <input
-        type="datetime-local"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="w-full border border-purple-100 rounded-xl px-3 py-2.5 font-sans text-sm text-gray-700 outline-none focus:border-purple focus:shadow-[0_0_0_3px_rgba(91,33,182,0.08)] transition-all bg-purple-50/30"
-      />
-    </div>
-  );
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" style={{ maxWidth: 520 }}>
       <div>
-        <h3 className="font-sans text-xl font-bold text-purple-900">Webinar Timer & Controls</h3>
+        <h3 className="font-sans text-xl font-bold text-purple-900">Webinar Timer</h3>
         <p className="font-sans text-sm text-purple-400 mt-1">
           All times in IST (India Standard Time). Changes update the countdown timer instantly for all visitors.
         </p>
       </div>
 
-      {/* Date pickers */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <DateCard
-          label="Next Webinar"
-          hint="Countdown timer target date & time"
+      {/* Single date picker */}
+      <div className="bg-white rounded-card border border-purple-100 p-5 hover:border-purple-300 transition-colors">
+        <label className="block font-sans font-semibold text-purple-900 text-sm mb-1">Next Webinar</label>
+        <p className="font-sans text-xs text-purple-400 mb-3">Countdown timer target date &amp; time</p>
+        <input
+          type="datetime-local"
           value={nextWebinar}
-          onChange={setNextWebinar}
+          onChange={e => setNextWebinar(e.target.value)}
+          className="w-full border border-purple-100 rounded-xl px-3 py-2.5 font-sans text-sm text-gray-700 outline-none focus:border-purple focus:shadow-[0_0_0_3px_rgba(91,33,182,0.08)] transition-all bg-purple-50/30"
         />
-        <DateCard
-          label="Backup Webinar"
-          hint="Fallback date if next webinar is cancelled"
-          value={backupWebinar}
-          onChange={setBackupWebinar}
-        />
-      </div>
-
-      {/* Kill switch */}
-      <div className={`rounded-card border-2 p-5 transition-all duration-300 ${
-        killSwitch
-          ? 'border-red-300 bg-red-50'
-          : 'border-purple-100 bg-white'
-      }`}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-sans font-semibold text-gray-900">Registration Kill Switch</p>
-            <p className={`font-sans text-xs mt-1 ${killSwitch ? 'text-red-600 font-medium' : 'text-purple-400'}`}>
-              <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${killSwitch ? 'bg-red-500' : 'bg-green-500'}`} />
-              {killSwitch ? 'ACTIVE — All new form submissions are blocked' : 'OFF — Registrations are open and accepting submissions'}
-            </p>
-          </div>
-          <button
-            onClick={() => setKillSwitch(k => !k)}
-            className={`relative w-14 h-7 rounded-full flex-shrink-0 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              killSwitch ? 'bg-red-500 focus:ring-red-400' : 'bg-gray-200 focus:ring-purple-400'
-            }`}
-          >
-            <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-sm transition-transform duration-300 ${
-              killSwitch ? 'translate-x-7' : 'translate-x-0.5'
-            }`} />
-          </button>
-        </div>
-        {killSwitch && (
-          <div className="mt-3 bg-red-100 rounded-xl px-3 py-2">
-            <p className="font-sans text-xs text-red-700 font-medium">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="inline mr-1"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              Warning: New leads cannot register while this is active. Turn off when ready to accept registrations.
-            </p>
-          </div>
+        {nextWebinar && (
+          <p className="font-sans text-xs text-purple-400 mt-2">
+            {new Date(fromLocalDatetimeValue(nextWebinar)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
+          </p>
         )}
       </div>
 
