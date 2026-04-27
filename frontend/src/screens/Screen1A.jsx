@@ -407,7 +407,7 @@ export default function Screen1A() {
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
               <motion.button onClick={handleZoomYes} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} whileTap={{ scale: 0.97 }} style={pillStyle}>
-                Yes, I understand Tamil
+                எனக்கு தமிழ் தெரியும்
               </motion.button>
               <motion.button onClick={handleZoomNo} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} whileTap={{ scale: 0.97 }} style={pillStyle}>
                 No, I don't understand Tamil
