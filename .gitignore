@@ -1,10 +1,14 @@
 # Dependencies
 node_modules/
-frontend/node_modules/
 backend/node_modules/
+apps/funnel/node_modules/
+apps/whatsapp/node_modules/
+apps/disqualified/node_modules/
 
 # Build output
-frontend/dist/
+apps/funnel/dist/
+apps/whatsapp/dist/
+apps/disqualified/dist/
 
 # Environment files
 backend/.env
