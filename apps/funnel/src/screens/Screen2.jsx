@@ -5,7 +5,7 @@ import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import TopBar from '../components/TopBar';
 import CountdownTimerCompact from '../components/CountdownTimerCompact';
-import { pixelLanguageQualified, pixelDisqualifiedLead } from '../utils/pixel';
+import { pixelLanguageQualified, pixelDisqualifiedLead, pixelLead } from '../utils/pixel';
 
 const slideIn = {
   initial: { x: '100%', opacity: 0 },
@@ -26,6 +26,7 @@ export default function Screen2() {
     dispatch({ type: 'SET_LANGUAGE_QUALIFIED', payload: true });
     dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
     pixelLanguageQualified();
+    pixelLead({ content_name: 'tamil_qualified', content_category: 'language_screen' });
     navigate('/duration');
   }
 
