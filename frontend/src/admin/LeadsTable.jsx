@@ -10,6 +10,8 @@ export default function LeadsTable({ token }) {
   const [sortKey, setSortKey] = useState('created_at');
   const [sortAsc, setSortAsc] = useState(false);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo]     = useState('');
 
   useEffect(() => {
     fetch('/api/admin/leads', { headers: { Authorization: `Bearer ${token}` } })
@@ -24,6 +26,19 @@ export default function LeadsTable({ token }) {
   }
 
   const filtered = leads.filter(l => {
+    // Date range filter (IST)
+    if (dateFrom || dateTo) {
+      const created = new Date(l.created_at);
+      if (dateFrom) {
+        const from = new Date(dateFrom + 'T00:00:00+05:30');
+        if (created < from) return false;
+      }
+      if (dateTo) {
+        const to = new Date(dateTo + 'T23:59:59+05:30');
+        if (created > to) return false;
+      }
+    }
+    // Card filter
     if (activeFilter === 'all')        return true;
     if (activeFilter === 'high_sugar') return l.sugar_level === '250+';
     if (activeFilter === 'wa_clicked') return l.wa_clicked === true;
@@ -54,8 +69,20 @@ export default function LeadsTable({ token }) {
     URL.revokeObjectURL(url);
   }
 
-  const waClicked    = leads.filter(l => l.wa_clicked === true).length;
-  const waNotClicked = leads.filter(l => !l.wa_clicked).length;
+  // Use date-filtered base for stat counts
+  const dateFiltered = leads.filter(l => {
+    if (dateFrom) {
+      const from = new Date(dateFrom + 'T00:00:00+05:30');
+      if (new Date(l.created_at) < from) return false;
+    }
+    if (dateTo) {
+      const to = new Date(dateTo + 'T23:59:59+05:30');
+      if (new Date(l.created_at) > to) return false;
+    }
+    return true;
+  });
+  const waClicked    = dateFiltered.filter(l => l.wa_clicked === true).length;
+  const waNotClicked = dateFiltered.filter(l => !l.wa_clicked).length;
 
   const cols = [
     { key: 'full_name',         label: 'Name' },
@@ -101,11 +128,64 @@ export default function LeadsTable({ token }) {
         </button>
       </div>
 
+      {/* Date range filter */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        background: 'rgba(237,234,248,0.50)', borderRadius: 14,
+        border: '1px solid rgba(139,92,246,0.15)',
+        padding: '10px 14px', marginBottom: 14,
+      }}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.55)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', whiteSpace: 'nowrap' }}>Date Range</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+            style={{
+              height: '2.1rem', padding: '0 10px', borderRadius: 10,
+              border: '1px solid rgba(139,92,246,0.25)',
+              background: '#fff', fontFamily: 'Outfit, sans-serif',
+              fontSize: '0.82rem', color: '#3B0764', outline: 'none', cursor: 'pointer',
+            }}
+          />
+          <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: 'rgba(91,33,182,0.45)', fontWeight: 600 }}>to</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+            style={{
+              height: '2.1rem', padding: '0 10px', borderRadius: 10,
+              border: '1px solid rgba(139,92,246,0.25)',
+              background: '#fff', fontFamily: 'Outfit, sans-serif',
+              fontSize: '0.82rem', color: '#3B0764', outline: 'none', cursor: 'pointer',
+            }}
+          />
+        </div>
+        {(dateFrom || dateTo) && (
+          <button
+            onClick={() => { setDateFrom(''); setDateTo(''); }}
+            style={{
+              height: '2.1rem', padding: '0 12px', borderRadius: 10,
+              border: '1px solid rgba(239,68,68,0.30)',
+              background: 'rgba(254,242,242,0.80)',
+              fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem',
+              fontWeight: 600, color: '#DC2626', cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            ✕ Clear
+          </button>
+        )}
+      </div>
+
       {/* Stats summary — click to filter */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         {[
-          { label: 'Total Leads',      value: total,                                               filterId: 'all',        color: 'text-purple-700 bg-purple-50', ring: 'ring-purple-400' },
-          { label: 'High Sugar (250+)', value: leads.filter(l => l.sugar_level === '250+').length,  filterId: 'high_sugar', color: 'text-red-700 bg-red-50',       ring: 'ring-red-400' },
+          { label: 'Total Leads',      value: dateFiltered.length,                                               filterId: 'all',        color: 'text-purple-700 bg-purple-50', ring: 'ring-purple-400' },
+          { label: 'High Sugar (250+)', value: dateFiltered.filter(l => l.sugar_level === '250+').length,  filterId: 'high_sugar', color: 'text-red-700 bg-red-50',       ring: 'ring-red-400' },
           { label: 'WA Clicked',        value: waClicked,                                           filterId: 'wa_clicked', color: 'text-green-700 bg-green-50',    ring: 'ring-green-400' },
           { label: 'WA Not Clicked',    value: waNotClicked,                                        filterId: 'wa_not',     color: 'text-gray-600 bg-gray-50',      ring: 'ring-gray-400' },
         ].map((s, i) => {
