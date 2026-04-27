@@ -127,7 +127,7 @@ export function FunnelProvider({ children }) {
     saveState(state);
   }, [state]);
 
-  // On mount: refresh UTM + webinar config
+  // On mount: fetch config once, then listen for live updates via SSE
   useEffect(() => {
     dispatch({ type: 'SET_UTM', payload: parseUTMParams() });
 
@@ -138,6 +138,16 @@ export function FunnelProvider({ children }) {
         dispatch({ type: 'SET_WEBINAR_CONFIG', payload: data });
       })
       .catch(err => dispatch({ type: 'SET_WEBINAR_CONFIG_ERROR', payload: err.message }));
+
+    const es = new EventSource('/api/webinar-config/events');
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        saveConfig(data);
+        dispatch({ type: 'SET_WEBINAR_CONFIG', payload: data });
+      } catch {}
+    };
+    return () => es.close();
   }, []);
 
   return (

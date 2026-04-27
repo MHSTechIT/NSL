@@ -6,6 +6,7 @@ const pool     = require('../db');
 const { adminAuth }                = require('../middleware/adminAuth');
 const { getPassword, writeConfig } = require('../utils/adminConfig');
 const cache = require('../utils/webinarConfigCache');
+const { broadcast } = require('../utils/sseClients');
 
 router.use(adminAuth);
 
@@ -60,6 +61,17 @@ router.put('/webinar-config', configValidators, async (req, res) => {
       values
     );
     cache.invalidate();
+
+    // Fetch fresh config and push to all connected clients immediately
+    const { rows } = await pool.query(
+      'SELECT next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch FROM webinar_config WHERE id = 1'
+    );
+    if (rows.length > 0) {
+      const fresh = { ...rows[0] };
+      cache.set(fresh);
+      broadcast(fresh);
+    }
+
     res.json({ success: true, updated_at: updates.updated_at });
   } catch (err) {
     console.error('Update config error:', err.message);
