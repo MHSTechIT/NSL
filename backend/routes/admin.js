@@ -2,8 +2,8 @@ const express  = require('express');
 const { body, validationResult } = require('express-validator');
 const crypto   = require('crypto');
 const router   = express.Router();
-const supabase = require('../supabase');
-const { adminAuth }              = require('../middleware/adminAuth');
+const pool     = require('../db');
+const { adminAuth }                = require('../middleware/adminAuth');
 const { getPassword, writeConfig } = require('../utils/adminConfig');
 const cache = require('../utils/webinarConfigCache');
 
@@ -11,13 +11,15 @@ router.use(adminAuth);
 
 /* ── GET /api/admin/leads ── */
 router.get('/leads', async (req, res) => {
-  const { data, error, count } = await supabase
-    .from('leads')
-    .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false });
-
-  if (error) return res.status(500).json({ error: 'Failed to fetch leads' });
-  res.json({ leads: data, total: count });
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM leads ORDER BY created_at DESC'
+    );
+    res.json({ leads: rows, total: rows.length });
+  } catch (err) {
+    console.error('Fetch leads error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch leads' });
+  }
 });
 
 /* ── PUT /api/admin/webinar-config ── */
@@ -47,20 +49,25 @@ router.put('/webinar-config', configValidators, async (req, res) => {
 
   updates.updated_at = new Date().toISOString();
 
-  const { error } = await supabase
-    .from('webinar_config')
-    .update(updates)
-    .eq('id', 1);
+  // Build dynamic SET clause: SET col1=$1, col2=$2 ...
+  const keys = Object.keys(updates);
+  const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+  const values = keys.map(k => updates[k]);
 
-  if (error) return res.status(500).json({ error: 'Failed to update config' });
-  cache.invalidate();
-  res.json({ success: true, updated_at: updates.updated_at });
+  try {
+    await pool.query(
+      `UPDATE webinar_config SET ${setClause} WHERE id = 1`,
+      values
+    );
+    cache.invalidate();
+    res.json({ success: true, updated_at: updates.updated_at });
+  } catch (err) {
+    console.error('Update config error:', err.message);
+    res.status(500).json({ error: 'Failed to update config' });
+  }
 });
 
-/* ── PATCH /api/admin/change-password ──
-   Verifies current password, writes new password to local file.
-   No database involved — fully autonomous.
-── */
+/* ── PATCH /api/admin/change-password ── */
 router.patch('/change-password',
   body('current_password').notEmpty(),
   body('new_password').isLength({ min: 6 }),
@@ -73,7 +80,6 @@ router.patch('/change-password',
     const { current_password, new_password } = req.body;
     const expected = getPassword();
 
-    /* Constant-time compare of supplied current password */
     const a = Buffer.alloc(Math.max(current_password.length, expected.length));
     const b = Buffer.alloc(Math.max(current_password.length, expected.length));
     Buffer.from(current_password).copy(a);

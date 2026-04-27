@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const router = express.Router();
-const supabase = require('../supabase');
+const pool = require('../db');
 
 function computeLeadScore(sugarLevel, duration) {
   if (duration === 'pre') return 2;
@@ -12,8 +12,7 @@ function computeLeadScore(sugarLevel, duration) {
 
 function getISTDayOfWeek() {
   const now = new Date();
-  const istString = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' });
-  return istString; // 'Mon', 'Tue', 'Wed', etc.
+  return now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' });
 }
 
 const validators = [
@@ -35,14 +34,16 @@ router.post('/leads', validators, async (req, res) => {
     });
   }
 
-  const { data: configData, error: configError } = await supabase
-    .from('webinar_config')
-    .select('kill_switch, tuesday_whatsapp_link, friday_whatsapp_link')
-    .eq('id', 1)
-    .maybeSingle();
-
-  const config = configData || { kill_switch: false, tuesday_whatsapp_link: '', friday_whatsapp_link: '' };
-  if (configError) console.warn('Config fetch warning:', configError.message);
+  // Fetch config
+  let config = { kill_switch: false, tuesday_whatsapp_link: '', friday_whatsapp_link: '' };
+  try {
+    const { rows } = await pool.query(
+      'SELECT kill_switch, tuesday_whatsapp_link, friday_whatsapp_link FROM webinar_config WHERE id = 1'
+    );
+    if (rows.length > 0) config = rows[0];
+  } catch (err) {
+    console.warn('Config fetch warning:', err.message);
+  }
 
   if (config.kill_switch) {
     return res.status(409).json({ success: false, error: 'registrations_paused' });
@@ -57,49 +58,44 @@ router.post('/leads', validators, async (req, res) => {
     ? config.tuesday_whatsapp_link
     : config.friday_whatsapp_link;
 
-  const { data: lead, error: insertError } = await supabase
-    .from('leads')
-    .insert({
-      full_name,
-      whatsapp_number,
-      email,
-      sugar_level,
-      diabetes_duration,
-      language_pref,
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO leads
+        (full_name, whatsapp_number, email, sugar_level, diabetes_duration,
+         language_pref, lead_score, utm_source, utm_campaign, utm_content, fbclid)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id`,
+      [
+        full_name, whatsapp_number, email, sugar_level, diabetes_duration,
+        language_pref, lead_score,
+        utm_source || null, utm_campaign || null, utm_content || null, fbclid || null,
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      lead_id: rows[0].id,
       lead_score,
-      utm_source: utm_source || null,
-      utm_campaign: utm_campaign || null,
-      utm_content: utm_content || null,
-      fbclid: fbclid || null,
-    })
-    .select('id')
-    .single();
-
-  if (insertError) return res.status(500).json({ success: false, error: 'server_error' });
-
-  res.status(201).json({
-    success: true,
-    lead_id: lead.id,
-    lead_score,
-    whatsapp_link,
-  });
+      whatsapp_link,
+    });
+  } catch (err) {
+    console.error('Lead insert error:', err.message);
+    res.status(500).json({ success: false, error: 'server_error' });
+  }
 });
 
-/* PATCH /api/leads/:id/wa-click — mark that user clicked the WhatsApp button */
+/* PATCH /api/leads/:id/wa-click */
 router.patch('/leads/:id/wa-click', async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ success: false });
 
-  const { error } = await supabase
-    .from('leads')
-    .update({ wa_clicked: true })
-    .eq('id', id);
-
-  if (error) {
-    console.error('wa-click update error:', error.message);
-    return res.status(500).json({ success: false });
+  try {
+    await pool.query('UPDATE leads SET wa_clicked = true WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('wa-click update error:', err.message);
+    res.status(500).json({ success: false });
   }
-  res.json({ success: true });
 });
 
 module.exports = router;

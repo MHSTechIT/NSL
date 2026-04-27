@@ -1,10 +1,9 @@
 -- ============================================================
--- MHS Diabetes Webinar Funnel — Supabase Setup
--- Run this ONCE in your Supabase SQL Editor
--- Dashboard → SQL Editor → New Query → Paste → Run
+-- MHS Diabetes Webinar Funnel — PostgreSQL Schema
+-- Run this ONCE in pgAdmin Query Tool on nsl_database
 -- ============================================================
 
--- 1. Create webinar_config table (single-row config)
+-- 1. webinar_config table (single-row config)
 CREATE TABLE IF NOT EXISTS webinar_config (
   id                    INTEGER PRIMARY KEY DEFAULT 1,
   next_webinar_at       TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '4 days',
@@ -16,7 +15,7 @@ CREATE TABLE IF NOT EXISTS webinar_config (
   CONSTRAINT single_row CHECK (id = 1)
 );
 
--- 2. Create leads table
+-- 2. leads table
 CREATE TABLE IF NOT EXISTS leads (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name         TEXT NOT NULL,
@@ -26,6 +25,7 @@ CREATE TABLE IF NOT EXISTS leads (
   diabetes_duration TEXT NOT NULL CHECK (diabetes_duration IN ('new','mid','long','pre')),
   language_pref     TEXT NOT NULL CHECK (language_pref IN ('tamil','english')),
   lead_score        INTEGER NOT NULL CHECK (lead_score BETWEEN 1 AND 5),
+  wa_clicked        BOOLEAN NOT NULL DEFAULT FALSE,
   utm_source        TEXT,
   utm_campaign      TEXT,
   utm_content       TEXT,
@@ -36,15 +36,7 @@ CREATE TABLE IF NOT EXISTS leads (
 -- 3. Index for fast admin queries
 CREATE INDEX IF NOT EXISTS leads_created_at_idx ON leads (created_at DESC);
 
--- 4. DISABLE Row Level Security (access is controlled by the Express API layer)
-ALTER TABLE leads DISABLE ROW LEVEL SECURITY;
-ALTER TABLE webinar_config DISABLE ROW LEVEL SECURITY;
-
--- Drop any existing restrictive policies
-DROP POLICY IF EXISTS "service_only_leads"  ON leads;
-DROP POLICY IF EXISTS "service_only_config" ON webinar_config;
-
--- 5. Seed the initial config row (sets next webinar to 4 days from now)
+-- 4. Seed the initial config row
 INSERT INTO webinar_config (id, next_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link)
 VALUES (1, NOW() + INTERVAL '4 days', '', '')
 ON CONFLICT (id) DO NOTHING;
