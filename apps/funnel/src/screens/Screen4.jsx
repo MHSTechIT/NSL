@@ -88,7 +88,6 @@ export default function Screen4() {
 
   useEffect(() => {
     if (!state.sugarLevel) navigate('/', { replace: true });
-    else pixelPageView(); // qualified lead reached register form
   }, []);
 
   useEffect(() => {
