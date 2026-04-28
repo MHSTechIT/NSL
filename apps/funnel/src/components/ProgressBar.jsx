@@ -1,4 +1,4 @@
-import {  } from 'framer-motion';
+import { m } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 

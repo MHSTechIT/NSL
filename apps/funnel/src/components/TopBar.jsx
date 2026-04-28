@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import {  } from 'framer-motion';
+import { m } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import LanguageToggle from './LanguageToggle';
 import { pixelBackNavigation } from '../utils/pixel';

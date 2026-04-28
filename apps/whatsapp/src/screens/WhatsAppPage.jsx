@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import {  } from 'framer-motion';
+import { m } from 'framer-motion';
 
 /* ── Link expiry countdown ── */
 function LinkExpiryTimer() {
