@@ -1,4 +1,4 @@
-import { AnimatePresence,  } from 'framer-motion';
+import { AnimatePresence, m } from 'framer-motion';
 
 /* ─── Single morphing digit ─── */
 function MorphDigit({ value, size = 'lg', urgent = false }) {
