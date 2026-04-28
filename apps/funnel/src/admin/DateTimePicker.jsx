@@ -37,12 +37,20 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
   function openPicker() {
     if (triggerRef.current) {
       const r = triggerRef.current.getBoundingClientRect();
-      const dropH = 330;
       const spaceBelow = window.innerHeight - r.bottom - 8;
-      let top = spaceBelow >= dropH ? r.bottom + 8 : r.top - dropH - 8;
-      // clamp so it never goes off-screen top or bottom
-      top = Math.max(8, Math.min(top, window.innerHeight - dropH - 8));
-      setDropPos({ top, left: r.left, width: r.width });
+      const spaceAbove = r.top - 8;
+      const maxH = Math.min(360, window.innerHeight - 16);
+
+      let top;
+      if (spaceBelow >= maxH) {
+        top = r.bottom + 4;
+      } else if (spaceAbove >= maxH) {
+        top = r.top - maxH - 4;
+      } else {
+        // not enough space either side — anchor to top with full available height
+        top = 8;
+      }
+      setDropPos({ top, left: r.left, width: r.width, maxH });
     }
     setOpen(o => !o);
   }
@@ -126,6 +134,8 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
     top: dropPos.top,
     left: dropPos.left,
     width: dropPos.width,
+    maxHeight: dropPos.maxH || 360,
+    overflowY: 'auto',
     background: '#fff',
     border: '1px solid rgba(139,92,246,0.18)',
     borderRadius: 14,
