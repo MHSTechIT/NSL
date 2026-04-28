@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import {  } from 'framer-motion';
 
 function GearIcon({ size }) {
   return (
@@ -23,7 +23,7 @@ export default function GearBackground() {
   return (
     <>
       {gears.map((g, i) => (
-        <motion.div
+        <m.div
           key={i}
           animate={{ rotate: g.rotate * 360 }}
           transition={{ duration: g.duration, repeat: Infinity, ease: 'linear' }}
@@ -40,7 +40,7 @@ export default function GearBackground() {
           }}
         >
           <GearIcon size={g.size} />
-        </motion.div>
+        </m.div>
       ))}
     </>
   );

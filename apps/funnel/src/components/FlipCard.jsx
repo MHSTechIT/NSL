@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence,  } from 'framer-motion';
 
 /* ─── Single morphing digit ─── */
 function MorphDigit({ value, size = 'lg', urgent = false }) {
@@ -26,7 +26,7 @@ function MorphDigit({ value, size = 'lg', urgent = false }) {
       transition: 'all 0.5s',
     }}>
       <AnimatePresence mode="popLayout">
-        <motion.span
+        <m.span
           key={value}
           initial={{ opacity: 0, filter: 'blur(10px)', scale: 1.45, y: -6 }}
           animate={{ opacity: 1, filter: 'blur(0px)',  scale: 1,    y:  0 }}
@@ -45,7 +45,7 @@ function MorphDigit({ value, size = 'lg', urgent = false }) {
           }}
         >
           {value}
-        </motion.span>
+        </m.span>
       </AnimatePresence>
     </div>
   );

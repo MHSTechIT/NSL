@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import {  } from 'framer-motion';
 
 const slideIn = {
   initial: { opacity: 0, y: 12 },
@@ -10,7 +10,7 @@ const YOUTUBE_URL = 'https://www.youtube.com/@DoctorFarmer';
 
 export default function Disqualified() {
   return (
-    <motion.div
+    <m.div
       variants={slideIn} initial="initial" animate="animate" exit="exit"
       style={{
         minHeight: '100vh',
@@ -20,7 +20,7 @@ export default function Disqualified() {
       }}
     >
       {/* Main card */}
-      <motion.div
+      <m.div
         initial={{ opacity: 0, y: 20, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: 'spring', stiffness: 280, damping: 24, delay: 0.1 }}
@@ -37,7 +37,7 @@ export default function Disqualified() {
         }}
       >
         {/* YouTube play icon */}
-        <motion.div
+        <m.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ type: 'spring', stiffness: 320, damping: 20, delay: 0.2 }}
@@ -53,7 +53,7 @@ export default function Disqualified() {
           <svg width="38" height="38" viewBox="0 0 24 24" fill="#ffffff">
             <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
           </svg>
-        </motion.div>
+        </m.div>
 
         {/* Heading */}
         <h2 style={{
@@ -83,7 +83,7 @@ export default function Disqualified() {
 
         {/* Tip pills */}
         {['🥗 Diet & Nutrition Tips', '🧘 Lifestyle Reversal', '💊 Reduce Medication Naturally'].map((tip, i) => (
-          <motion.div
+          <m.div
             key={i}
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
@@ -95,11 +95,11 @@ export default function Disqualified() {
             }}
           >
             <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#4c1d95', fontWeight: 500 }}>{tip}</span>
-          </motion.div>
+          </m.div>
         ))}
 
         {/* YouTube button */}
-        <motion.a
+        <m.a
           href={YOUTUBE_URL}
           target="_blank"
           rel="noopener noreferrer"
@@ -125,7 +125,7 @@ export default function Disqualified() {
             <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
           </svg>
           Follow on YouTube
-        </motion.a>
+        </m.a>
 
         {/* Channel name */}
         <p style={{
@@ -134,7 +134,7 @@ export default function Disqualified() {
         }}>
           @DoctorFarmer
         </p>
-      </motion.div>
-    </motion.div>
+      </m.div>
+    </m.div>
   );
 }

@@ -99,3 +99,5 @@ router.patch('/leads/:id/wa-click', async (req, res) => {
 });
 
 module.exports = router;
+module.exports._computeLeadScore = computeLeadScore;
+module.exports._getISTDayOfWeek  = getISTDayOfWeek;

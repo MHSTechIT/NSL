@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import {  } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import TopBar from '../components/TopBar';
@@ -37,7 +37,7 @@ export default function Screen2() {
   }
 
   return (
-    <motion.div
+    <m.div
       variants={slideIn} initial="initial" animate="animate" exit="exit"
       className="flex flex-col min-h-screen"
     >
@@ -52,7 +52,7 @@ export default function Screen2() {
       <div style={{ position: 'relative', padding: '0 16px 32px' }}>
 
         {/* Zoom image — center, sits behind card */}
-        <motion.img
+        <m.img
           src="/zoom.webp"
           alt="Zoom"
           initial={{ opacity: 0, scale: 0.85, y: 20 }}
@@ -73,7 +73,7 @@ export default function Screen2() {
         />
 
         {/* Card — sits in front of image */}
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ type: 'spring', stiffness: 300, damping: 30, delay: 0.08 }}
@@ -115,7 +115,7 @@ export default function Screen2() {
               { label: t.screen2.yes[lang], action: handleYes },
               { label: t.screen2.no[lang],  action: handleNo  },
             ].map(({ label, action }, i) => (
-              <motion.button
+              <m.button
                 key={i}
                 onClick={action}
                 initial={{ opacity: 0, y: 12 }}
@@ -137,7 +137,7 @@ export default function Screen2() {
                 }}
               >
                 {label}
-              </motion.button>
+              </m.button>
             ))}
           </div>
 
@@ -148,8 +148,8 @@ export default function Screen2() {
           }}>
             🔒 {lang === 'tamil' ? '100% தனிப்பட்டது & பாதுகாப்பானது' : '100% Private & Secure'}
           </p>
-        </motion.div>
+        </m.div>
       </div>
-    </motion.div>
+    </m.div>
   );
 }

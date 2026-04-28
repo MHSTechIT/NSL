@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { m, AnimatePresence } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import CountdownTimer, { stopTick } from '../components/CountdownTimer';
@@ -57,7 +57,7 @@ function SocialProofCard({ visibleMsgs, seatInfo }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ position: 'relative', flexShrink: 0 }}>
               <div style={{ width: 9, height: 9, borderRadius: '50%', background: s.dot }} />
-              <motion.div
+              <m.div
                 animate={{ scale: [1, 2.2, 1], opacity: [0.7, 0, 0.7] }}
                 transition={{ repeat: Infinity, duration: 1.5, ease: 'easeOut' }}
                 style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: s.dot }}
@@ -96,7 +96,7 @@ function SocialProofCard({ visibleMsgs, seatInfo }) {
 
       {/* ── Progress bar ── */}
       <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.10)', marginBottom: 12, overflow: 'hidden' }}>
-        <motion.div
+        <m.div
           initial={{ width: 0 }}
           animate={{ width: `${progress * 100}%` }}
           transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
@@ -117,7 +117,7 @@ function SocialProofCard({ visibleMsgs, seatInfo }) {
             const city = rest.split(' joined')[0];
             const time = msg.split('joined ')[1] || '';
             return (
-              <motion.div
+              <m.div
                 key={msg}
                 layout
                 initial={{ opacity: 0, y: 32, scale: 0.94 }}
@@ -143,7 +143,7 @@ function SocialProofCard({ visibleMsgs, seatInfo }) {
                 <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.72rem', color: '#7c5cbf', flexShrink: 0 }}>
                   {time}
                 </span>
-              </motion.div>
+              </m.div>
             );
           })}
         </AnimatePresence>
@@ -302,12 +302,12 @@ export default function Screen1A() {
   /* ── Shared: CTA button (used in both layouts) ── */
   const ctaButton = (
     <div style={{ position: 'relative' }}>
-      <motion.div
+      <m.div
         animate={{ scale: [1, 1.08, 1], opacity: [0.55, 0.15, 0.55] }}
         transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
         style={{ position: 'absolute', inset: 0, borderRadius: 50, background: 'rgba(139,92,246,0.55)', filter: 'blur(12px)', zIndex: 0 }}
       />
-      <motion.button
+      <m.button
         onClick={() => { stopTick(); setExpanded(true); }}
         animate={{
           scale: [1, 1.04, 1],
@@ -326,7 +326,7 @@ export default function Screen1A() {
         }}
       >
         {t.screen1A.cta.english}
-      </motion.button>
+      </m.button>
     </div>
   );
 
@@ -347,7 +347,7 @@ export default function Screen1A() {
     }}>
       <AnimatePresence mode="wait">
         {popupStep === 'sugar' && (
-          <motion.div
+          <m.div
             key="sugar-step"
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
@@ -362,7 +362,7 @@ export default function Screen1A() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
               {sugarOptions.map((opt, i) => (
-                <motion.button
+                <m.button
                   key={opt.id}
                   onClick={() => handleSugarSelect(opt)}
                   initial={{ opacity: 0, y: 12 }}
@@ -372,13 +372,13 @@ export default function Screen1A() {
                   style={pillStyle}
                 >
                   {opt.label}
-                </motion.button>
+                </m.button>
               ))}
             </div>
-          </motion.div>
+          </m.div>
         )}
         {popupStep === 'zoom' && (
-          <motion.div
+          <m.div
             key="zoom-step"
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
@@ -393,14 +393,14 @@ export default function Screen1A() {
               Do you understand Tamil?
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-              <motion.button onClick={handleZoomYes} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} whileTap={{ scale: 0.97 }} style={pillStyle}>
+              <m.button onClick={handleZoomYes} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} whileTap={{ scale: 0.97 }} style={pillStyle}>
                 எனக்கு தமிழ் தெரியும்
-              </motion.button>
-              <motion.button onClick={handleZoomNo} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} whileTap={{ scale: 0.97 }} style={pillStyle}>
+              </m.button>
+              <m.button onClick={handleZoomNo} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} whileTap={{ scale: 0.97 }} style={pillStyle}>
                 No, I don't understand Tamil
-              </motion.button>
+              </m.button>
             </div>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>
@@ -410,7 +410,7 @@ export default function Screen1A() {
   const eligibleOverlay = (
     <AnimatePresence>
       {showEligible && (
-        <motion.div
+        <m.div
           key="eligible-overlay"
           initial={{ opacity: 0, scale: 0.88, y: 24 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -426,27 +426,27 @@ export default function Screen1A() {
             boxShadow: '0 4px 32px rgba(91,33,182,0.12), inset 0 1px 0 rgba(255,255,255,0.90)',
             border: '1px solid rgba(139,92,246,0.18)', maxWidth: 300, width: '100%',
           }}>
-            <motion.div
+            <m.div
               initial={{ scale: 0 }} animate={{ scale: 1 }}
               transition={{ type: 'spring', stiffness: 350, damping: 20, delay: 0.1 }}
               style={{ width: 68, height: 68, borderRadius: '50%', background: 'linear-gradient(135deg, #22C55E, #16A34A)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', boxShadow: '0 0 0 10px rgba(34,197,94,0.12), 0 8px 32px rgba(34,197,94,0.50)' }}
             >
               <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
-                <motion.path d="M5 13l4 4L19 7" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                <m.path d="M5 13l4 4L19 7" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
                   initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
                   transition={{ delay: 0.3, duration: 0.4, ease: [0.16, 1, 0.3, 1] }} />
               </svg>
-            </motion.div>
-            <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.35 }}
+            </m.div>
+            <m.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.35 }}
               style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: '1.2rem', color: '#2d0a6e', lineHeight: 1.25, marginBottom: 8 }}>
               You are Eligible!
-            </motion.p>
-            <motion.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.38, duration: 0.3 }}
+            </m.p>
+            <m.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.38, duration: 0.3 }}
               style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: '#15803d', fontWeight: 600, textShadow: '0 1px 4px rgba(0,0,0,0.15)' }}>
               Your spot for the FREE Webinar is waiting
-            </motion.p>
+            </m.p>
           </div>
-        </motion.div>
+        </m.div>
       )}
     </AnimatePresence>
   );
@@ -455,7 +455,7 @@ export default function Screen1A() {
   const blurBackdrop = (
     <AnimatePresence>
       {(expanded || showEligible) && (
-        <motion.div
+        <m.div
           key="blur-backdrop"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           transition={{ duration: 0.25 }}
@@ -487,7 +487,7 @@ export default function Screen1A() {
         }}>
 
           {/* ── LEFT: Hero — stretches to full right-column height ── */}
-          <motion.div {...cardAnim(1)} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <m.div {...cardAnim(1)} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             {/* Person image floats above the card */}
             <div style={{ marginBottom: -64, position: 'relative', zIndex: 0, pointerEvents: 'none', userSelect: 'none', width: '100%', display: 'flex', justifyContent: 'flex-start', paddingLeft: 36, flexShrink: 0 }}>
               <img src="/person.webp" alt="" style={{ width: '50%', maxWidth: 300, display: 'block' }} />
@@ -510,18 +510,18 @@ export default function Screen1A() {
                 {t.screen1A.subheadline.english}
               </p>
             </div>
-          </motion.div>
+          </m.div>
 
           {/* ── RIGHT: Countdown + Social Proof + CTA ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <motion.div {...cardAnim(2)}><CountdownTimer /></motion.div>
-            <motion.div {...cardAnim(3)}>
+            <m.div {...cardAnim(2)}><CountdownTimer /></m.div>
+            <m.div {...cardAnim(3)}>
               <SocialProofCard visibleMsgs={visibleMsgs} seatInfo={seatInfo} />
-            </motion.div>
-            <motion.div {...cardAnim(4)}>
+            </m.div>
+            <m.div {...cardAnim(4)}>
               {ctaButton}
               <TrustBar />
-            </motion.div>
+            </m.div>
           </div>
 
         </div>
@@ -532,7 +532,7 @@ export default function Screen1A() {
         <div className="flex-1 px-4 flex flex-col gap-4" style={{ overflowY: 'auto', paddingBottom: 100 }}>
 
           {/* Hero */}
-          <motion.div {...cardAnim(1)} style={{ position: 'relative' }}>
+          <m.div {...cardAnim(1)} style={{ position: 'relative' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: -50, position: 'relative', zIndex: 0, pointerEvents: 'none', userSelect: 'none' }}>
               <img src="/person.webp" alt="" style={{ width: '55%', maxWidth: 200, display: 'block' }} />
             </div>
@@ -544,13 +544,13 @@ export default function Screen1A() {
                 {t.screen1A.subheadline.english}
               </p>
             </div>
-          </motion.div>
+          </m.div>
 
-          <motion.div {...cardAnim(2)}><CountdownTimer /></motion.div>
+          <m.div {...cardAnim(2)}><CountdownTimer /></m.div>
 
-          <motion.div {...cardAnim(3)}>
+          <m.div {...cardAnim(3)}>
             <SocialProofCard visibleMsgs={visibleMsgs} seatInfo={seatInfo} />
-          </motion.div>
+          </m.div>
 
         </div>
       )}
@@ -564,7 +564,7 @@ export default function Screen1A() {
         {expanded && (
           isDesktop ? (
             /* Desktop: centered modal */
-            <motion.div
+            <m.div
               key="expanded-desktop"
               initial={{ opacity: 0, scale: 0.94 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -592,22 +592,22 @@ export default function Screen1A() {
                   }}
                 >✕</button>
                 {/* Timer above modal */}
-                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12, duration: 0.28 }} style={{ marginBottom: 12 }}>
+                <m.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12, duration: 0.28 }} style={{ marginBottom: 12 }}>
                   <CountdownTimer />
-                </motion.div>
+                </m.div>
 
                 {/* Floating image — top-right corner */}
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-40px', pointerEvents: 'none' }}>
                     <AnimatePresence mode="wait">
                       {popupStep === 'sugar' ? (
-                        <motion.img key="gmeter-d" src="/gmeter.webp" alt=""
+                        <m.img key="gmeter-d" src="/gmeter.webp" alt=""
                           initial={{ opacity: 0, y: 20, scale: 0.8 }} animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.7, y: -10, transition: { duration: 0.2 } }}
                           transition={{ duration: 0.3 }}
                           style={{ width: '46%', maxWidth: 200, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.35))' }} />
                       ) : (
-                        <motion.img key="zoom-d" src="/zoom.webp" alt=""
+                        <m.img key="zoom-d" src="/zoom.webp" alt=""
                           initial={{ opacity: 0, scale: 0.75, y: 15 }} animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.7, y: -10, transition: { duration: 0.2 } }}
                           transition={{ duration: 0.35 }}
@@ -618,10 +618,10 @@ export default function Screen1A() {
                   {popupCardContent}
                 </div>
               </div>
-            </motion.div>
+            </m.div>
           ) : (
             /* Mobile: bottom sheet */
-            <motion.div
+            <m.div
               key="expanded-mobile"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
@@ -633,19 +633,19 @@ export default function Screen1A() {
                 zIndex: 50, padding: '0 20px', paddingBottom: 0,
               }}
             >
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18, duration: 0.3 }} style={{ marginBottom: 10 }}>
+              <m.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18, duration: 0.3 }} style={{ marginBottom: 10 }}>
                 <CountdownTimer />
-              </motion.div>
+              </m.div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-40px', pointerEvents: 'none', position: 'relative', zIndex: 1 }}>
                 <AnimatePresence mode="wait">
                   {popupStep === 'sugar' ? (
-                    <motion.img key="gmeter" src="/gmeter.webp" alt=""
+                    <m.img key="gmeter" src="/gmeter.webp" alt=""
                       initial={{ opacity: 0, y: 30, scale: 0.8 }} animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.7, y: -10, transition: { duration: 0.25 } }}
                       transition={{ duration: 0.35, delay: 0.05 }}
                       style={{ width: '58%', maxWidth: 220, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.45))' }} />
                   ) : (
-                    <motion.img key="zoom" src="/zoom.webp" alt=""
+                    <m.img key="zoom" src="/zoom.webp" alt=""
                       initial={{ opacity: 0, scale: 0.75, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.7, y: -10, transition: { duration: 0.25 } }}
                       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
@@ -654,7 +654,7 @@ export default function Screen1A() {
                 </AnimatePresence>
               </div>
               {popupCardContent}
-            </motion.div>
+            </m.div>
           )
         )}
       </AnimatePresence>

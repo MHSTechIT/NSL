@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import {  } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import LanguageToggle from './LanguageToggle';
 import { pixelBackNavigation } from '../utils/pixel';
@@ -51,7 +51,7 @@ export default function TopBar({ showBack = false, backPath = '/', onBack, step 
 
       {/* Progress line */}
       <div style={{ flex: 1, height: 4, borderRadius: 99, background: 'rgba(91,33,182,0.12)', overflow: 'hidden' }}>
-        <motion.div
+        <m.div
           style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg,#5B21B6,#8B6FEA)' }}
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { m, AnimatePresence } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import { computeLeadScore } from '../utils/scoring';
@@ -74,7 +74,7 @@ function UrgencyTimer() {
 function SandClockIcon() {
   return (
     <div style={{ width: 100, height: 100, background: 'rgba(237,234,248,0.70)', borderRadius: 24, border: '1px solid rgba(255,255,255,0.90)', boxShadow: 'inset 0 2px 10px rgba(91,33,182,0.10)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <motion.div animate={{ rotateZ: [0, 0, 180, 180] }} transition={{ duration: 6, times: [0, 0.75, 0.85, 1], repeat: Infinity, ease: 'easeInOut' }}>
+      <m.div animate={{ rotateZ: [0, 0, 180, 180] }} transition={{ duration: 6, times: [0, 0.75, 0.85, 1], repeat: Infinity, ease: 'easeInOut' }}>
         <svg width="50" height="62" viewBox="0 0 54 66">
           <defs>
             <clipPath id="sc-top"><polygon points="6,6 48,6 48,12 30,32 24,32 6,12" /></clipPath>
@@ -83,13 +83,13 @@ function SandClockIcon() {
           <polygon points="6,6 48,6 48,12 30,32 30,34 48,54 48,60 6,60 6,54 24,34 24,32 6,12" fill="rgba(237,234,248,0.5)" stroke="rgba(91,33,182,0.55)" strokeWidth="2.2" strokeLinejoin="round" />
           <line x1="4" y1="6" x2="50" y2="6" stroke="rgba(91,33,182,0.65)" strokeWidth="3" strokeLinecap="round" />
           <line x1="4" y1="60" x2="50" y2="60" stroke="rgba(91,33,182,0.65)" strokeWidth="3" strokeLinecap="round" />
-          <motion.rect x="0" width="54" animate={{ y: [6, 34], height: [28, 0] }} transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 0.8, ease: 'linear' }} clipPath="url(#sc-top)" fill="rgba(91,33,182,0.28)" />
-          <motion.rect x="0" width="54" animate={{ y: [60, 34], height: [0, 26] }} transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 0.8, ease: 'linear' }} clipPath="url(#sc-bot)" fill="rgba(91,33,182,0.28)" />
+          <m.rect x="0" width="54" animate={{ y: [6, 34], height: [28, 0] }} transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 0.8, ease: 'linear' }} clipPath="url(#sc-top)" fill="rgba(91,33,182,0.28)" />
+          <m.rect x="0" width="54" animate={{ y: [60, 34], height: [0, 26] }} transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 0.8, ease: 'linear' }} clipPath="url(#sc-bot)" fill="rgba(91,33,182,0.28)" />
           {[0, 1, 2].map(i => (
-            <motion.circle key={i} cx="27" r="1.3" fill="rgba(91,33,182,0.55)" animate={{ cy: [32, 34], opacity: [0, 1, 0] }} transition={{ duration: 0.45, repeat: Infinity, delay: i * 0.15 }} />
+            <m.circle key={i} cx="27" r="1.3" fill="rgba(91,33,182,0.55)" animate={{ cy: [32, 34], opacity: [0, 1, 0] }} transition={{ duration: 0.45, repeat: Infinity, delay: i * 0.15 }} />
           ))}
         </svg>
-      </motion.div>
+      </m.div>
     </div>
   );
 }
@@ -97,9 +97,9 @@ function SandClockIcon() {
 /* ─────────────────────────────────────── Staggered field ── */
 function Field({ index, children }) {
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 + index * 0.065, duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
+    <m.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 + index * 0.065, duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
       {children}
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -232,7 +232,7 @@ export default function Screen3() {
   const isSolid = phase === 'form' || phase === 'success' || phase === 'webinar';
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="flex flex-col min-h-screen">
+    <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="flex flex-col min-h-screen">
       {/* Full-screen confetti — rendered outside the card so it's not clipped */}
       <Confetti
         active={phase === 'success'}
@@ -249,7 +249,7 @@ export default function Screen3() {
       {/* ── SUCCESS OVERLAY — fixed, appears after confetti ends ── */}
       <AnimatePresence>
         {showOverlay && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -263,7 +263,7 @@ export default function Screen3() {
               WebkitBackdropFilter: 'blur(5px)',
             }}
           >
-            <motion.div
+            <m.div
               className="success-card-glow"
               initial={{ opacity: 0, scale: 0.92, y: 16 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -280,7 +280,7 @@ export default function Screen3() {
               }}
             >
               {/* Check icon — pops in then draws the tick */}
-              <motion.div
+              <m.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{ delay: 0.12, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
@@ -293,7 +293,7 @@ export default function Screen3() {
                 }}
               >
                 <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
-                  <motion.path
+                  <m.path
                     d="M5 13l4 4L19 7"
                     stroke="#fff"
                     strokeWidth="2.5"
@@ -304,39 +304,39 @@ export default function Screen3() {
                     transition={{ delay: 0.46, duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
                   />
                 </svg>
-              </motion.div>
+              </m.div>
 
               {/* Title */}
-              <motion.p
+              <m.p
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.42, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
                 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.52rem', color: '#3B0764', lineHeight: 1.2, marginBottom: 10 }}
               >
                 {lang === 'tamil' ? `${firstName}, பதிவு வெற்றி!` : `${firstName}, Registration Successful!`}
-              </motion.p>
+              </m.p>
 
               {/* Supporting text */}
-              <motion.p
+              <m.p
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.58, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
                 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.88rem', color: 'rgba(91,33,182,0.60)', marginBottom: 18 }}
               >
                 {lang === 'tamil' ? 'உங்கள் இலவச இடம் உறுதிப்படுத்தப்பட்டது 🎉' : 'Your free seat has been confirmed 🎉'}
-              </motion.p>
+              </m.p>
 
               {/* Loading hint */}
-              <motion.p
+              <m.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.74, duration: 0.4 }}
                 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.74rem', color: 'rgba(91,33,182,0.38)' }}
               >
                 {lang === 'tamil' ? 'வெபினார் விவரங்கள் வருகின்றன...' : 'Webinar details loading...'}
-              </motion.p>
-            </motion.div>
-          </motion.div>
+              </m.p>
+            </m.div>
+          </m.div>
         )}
       </AnimatePresence>
 
@@ -353,7 +353,7 @@ export default function Screen3() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 16px 28px' }}>
 
         {/* ── single card that flips in-place ── */}
-        <motion.div
+        <m.div
           animate={{ rotateY: cardRotY, minHeight: cardHeight, y: slideDown ? '110vh' : 0 }}
           transition={{
             rotateY: { duration: HALF / 1000, ease: 'easeInOut' },
@@ -394,12 +394,12 @@ export default function Screen3() {
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {durationOptions.map((key, i) => (
-                  <motion.button key={key} onClick={() => handleSelect(key)}
+                  <m.button key={key} onClick={() => handleSelect(key)}
                     initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.06 + i * 0.07, duration: 0.28 }}
                     whileTap={{ scale: 0.97 }} style={pillStyle}>
                     {lang === 'tamil' ? t.screen3[`opt${i + 1}Title`].tamil : t.screen3[`opt${i + 1}Title`].english}
-                  </motion.button>
+                  </m.button>
                 ))}
               </div>
               <p style={{ textAlign: 'center', marginTop: 16, fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', color: 'rgba(91,33,182,0.38)' }}>
@@ -449,14 +449,14 @@ export default function Screen3() {
               </Field>
               {serverError && <p style={{ color: '#EF4444', fontSize: '0.78rem', fontFamily: 'Outfit,sans-serif', textAlign: 'center' }}>{serverError}</p>}
               <Field index={5}>
-                <motion.button type="submit" disabled={submitting}
+                <m.button type="submit" disabled={submitting}
                   animate={submitting ? {} : { scale: [1, 1.02, 1] }}
                   transition={{ repeat: Infinity, repeatDelay: 3, duration: 0.4 }}
                   style={{ width: '100%', height: '3.4rem', background: submitting ? 'rgba(91,33,182,0.55)' : '#5B21B6', border: 'none', borderRadius: 50, color: '#fff', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '1.05rem', cursor: submitting ? 'not-allowed' : 'pointer', boxShadow: '0 4px 22px rgba(91,33,182,0.38)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                   {submitting
                     ? <><svg style={{ animation: 'spin 1s linear infinite', width: 18, height: 18 }} viewBox="0 0 24 24" fill="none"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>{t.screen4.submitting[lang]}</>
                     : t.screen4.cta[lang]}
-                </motion.button>
+                </m.button>
               </Field>
               <Field index={6}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -476,7 +476,7 @@ export default function Screen3() {
 
           {/* ── WEBINAR ── */}
           {phase === 'webinar' && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.28 }}
+            <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.28 }}
               style={{ padding: '24px 18px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(91,33,182,0.07)', borderRadius: 50, padding: '4px 14px', marginBottom: 8 }}>
@@ -502,20 +502,20 @@ export default function Screen3() {
                 <UrgencyTimer />
               </div>
               <div style={{ height: 1, background: 'rgba(91,33,182,0.08)' }} />
-              <motion.button onClick={handleJoinWA} whileTap={{ scale: 0.97 }}
+              <m.button onClick={handleJoinWA} whileTap={{ scale: 0.97 }}
                 animate={{ scale: [1, 1.02, 1] }} transition={{ repeat: Infinity, repeatDelay: 2.5, duration: 0.4 }}
                 style={{ width: '100%', height: '3.4rem', background: '#25D366', border: 'none', borderRadius: 50, color: '#fff', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '1rem', cursor: 'pointer', boxShadow: '0 4px 20px rgba(37,211,102,0.40)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9 }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" /></svg>
                 {lang === 'tamil' ? 'WhatsApp குழுவில் சேரவும்' : 'Join WhatsApp Group'}
-              </motion.button>
+              </m.button>
               <p style={{ textAlign: 'center', fontFamily: 'Outfit,sans-serif', fontSize: '0.7rem', color: 'rgba(91,33,182,0.32)' }}>
                 🔒 {lang === 'tamil' ? 'இணைப்பு உங்களுக்காக மட்டுமே' : 'This link is exclusively for you'}
               </p>
-            </motion.div>
+            </m.div>
           )}
 
-        </motion.div>
+        </m.div>
       </div>
-    </motion.div>
+    </m.div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import {  } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 
@@ -33,7 +33,7 @@ function UrgencyTimer() {
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       {/* Glow layer — blurred red div that pulses, never touches text */}
-      <motion.div
+      <m.div
         animate={{ opacity: [0.4, 1, 0.4], scale: [1, 1.06, 1] }}
         transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
         style={{
@@ -54,7 +54,7 @@ function UrgencyTimer() {
         borderRadius: 12, padding: '8px 20px',
         width: '100%',
       }}>
-        <motion.div
+        <m.div
           animate={{ opacity: [1, 0.2, 1], scale: [1, 1.4, 1] }}
           transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
           style={{ width: 7, height: 7, borderRadius: '50%', background: '#ffffff', flexShrink: 0 }}
@@ -197,14 +197,14 @@ export default function Screen4() {
         <UrgencyTimer />
       </div>
 
-    <motion.div variants={slideIn} initial="initial" animate="animate" exit="exit"
+    <m.div variants={slideIn} initial="initial" animate="animate" exit="exit"
       style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
       {/* ── Scrollable body ── */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '80px 16px 120px' }}>
 
       {/* ── Headline ── */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+      <m.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
         <h1 style={{
           fontFamily: '"Montserrat", Outfit, sans-serif', fontWeight: 900,
           fontSize: 'clamp(1.5rem, 7vw, 2rem)', lineHeight: 1.15,
@@ -219,10 +219,10 @@ export default function Screen4() {
         <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#7c5cbf', marginBottom: 14 }}>
           Fill in your details below to confirm your spot
         </p>
-      </motion.div>
+      </m.div>
 
       {/* ── Webinar details pills ── */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+      <m.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
         style={{
           display: 'flex', flexWrap: 'nowrap', gap: 6, marginBottom: 14,
           background: 'rgba(255,255,255,0.55)', borderRadius: 12, padding: '10px 12px',
@@ -264,10 +264,10 @@ export default function Screen4() {
             <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', fontWeight: 600, color: '#2d0a6e', whiteSpace: 'nowrap' }}>{item.text}</span>
           </div>
         ))}
-      </motion.div>
+      </m.div>
 
       {/* ── Based on your answers ── */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+      <m.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
         style={{
           background: '#FFFDE7', borderRadius: 12, padding: '12px 14px', marginBottom: 16,
           border: '1px solid #F0D080',
@@ -305,25 +305,25 @@ export default function Screen4() {
             This session is built for <em style={{ fontStyle: 'italic', color: '#5b21b6' }}>YOU.</em>
           </span>
         </div>
-      </motion.div>
+      </m.div>
 
       {/* ── Social proof ── */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 18 }}>
-        <motion.div
+        <m.div
           animate={{ opacity: [1, 0.3, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}
           style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}
         />
         <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.75rem', color: '#5b3fa0', fontWeight: 500 }}>
           <span style={{ color: '#2d0a6e', fontWeight: 700 }}>347 people</span> have registered in the last 24 hours
         </span>
-      </motion.div>
+      </m.div>
 
       {/* ── Form ── */}
       <form id="reg-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
         {/* Full Name */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }}>
+        <m.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }}>
           <label style={labelStyle}>Full Name</label>
           <input
             type="text"
@@ -340,10 +340,10 @@ export default function Screen4() {
               ⚠ {t.screen4.errorName[lang]}
             </p>
           )}
-        </motion.div>
+        </m.div>
 
         {/* WhatsApp */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.36 }}>
+        <m.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.36 }}>
           <label style={labelStyle}>WhatsApp Number</label>
           <div style={{
             display: 'flex', alignItems: 'center', borderRadius: 14, height: '3.2rem', overflow: 'hidden',
@@ -381,10 +381,10 @@ export default function Screen4() {
               ⚠ {t.screen4.errorPhone[lang]}
             </p>
           )}
-        </motion.div>
+        </m.div>
 
         {/* Email */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.40 }}>
+        <m.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.40 }}>
           <label style={labelStyle}>Email Address</label>
           <input
             type="email"
@@ -403,7 +403,7 @@ export default function Screen4() {
               ⚠ {t.screen4.errorEmail[lang]}
             </p>
           )}
-        </motion.div>
+        </m.div>
 
         {serverError && (
           <div style={{
@@ -417,7 +417,7 @@ export default function Screen4() {
 
       </form>
       </div>{/* end scrollable body */}
-    </motion.div>
+    </m.div>
 
       {/* ── Fixed bottom: submit button — outside animated wrapper ── */}
       <div style={{
@@ -428,12 +428,12 @@ export default function Screen4() {
         zIndex: 50,
       }}>
         <div style={{ position: 'relative' }}>
-          <motion.div
+          <m.div
             animate={{ scale: [1, 1.12, 1], opacity: [0.7, 0.2, 0.7] }}
             transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
             style={{ position: 'absolute', inset: -10, borderRadius: 50, background: 'rgba(139,92,246,0.70)', filter: 'blur(18px)', zIndex: 0 }}
           />
-          <motion.button
+          <m.button
             type="submit"
             form="reg-form"
             disabled={submitting}
@@ -463,7 +463,7 @@ export default function Screen4() {
                 Reserving your seat...
               </>
             ) : 'COMPLETE REGISTRATION →'}
-          </motion.button>
+          </m.button>
         </div>
         <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.68rem', color: '#7c5cbf', textAlign: 'center', marginTop: 6 }}>
           By joining, you agree to our{' '}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import {  } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import { formatISTDateTime } from '../utils/time';
@@ -41,11 +41,11 @@ export default function Screen5() {
   const seatSec2 = String(seatSecs % 60).padStart(2, '0');
 
   return (
-    <motion.div variants={slideIn} initial="initial" animate="animate" exit="exit" className="flex flex-col min-h-screen">
+    <m.div variants={slideIn} initial="initial" animate="animate" exit="exit" className="flex flex-col min-h-screen">
       <div className="flex-1 px-4 pb-8 flex flex-col items-center gap-5 text-center">
 
         {/* Success icon */}
-        <motion.div
+        <m.div
           initial={{ scale: 0, rotate: -20 }}
           animate={{ scale: 1, rotate: 0 }}
           transition={{ type: 'spring', stiffness: 220, damping: 14 }}
@@ -53,7 +53,7 @@ export default function Screen5() {
           style={{ background: 'linear-gradient(135deg, #5B21B6, #8B6FEA)' }}
         >
           ✓
-        </motion.div>
+        </m.div>
 
         <div>
           <h2 className="font-heading text-2xl font-bold text-purple-900">
@@ -85,7 +85,7 @@ export default function Screen5() {
 
         {/* WhatsApp CTA */}
         <div className="w-full mt-auto space-y-3">
-          <motion.button
+          <m.button
             onClick={handleJoin}
             disabled={joinState === 'joined'}
             className="btn-wa disabled:opacity-60"
@@ -100,9 +100,9 @@ export default function Screen5() {
                 {t.screen5.joinBtn[lang]}
               </>
             )}
-          </motion.button>
+          </m.button>
         </div>
       </div>
-    </motion.div>
+    </m.div>
   );
 }
