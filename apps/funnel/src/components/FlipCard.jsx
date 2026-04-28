@@ -16,12 +16,14 @@ function MorphDigit({ value, size = 'lg', urgent = false }) {
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
-      background: 'rgba(255,255,255,0.70)',
+      background: urgent ? 'rgba(254,202,202,0.80)' : 'rgba(255,255,255,0.70)',
       backdropFilter: 'blur(20px) saturate(180%)',
       WebkitBackdropFilter: 'blur(20px) saturate(180%)',
       borderRadius: r,
-      border: '1px solid rgba(139,92,246,0.20)',
-      boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,0.80), 0 0 12px rgba(139,92,246,0.12)',
+      border: urgent ? '1px solid rgba(239,68,68,0.45)' : '1px solid rgba(139,92,246,0.20)',
+      boxShadow: urgent
+        ? 'inset 0 1.5px 0 rgba(255,255,255,0.80), 0 0 12px rgba(239,68,68,0.25)'
+        : 'inset 0 1.5px 0 rgba(255,255,255,0.80), 0 0 12px rgba(139,92,246,0.12)',
       overflow: 'hidden',
       transition: 'all 0.5s',
     }}>
@@ -36,7 +38,7 @@ function MorphDigit({ value, size = 'lg', urgent = false }) {
             fontFamily: '"Outfit", "Noto Sans Tamil", sans-serif',
             fontWeight: 800,
             fontSize: fs,
-            color: '#2d0a6e',
+            color: urgent ? '#DC2626' : '#2d0a6e',
             lineHeight: 1,
             userSelect: 'none',
             letterSpacing: '-0.02em',

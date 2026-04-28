@@ -8,9 +8,10 @@ export function getCountdownParts(targetISO) {
 
   const isDuringSession = diff < 0 && Math.abs(diff) < sessionDuration;
   const isNearStart = diff > 0 && diff < 2 * 60 * 60 * 1000;
+  const isUrgent = diff > 0 && diff < 24 * 60 * 60 * 1000;
 
   if (diff <= 0 && !isDuringSession) {
-    return { days: 0, hrs: 0, min: 0, sec: 0, isNearStart: false, isDuringSession: false };
+    return { days: 0, hrs: 0, min: 0, sec: 0, isNearStart: false, isUrgent: false, isDuringSession: false };
   }
 
   const totalSec = Math.max(0, Math.floor(diff / 1000));
@@ -19,7 +20,7 @@ export function getCountdownParts(targetISO) {
   const min = Math.floor((totalSec % 3600) / 60);
   const sec = totalSec % 60;
 
-  return { days, hrs, min, sec, isNearStart, isDuringSession };
+  return { days, hrs, min, sec, isNearStart, isUrgent, isDuringSession };
 }
 
 export function isCurrentDayMonOrTue() {

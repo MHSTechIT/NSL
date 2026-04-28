@@ -29,6 +29,7 @@ export default function CountdownTimer({ floating = false }) {
   }
 
   const isNear = parts.isNearStart;
+  const isUrgent = parts.isUrgent;
   const showDays = parts.days > 0;
 
   const units = showDays
@@ -45,7 +46,7 @@ export default function CountdownTimer({ floating = false }) {
       ];
 
   return (
-    <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: 'rgba(255,255,255,0.55)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', border: '1px solid rgba(139,92,246,0.18)', boxShadow: '0 4px 24px rgba(91,33,182,0.10)' }}>
+    <div className={`rounded-card p-4 ${isNear ? 'animate-pulse' : ''}`} style={{ background: isUrgent ? 'rgba(254,242,242,0.75)' : 'rgba(255,255,255,0.55)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', border: isUrgent ? '1px solid rgba(239,68,68,0.35)' : '1px solid rgba(139,92,246,0.18)', boxShadow: isUrgent ? '0 4px 24px rgba(239,68,68,0.15)' : '0 4px 24px rgba(91,33,182,0.10)', transition: 'all 0.5s' }}>
       <p className="font-sans text-center text-xs font-semibold mb-4 tracking-widest uppercase" style={{ color: '#5b3fa0' }}>
         {isNear ? t.screen1A.nearStart[lang] : t.screen1A.timerLabel[lang]}
       </p>
@@ -53,7 +54,7 @@ export default function CountdownTimer({ floating = false }) {
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 2 }}>
         {units.map(({ val, label }, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
-            <FlipUnit value={val} label={label} size="lg" />
+            <FlipUnit value={val} label={label} size="lg" urgent={isUrgent} />
             {i < units.length - 1 && (
               <span style={{
                 fontFamily: 'Outfit, sans-serif',
