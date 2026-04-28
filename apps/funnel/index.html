@@ -4,15 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Health School – Diabetes Reversal Webinar</title>
-    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%235B21B6'/><text x='16' y='22' font-family='Arial,sans-serif' font-weight='900' font-size='20' fill='white' text-anchor='middle'>M</text></svg>" />
 
-<!-- Preload hero image — shown immediately on first paint -->
+    <!-- Preload hero image — shown immediately on first paint -->
     <link rel="preload" href="/person.webp" as="image" type="image/webp" />
 
-    <!-- Fonts: only used families, trimmed weights -->
+    <!-- Fonts: async (non-blocking) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&family=Outfit:wght@400;500;600;700;800&family=Noto+Sans+Tamil:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&family=Outfit:wght@400;500;600;700;800&family=Noto+Sans+Tamil:wght@400;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&family=Outfit:wght@400;500;600;700;800&family=Noto+Sans+Tamil:wght@400;600;700&display=swap" /></noscript>
   </head>
   <body>
 <div id="root"></div>
