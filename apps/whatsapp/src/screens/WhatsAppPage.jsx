@@ -8,7 +8,7 @@ function LinkExpiryTimer() {
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
   }, []);
-  const m = Math.floor(secs / 60);
+  const mins = Math.floor(secs / 60);
   const s = secs % 60;
   const fmt = (n) => String(n).padStart(2, '0');
   return (
@@ -21,7 +21,7 @@ function LinkExpiryTimer() {
         Link Expires In
       </span>
       <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.15rem', fontWeight: 800, color: '#ffffff', letterSpacing: '0.06em' }}>
-        {fmt(m)}:{fmt(s)}
+        {fmt(mins)}:{fmt(s)}
       </span>
     </div>
   );
@@ -36,6 +36,15 @@ export default function WhatsAppPage() {
       .then(data => setWaLink(data.tuesday_whatsapp_link || ''))
       .catch(() => {});
   }, []);
+
+  function handleJoinClick() {
+    // lead_id passed as URL param from the funnel registration page
+    const params = new URLSearchParams(window.location.search);
+    const leadId = params.get('lead_id') || localStorage.getItem('mhs_lead_id');
+    if (leadId) {
+      fetch(`/api/leads/${leadId}/wa-click`, { method: 'PATCH' }).catch(() => {});
+    }
+  }
 
   return (
     <div style={{
@@ -121,6 +130,7 @@ export default function WhatsAppPage() {
           href={waLink || '#'}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={handleJoinClick}
           whileTap={{ scale: 0.97 }}
           animate={{
             boxShadow: [

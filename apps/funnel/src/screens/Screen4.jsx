@@ -145,7 +145,8 @@ export default function Screen4() {
 
       setSubmitting(false);
       if (data.lead_id) localStorage.setItem('mhs_lead_id', data.lead_id);
-      window.location.href = import.meta.env.VITE_WHATSAPP_URL || '/whatsapp';
+      const waBase = import.meta.env.VITE_WHATSAPP_URL || '/whatsapp';
+      window.location.href = `${waBase}?lead_id=${data.lead_id}`;
     } catch (err) {
       clearTimeout(timeout);
       if (err.name === 'AbortError') {
