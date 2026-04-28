@@ -38,7 +38,7 @@ export default function Disqualified() {
       >
         {/* Profile image with gradient ring */}
         <motion.img
-          src="/yt.png"
+          src="/yt.webp"
           alt="Doctor"
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
