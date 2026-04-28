@@ -37,6 +37,13 @@ export default function WhatsAppPage() {
       .catch(() => {});
   }, []);
 
+  function handleJoinClick() {
+    const leadId = localStorage.getItem('mhs_lead_id');
+    if (leadId) {
+      fetch(`/api/leads/${leadId}/wa-click`, { method: 'PATCH' }).catch(() => {});
+    }
+  }
+
   return (
     <div style={{
       position: 'fixed',
@@ -121,6 +128,7 @@ export default function WhatsAppPage() {
           href={waLink || '#'}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={handleJoinClick}
           whileTap={{ scale: 0.97 }}
           animate={{
             boxShadow: [

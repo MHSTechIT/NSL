@@ -144,6 +144,7 @@ export default function Screen4() {
       });
 
       setSubmitting(false);
+      if (data.lead_id) localStorage.setItem('mhs_lead_id', data.lead_id);
       window.location.href = import.meta.env.VITE_WHATSAPP_URL || '/whatsapp';
     } catch (err) {
       clearTimeout(timeout);
