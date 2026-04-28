@@ -25,7 +25,7 @@ function UrgencyTimer() {
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
   }, []);
-  const m = Math.floor(secs / 60);
+  const mins = Math.floor(secs / 60);
   const s = secs % 60;
   const fmt = (n) => String(n).padStart(2, '0');
   const pulse = secs <= 60; // pulse when under 1 min
@@ -63,7 +63,7 @@ function UrgencyTimer() {
           Complete in
         </span>
         <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.15rem', fontWeight: 800, letterSpacing: '0.06em', color: '#ffffff' }}>
-          {fmt(m)}:{fmt(s)}
+          {fmt(mins)}:{fmt(s)}
         </span>
         <span style={{ fontSize: '0.9rem' }}>⚠️</span>
       </div>
