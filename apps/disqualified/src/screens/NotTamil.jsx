@@ -6,7 +6,8 @@ const slideIn = {
   exit: { opacity: 0, y: -8, transition: { duration: 0.18, ease: 'easeIn' } },
 };
 
-const PRODUCTS_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSfFkRVY__WZgzQd219vO9rPMA5nc5d3TwKuBAwlQsMHgcN8MA/viewform';
+const PRODUCTS_URL =
+  'https://docs.google.com/forms/d/e/1FAIpQLSfFkRVY__WZgzQd219vO9rPMA5nc5d3TwKuBAwlQsMHgcN8MA/viewform';
 
 export default function NotTamil() {
   return (
@@ -19,7 +20,6 @@ export default function NotTamil() {
         padding: '40px 16px',
       }}
     >
-      {/* Main card */}
       <m.div
         initial={{ opacity: 0, y: 20, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -49,8 +49,11 @@ export default function NotTamil() {
             boxShadow: '0 6px 28px rgba(124,58,237,0.30)',
           }}
         >
-          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none"
+            stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <path d="M16 10a4 4 0 01-8 0" />
           </svg>
         </m.div>
 
@@ -70,18 +73,22 @@ export default function NotTamil() {
         </h2>
 
         {/* Divider */}
-        <div style={{ width: 48, height: 3, borderRadius: 2, background: 'linear-gradient(90deg,#7C3AED,#a78bfa)', margin: '0 auto 18px' }} />
+        <div style={{
+          width: 48, height: 3, borderRadius: 2,
+          background: 'linear-gradient(90deg,#7C3AED,#a78bfa)',
+          margin: '0 auto 18px',
+        }} />
 
         {/* Subheading */}
         <p style={{
-          fontFamily: 'Outfit, sans-serif', fontSize: '0.95rem',
-          color: '#5b3fa0', lineHeight: 1.65, marginBottom: 28, fontWeight: 500,
+          fontFamily: 'Outfit, sans-serif', fontSize: '0.90rem',
+          color: '#5b3fa0', lineHeight: 1.65, marginBottom: 10,
         }}>
           Explore our healthy products designed for your overall well-being.
         </p>
 
-        {/* Product highlights */}
-        {['🌿 Natural Health Products', '💪 Boost Your Immunity', '✨ Designed for Your Well-being'].map((item, i) => (
+        {/* Pills */}
+        {['🌿 Natural Health Products', '💪 Boost Your Immunity', '✨ Designed for Your Well-being'].map((tip, i) => (
           <m.div
             key={i}
             initial={{ opacity: 0, x: -10 }}
@@ -93,11 +100,14 @@ export default function NotTamil() {
               padding: '8px 12px', marginBottom: 8, textAlign: 'left',
             }}
           >
-            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#4c1d95', fontWeight: 500 }}>{item}</span>
+            <span style={{
+              fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
+              color: '#4c1d95', fontWeight: 500,
+            }}>{tip}</span>
           </m.div>
         ))}
 
-        {/* Our Products button */}
+        {/* Button */}
         <m.a
           href={PRODUCTS_URL}
           target="_blank"
@@ -120,10 +130,6 @@ export default function NotTamil() {
             textDecoration: 'none',
           }}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
-            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
-          </svg>
           Our Products
         </m.a>
       </m.div>
