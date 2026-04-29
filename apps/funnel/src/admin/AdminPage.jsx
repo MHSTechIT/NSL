@@ -257,23 +257,17 @@ export default function AdminPage() {
             <button
               onClick={() => setShowDropdown(v => !v)}
               style={{
-                width: 44, height: 44, borderRadius: '50%',
-                background: showDropdown
-                  ? 'rgba(124,58,237,0.15)'
-                  : 'rgba(237,234,248,0.80)',
-                border: showDropdown
-                  ? '2.5px solid #7C3AED'
-                  : '2.5px solid rgba(124,58,237,0.30)',
-                boxShadow: '0 2px 12px rgba(91,33,182,0.18)',
+                background: 'none', border: 'none',
+                padding: 0, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', transition: 'all 180ms',
-                padding: 0, overflow: 'hidden',
+                opacity: showDropdown ? 0.75 : 1,
+                transition: 'opacity 180ms',
               }}
             >
               <img
                 src="/favicon.png"
                 alt="Admin"
-                style={{ width: 28, height: 28, objectFit: 'contain' }}
+                style={{ width: 36, height: 36, objectFit: 'contain' }}
               />
             </button>
 
