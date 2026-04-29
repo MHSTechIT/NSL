@@ -124,7 +124,7 @@ export default function NotTamil() {
             textDecoration: 'none',
           }}
         >
-          Our Products
+          Explore Healthy Products
         </m.a>
       </m.div>
     </m.div>
