@@ -148,6 +148,10 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
     selDate && selDate.getFullYear() === viewYear && selDate.getMonth() === viewMonth && selDate.getDate() === day;
   const isToday = (day) =>
     today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day;
+  const isPast = (day) => {
+    const d = new Date(viewYear, viewMonth, day, 23, 59, 59);
+    return d < today;
+  };
 
   /* --- styles --- */
   const selStyle = {
@@ -230,22 +234,26 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
             {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
               const sel = isSelected(day);
               const tod = isToday(day);
+              const past = isPast(day);
               return (
                 <button
                   key={day}
                   type="button"
-                  onClick={() => pickDay(day)}
+                  disabled={past}
+                  onClick={() => !past && pickDay(day)}
                   style={{
                     height: 26, borderRadius: 7, border: 'none',
                     background: sel ? '#5B21B6' : tod ? 'rgba(139,92,246,0.12)' : 'transparent',
-                    color: sel ? '#fff' : tod ? '#5B21B6' : '#3B0764',
+                    color: past ? 'rgba(91,33,182,0.20)' : sel ? '#fff' : tod ? '#5B21B6' : '#3B0764',
                     fontWeight: sel ? 700 : tod ? 600 : 400,
-                    fontSize: '0.78rem', cursor: 'pointer',
+                    fontSize: '0.78rem',
+                    cursor: past ? 'not-allowed' : 'pointer',
                     transition: 'all 150ms',
                     outline: tod && !sel ? '1.5px solid rgba(91,33,182,0.35)' : 'none',
+                    textDecoration: past ? 'line-through' : 'none',
                   }}
-                  onMouseEnter={e => { if (!sel) e.currentTarget.style.background = 'rgba(139,92,246,0.15)'; }}
-                  onMouseLeave={e => { if (!sel) e.currentTarget.style.background = tod ? 'rgba(139,92,246,0.12)' : 'transparent'; }}
+                  onMouseEnter={e => { if (!sel && !past) e.currentTarget.style.background = 'rgba(139,92,246,0.15)'; }}
+                  onMouseLeave={e => { if (!sel && !past) e.currentTarget.style.background = tod ? 'rgba(139,92,246,0.12)' : 'transparent'; }}
                 >
                   {day}
                 </button>

@@ -30,7 +30,10 @@ export default function WhatsAppLinksEditor({ token }) {
       .then(d => {
         setCurrentLink(d.tuesday_whatsapp_link || '');
         setPendingLink(d.pending_whatsapp_link || '');
-        setSwapAt(d.whatsapp_link_swap_at ? toISTValue(d.whatsapp_link_swap_at) : '');
+        // Only keep the scheduled time if it's still in the future
+        const swapRaw = d.whatsapp_link_swap_at;
+        const isFuture = swapRaw && new Date(swapRaw) > new Date();
+        setSwapAt(isFuture ? toISTValue(swapRaw) : '');
       });
   }
 
