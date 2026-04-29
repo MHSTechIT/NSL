@@ -10,7 +10,9 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/__tests__/**/*.test.js"],
+    "testMatch": [
+      "**/__tests__/**/*.test.js"
+    ],
     "clearMocks": true,
     "testTimeout": 10000
   },
@@ -19,6 +21,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-validator": "^7.1.0",
+    "googleapis": "^171.4.0",
+    "node-cron": "^4.2.1",
     "nodemailer": "^8.0.5",
     "pg": "^8.12.0"
   },

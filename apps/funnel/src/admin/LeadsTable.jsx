@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 const DURATION_LABELS = { new: '< 1 yr', mid: '1–5 yrs', long: '5+ yrs', pre: 'Pre-diabetic' };
 const SUGAR_LABELS    = { '150-250': '150–250', '250+': '250+' };
@@ -12,6 +12,8 @@ export default function LeadsTable({ token }) {
   const [activeFilter, setActiveFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
+  const [syncing, setSyncing]   = useState(false);
+  const [syncToast, setSyncToast] = useState(null);
 
   useEffect(() => {
     fetch('/api/admin/leads', { headers: { Authorization: `Bearer ${token}` } })
@@ -51,6 +53,28 @@ export default function LeadsTable({ token }) {
     const vb = b[sortKey] ?? '';
     return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
   });
+
+  const syncToGoogleSheet = useCallback(async () => {
+    setSyncing(true);
+    setSyncToast(null);
+    try {
+      const res = await fetch('/api/admin/sync-sheet', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncToast({ ok: true, msg: `✓ ${data.count} leads synced to Google Sheet` });
+      } else {
+        setSyncToast({ ok: false, msg: data.error || 'Sync failed' });
+      }
+    } catch {
+      setSyncToast({ ok: false, msg: 'Network error. Try again.' });
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncToast(null), 5000);
+    }
+  }, [token]);
 
   function exportCSV() {
     const headers = ['Name', 'Phone', 'Sugar Level', 'Duration', 'Registered At', 'WA Clicked'];
@@ -120,13 +144,61 @@ export default function LeadsTable({ token }) {
             }
           </p>
         </div>
-        <button
-          onClick={exportCSV}
-          className="inline-flex items-center gap-2 bg-purple text-white font-sans font-semibold text-sm px-4 py-2.5 rounded-pill hover:bg-purple-700 transition-colors shadow-[0_2px_12px_rgba(91,33,182,0.25)]"
-        >
-          ↓ Export CSV
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* Sync to Google Sheet */}
+          <button
+            onClick={syncToGoogleSheet}
+            disabled={syncing}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              height: '2.4rem', padding: '0 16px', borderRadius: 50,
+              border: '1.5px solid rgba(37,99,235,0.40)',
+              background: syncing ? 'rgba(37,99,235,0.08)' : 'rgba(239,246,255,0.80)',
+              fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.82rem',
+              color: '#1d4ed8', cursor: syncing ? 'not-allowed' : 'pointer',
+              opacity: syncing ? 0.7 : 1, transition: 'all 180ms',
+            }}
+          >
+            {syncing ? (
+              <>
+                <svg style={{ animation: 'spin 1s linear infinite', width: 14, height: 14 }} viewBox="0 0 24 24" fill="none">
+                  <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                Syncing…
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M23.266 13.443a2.5 2.5 0 00-4.332 0l-2.5 4.33A2.5 2.5 0 0018.5 22h5a2.5 2.5 0 002.066-3.927l-2.3-4.63zM14 3.5A10.5 10.5 0 003.5 14H1l3.5 5 3.5-5H5.5A8.5 8.5 0 0114 5.5V3.5z"/>
+                </svg>
+                Sync to Sheet
+              </>
+            )}
+          </button>
+
+          {/* Export CSV */}
+          <button
+            onClick={exportCSV}
+            className="inline-flex items-center gap-2 bg-purple text-white font-sans font-semibold text-sm px-4 py-2.5 rounded-pill hover:bg-purple-700 transition-colors shadow-[0_2px_12px_rgba(91,33,182,0.25)]"
+          >
+            ↓ Export CSV
+          </button>
+        </div>
       </div>
+
+      {/* Sync status toast */}
+      {syncToast && (
+        <div style={{
+          marginBottom: 12, padding: '10px 14px', borderRadius: 10,
+          background: syncToast.ok ? 'rgba(220,252,231,0.80)' : 'rgba(254,226,226,0.80)',
+          border: syncToast.ok ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(239,68,68,0.35)',
+          fontFamily: 'Outfit, sans-serif', fontSize: '0.83rem', fontWeight: 600,
+          color: syncToast.ok ? '#15803d' : '#DC2626',
+        }}>
+          {syncToast.msg}
+        </div>
+      )}
 
       {/* Date range filter */}
       <div style={{

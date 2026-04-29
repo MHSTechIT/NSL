@@ -7,6 +7,7 @@ const { adminAuth }                = require('../middleware/adminAuth');
 const { getPassword, writeConfig } = require('../utils/adminConfig');
 const cache = require('../utils/webinarConfigCache');
 const { broadcast } = require('../utils/sseClients');
+const { syncLeadsToSheet } = require('../utils/leadsSheetSync');
 
 router.use(adminAuth);
 
@@ -79,6 +80,18 @@ router.put('/webinar-config', configValidators, async (req, res) => {
     console.error('Update config error:', err.message);
     res.status(500).json({ error: 'Failed to update config' });
   }
+});
+
+/* ── POST /api/admin/sync-sheet ── */
+router.post('/sync-sheet', async (_req, res) => {
+  const result = await syncLeadsToSheet();
+  if (result.skipped) {
+    return res.status(503).json({ error: 'Google Sheets not configured. Add GOOGLE_SERVICE_ACCOUNT_JSON and GOOGLE_SHEET_ID env vars.' });
+  }
+  if (!result.success) {
+    return res.status(500).json({ error: result.error });
+  }
+  res.json({ success: true, count: result.count });
 });
 
 /* ── PATCH /api/admin/change-password ── */
