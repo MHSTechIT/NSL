@@ -8,7 +8,7 @@ function LinkExpiryTimer() {
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
   }, []);
-  const m = Math.floor(secs / 60);
+  const mins = Math.floor(secs / 60);
   const s = secs % 60;
   const fmt = (n) => String(n).padStart(2, '0');
   return (
@@ -21,7 +21,7 @@ function LinkExpiryTimer() {
         Link Expires In
       </span>
       <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.15rem', fontWeight: 800, color: '#ffffff', letterSpacing: '0.06em' }}>
-        {fmt(m)}:{fmt(s)}
+        {fmt(mins)}:{fmt(s)}
       </span>
     </div>
   );
