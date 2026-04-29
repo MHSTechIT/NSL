@@ -17,8 +17,17 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
   const [viewYear, setViewYear]   = useState(() => value ? new Date(value).getFullYear() : new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(() => value ? new Date(value).getMonth()    : new Date().getMonth());
   const [selDate, setSelDate] = useState(() => value ? new Date(value) : null);
-  const [hour, setHour]       = useState(() => value ? new Date(value).getHours()   : 19);
+  // 12-hour clock state
+  const [hour12, setHour12]   = useState(() => {
+    if (value) { const h = new Date(value).getHours(); return h % 12 || 12; }
+    return 7; // 7 PM default
+  });
   const [minute, setMinute]   = useState(() => value ? new Date(value).getMinutes() : 0);
+  const [second, setSecond]   = useState(() => value ? new Date(value).getSeconds() : 0);
+  const [ampm, setAmpm]       = useState(() => {
+    if (value) { return new Date(value).getHours() < 12 ? 'AM' : 'PM'; }
+    return 'PM';
+  });
   const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 });
   const ref = useRef(null);
   const triggerRef = useRef(null);
@@ -62,18 +71,26 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
       setSelDate(d);
       setViewYear(d.getFullYear());
       setViewMonth(d.getMonth());
-      setHour(d.getHours());
+      const h = d.getHours();
+      setHour12(h % 12 || 12);
+      setAmpm(h < 12 ? 'AM' : 'PM');
       setMinute(d.getMinutes());
+      setSecond(d.getSeconds());
     }
   }, [value]);
 
   const pad = n => String(n).padStart(2, '0');
 
-  function commit(date, h, m) {
+  function to24h(h12, ap) {
+    if (ap === 'AM') return h12 === 12 ? 0 : h12;
+    return h12 === 12 ? 12 : h12 + 12;
+  }
+
+  function commit(date, h12, m, s, ap) {
     if (!date) return;
     const d = new Date(date);
-    // Build local datetime string — avoids UTC shift from toISOString()
-    const local = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(h)}:${pad(m)}`;
+    const h24 = to24h(h12, ap);
+    const local = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(h24)}:${pad(m)}:${pad(s)}`;
     onChange(local);
   }
 
@@ -89,16 +106,24 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
   function pickDay(day) {
     const d = new Date(viewYear, viewMonth, day);
     setSelDate(d);
-    commit(d, hour, minute);
+    commit(d, hour12, minute, second, ampm);
   }
 
   function changeHour(h) {
-    setHour(h);
-    commit(selDate, h, minute);
+    setHour12(h);
+    commit(selDate, h, minute, second, ampm);
   }
   function changeMinute(m) {
     setMinute(m);
-    commit(selDate, hour, m);
+    commit(selDate, hour12, m, second, ampm);
+  }
+  function changeSecond(s) {
+    setSecond(s);
+    commit(selDate, hour12, minute, s, ampm);
+  }
+  function toggleAmPm(ap) {
+    setAmpm(ap);
+    commit(selDate, hour12, minute, second, ap);
   }
 
   const daysInMonth  = getDaysInMonth(viewYear, viewMonth);
@@ -106,7 +131,7 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
   const today        = new Date();
 
   const displayStr = selDate
-    ? `${selDate.getDate()} ${MONTHS[selDate.getMonth()].slice(0,3)} ${selDate.getFullYear()}  ${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`
+    ? `${selDate.getDate()} ${MONTHS[selDate.getMonth()].slice(0,3)} ${selDate.getFullYear()}  ${pad(hour12)}:${pad(minute)}:${pad(second)} ${ampm}`
     : '';
 
   const isSelected = (day) =>
@@ -115,6 +140,14 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
     today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day;
 
   /* --- styles --- */
+  const selStyle = {
+    height: '1.7rem', padding: '0 4px', borderRadius: 7,
+    border: '1px solid rgba(139,92,246,0.22)',
+    background: 'rgba(237,234,248,0.40)',
+    fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem',
+    color: '#3B0764', outline: 'none', cursor: 'pointer',
+  };
+
   const pill = {
     width: '100%', height: '2.8rem',
     padding: '0 14px',
@@ -214,33 +247,70 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
           <div style={{ height: 1, background: 'rgba(139,92,246,0.10)', margin: '8px 0 7px' }} />
 
           {/* Time picker */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.45)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
             </svg>
             <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.55)' }}>Time</span>
-            {/* Hour */}
+
+            {/* Hour (1–12) */}
             <select
-              value={hour}
+              value={hour12}
               onChange={e => changeHour(Number(e.target.value))}
-              style={{ height: '1.7rem', padding: '0 4px', borderRadius: 7, border: '1px solid rgba(139,92,246,0.22)', background: 'rgba(237,234,248,0.40)', fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem', color: '#3B0764', outline: 'none', cursor: 'pointer' }}
+              style={selStyle}
             >
-              {Array.from({ length: 24 }, (_, i) => (
-                <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
+                <option key={h} value={h}>{pad(h)}</option>
               ))}
             </select>
+
             <span style={{ fontWeight: 700, color: '#5B21B6', fontSize: '0.9rem' }}>:</span>
-            {/* Minute */}
+
+            {/* Minute (0–59) */}
             <select
               value={minute}
               onChange={e => changeMinute(Number(e.target.value))}
-              style={{ height: '1.7rem', padding: '0 4px', borderRadius: 7, border: '1px solid rgba(139,92,246,0.22)', background: 'rgba(237,234,248,0.40)', fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem', color: '#3B0764', outline: 'none', cursor: 'pointer' }}
+              style={selStyle}
             >
-              {[0,5,10,15,20,25,30,35,40,45,50,55].map(m => (
-                <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+              {Array.from({ length: 60 }, (_, i) => i).map(m => (
+                <option key={m} value={m}>{pad(m)}</option>
               ))}
             </select>
-            <span style={{ fontSize: '0.75rem', color: 'rgba(91,33,182,0.40)', fontWeight: 500 }}>IST</span>
+
+            <span style={{ fontWeight: 700, color: '#5B21B6', fontSize: '0.9rem' }}>:</span>
+
+            {/* Second (0–59) */}
+            <select
+              value={second}
+              onChange={e => changeSecond(Number(e.target.value))}
+              style={selStyle}
+            >
+              {Array.from({ length: 60 }, (_, i) => i).map(s => (
+                <option key={s} value={s}>{pad(s)}</option>
+              ))}
+            </select>
+
+            {/* AM / PM toggle */}
+            <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(139,92,246,0.25)', marginLeft: 2 }}>
+              {['AM', 'PM'].map(ap => (
+                <button
+                  key={ap}
+                  type="button"
+                  onClick={() => toggleAmPm(ap)}
+                  style={{
+                    padding: '0 9px', height: '1.7rem',
+                    background: ampm === ap ? '#5B21B6' : 'rgba(237,234,248,0.40)',
+                    color: ampm === ap ? '#fff' : '#5B21B6',
+                    fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.75rem',
+                    border: 'none', cursor: 'pointer', transition: 'all 150ms',
+                  }}
+                >
+                  {ap}
+                </button>
+              ))}
+            </div>
+
+            <span style={{ fontSize: '0.72rem', color: 'rgba(91,33,182,0.40)', fontWeight: 500 }}>IST</span>
           </div>
 
           {/* Done button */}
