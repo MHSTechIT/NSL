@@ -145,38 +145,6 @@ export default function LeadsTable({ token }) {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {/* Sync to Google Sheet */}
-          <button
-            onClick={syncToGoogleSheet}
-            disabled={syncing}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 7,
-              height: '2.4rem', padding: '0 16px', borderRadius: 50,
-              border: '1.5px solid rgba(37,99,235,0.40)',
-              background: syncing ? 'rgba(37,99,235,0.08)' : 'rgba(239,246,255,0.80)',
-              fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.82rem',
-              color: '#1d4ed8', cursor: syncing ? 'not-allowed' : 'pointer',
-              opacity: syncing ? 0.7 : 1, transition: 'all 180ms',
-            }}
-          >
-            {syncing ? (
-              <>
-                <svg style={{ animation: 'spin 1s linear infinite', width: 14, height: 14 }} viewBox="0 0 24 24" fill="none">
-                  <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-                Syncing…
-              </>
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M23.266 13.443a2.5 2.5 0 00-4.332 0l-2.5 4.33A2.5 2.5 0 0018.5 22h5a2.5 2.5 0 002.066-3.927l-2.3-4.63zM14 3.5A10.5 10.5 0 003.5 14H1l3.5 5 3.5-5H5.5A8.5 8.5 0 0114 5.5V3.5z"/>
-                </svg>
-                Sync to Sheet
-              </>
-            )}
-          </button>
-
           {/* Export CSV */}
           <button
             onClick={exportCSV}
