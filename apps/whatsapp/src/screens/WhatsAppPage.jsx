@@ -31,7 +31,7 @@ export default function WhatsAppPage() {
   const [waLink, setWaLink] = useState('');
 
   useEffect(() => {
-    fetch('/api/webinar-config')
+    fetch(`/api/webinar-config?_=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(data => setWaLink(data.tuesday_whatsapp_link || ''))
       .catch(() => {});

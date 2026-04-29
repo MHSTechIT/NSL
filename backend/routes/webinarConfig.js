@@ -12,10 +12,17 @@ const DEFAULT_CONFIG = {
   kill_switch: false,
 };
 
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, max-age=0, must-revalidate',
+  'Pragma': 'no-cache',
+  'Expires': '0',
+};
+
 router.get('/webinar-config', async (req, res) => {
+  res.set(NO_CACHE_HEADERS);
+
   const hit = cache.get();
   if (hit) {
-    res.set('Cache-Control', 'no-store');
     return res.json(hit);
   }
 
@@ -28,7 +35,6 @@ router.get('/webinar-config', async (req, res) => {
     ]);
 
     if (configResult.rows.length === 0) {
-      res.set('Cache-Control', 'no-cache');
       return res.json({ ...DEFAULT_CONFIG, seats_reserved: 1813 });
     }
 
@@ -36,11 +42,9 @@ router.get('/webinar-config', async (req, res) => {
     const payload = { ...configResult.rows[0], seats_reserved };
 
     cache.set(payload);
-    res.set('Cache-Control', 'no-store');
     res.json(payload);
   } catch (err) {
     console.error('webinar-config error:', err.message);
-    res.set('Cache-Control', 'no-cache');
     res.json({ ...DEFAULT_CONFIG, seats_reserved: 1813 });
   }
 });
