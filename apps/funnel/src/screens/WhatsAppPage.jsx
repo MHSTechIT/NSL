@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { m } from 'framer-motion';
+import { useFunnel } from '../context/FunnelContext';
 
 /* ── Link expiry countdown ── */
 function LinkExpiryTimer() {
@@ -28,14 +29,9 @@ function LinkExpiryTimer() {
 }
 
 export default function WhatsAppPage() {
-  const [waLink, setWaLink] = useState('');
-
-  useEffect(() => {
-    fetch(`/api/webinar-config?_=${Date.now()}`, { cache: 'no-store' })
-      .then(r => r.json())
-      .then(data => setWaLink(data.tuesday_whatsapp_link || ''))
-      .catch(() => {});
-  }, []);
+  const { state } = useFunnel();
+  // Live link — comes from FunnelContext which already has SSE + initial fetch
+  const waLink = state.webinarConfig?.tuesday_whatsapp_link || '';
 
   function handleJoinClick() {
     const leadId = localStorage.getItem('mhs_lead_id');

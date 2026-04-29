@@ -31,10 +31,21 @@ export default function WhatsAppPage() {
   const [waLink, setWaLink] = useState('');
 
   useEffect(() => {
+    // Initial fetch — get current link immediately
     fetch(`/api/webinar-config?_=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(data => setWaLink(data.tuesday_whatsapp_link || ''))
       .catch(() => {});
+
+    // SSE — update the link in real-time whenever admin changes it
+    const es = new EventSource('/api/webinar-config/events');
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.tuesday_whatsapp_link) setWaLink(data.tuesday_whatsapp_link);
+      } catch {}
+    };
+    return () => es.close();
   }, []);
 
   function handleJoinClick() {
