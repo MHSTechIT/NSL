@@ -29,17 +29,17 @@ export default function NotTamil() {
           background: 'rgba(255,255,255,0.60)',
           backdropFilter: 'blur(24px) saturate(180%)',
           WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-          border: '1px solid rgba(30,95,62,0.18)',
+          border: '1px solid rgba(124,58,237,0.18)',
           borderRadius: 24,
           padding: '36px 28px 40px',
-          boxShadow: '0 8px 40px rgba(30,95,62,0.12), inset 0 1px 0 rgba(255,255,255,0.85)',
+          boxShadow: '0 8px 40px rgba(124,58,237,0.12), inset 0 1px 0 rgba(255,255,255,0.85)',
           textAlign: 'center',
         }}
       >
-        {/* TFS Logo */}
+        {/* Favicon Logo */}
         <m.img
-          src="/tfs.png"
-          alt="TFS Logo"
+          src="/favicon.png"
+          alt="Logo"
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ type: 'spring', stiffness: 320, damping: 20, delay: 0.2 }}
@@ -55,7 +55,7 @@ export default function NotTamil() {
         <h2 style={{
           fontFamily: '"Montserrat", Outfit, sans-serif',
           fontWeight: 900, fontSize: '1.45rem',
-          color: '#14532d', lineHeight: 1.2, marginBottom: 14,
+          color: '#3b0764', lineHeight: 1.2, marginBottom: 14,
         }}>
           This webinar is{' '}
           <span style={{
@@ -69,14 +69,14 @@ export default function NotTamil() {
         {/* Divider */}
         <div style={{
           width: 48, height: 3, borderRadius: 2,
-          background: 'linear-gradient(90deg, #1e5f3e, #4ade80)',
+          background: 'linear-gradient(90deg, #7c3aed, #c026d3)',
           margin: '0 auto 18px',
         }} />
 
         {/* Subheading */}
         <p style={{
           fontFamily: 'Outfit, sans-serif', fontSize: '0.90rem',
-          color: '#166534', lineHeight: 1.65, marginBottom: 10,
+          color: '#6b21a8', lineHeight: 1.65, marginBottom: 10,
         }}>
           Explore our healthy products designed for your overall well-being.
         </p>
@@ -90,13 +90,13 @@ export default function NotTamil() {
             transition={{ delay: 0.3 + i * 0.08 }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
-              background: 'rgba(30,95,62,0.07)', borderRadius: 10,
+              background: 'rgba(124,58,237,0.07)', borderRadius: 10,
               padding: '8px 12px', marginBottom: 8, textAlign: 'left',
             }}
           >
             <span style={{
               fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
-              color: '#14532d', fontWeight: 500,
+              color: '#3b0764', fontWeight: 500,
             }}>{tip}</span>
           </m.div>
         ))}
@@ -109,16 +109,16 @@ export default function NotTamil() {
           whileTap={{ scale: 0.97 }}
           animate={{
             boxShadow: [
-              '0 4px 18px rgba(30,95,62,0.25)',
-              '0 6px 30px rgba(30,95,62,0.55)',
-              '0 4px 18px rgba(30,95,62,0.25)',
+              '0 4px 18px rgba(124,58,237,0.25)',
+              '0 6px 30px rgba(124,58,237,0.55)',
+              '0 4px 18px rgba(124,58,237,0.25)',
             ],
           }}
           transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
             width: '100%', height: '3.4rem', borderRadius: 50, marginTop: 22,
-            background: 'linear-gradient(135deg, #1e5f3e, #15803d)',
+            background: 'linear-gradient(135deg, #7c3aed, #9333ea)',
             color: '#ffffff', fontFamily: 'Outfit, sans-serif',
             fontWeight: 700, fontSize: '1.05rem',
             textDecoration: 'none',
