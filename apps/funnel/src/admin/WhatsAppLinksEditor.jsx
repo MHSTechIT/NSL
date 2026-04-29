@@ -19,7 +19,8 @@ function fromISTValue(localVal) {
 export default function WhatsAppLinksEditor({ token }) {
   const [currentLink,   setCurrentLink]   = useState('');
   const [pendingLink,   setPendingLink]   = useState('');
-  const [swapAt,        setSwapAt]        = useState('');
+  const [swapAt,        setSwapAt]        = useState(''); // always blank on load — user picks fresh
+  const [activeSchedule, setActiveSchedule] = useState(''); // read-only: what's currently in DB
   const [saving,        setSaving]        = useState(false);
   const [toast,         setToast]         = useState(null);
   const [copied,        setCopied]        = useState(false);
@@ -30,10 +31,12 @@ export default function WhatsAppLinksEditor({ token }) {
       .then(d => {
         setCurrentLink(d.tuesday_whatsapp_link || '');
         setPendingLink(d.pending_whatsapp_link || '');
-        // Only keep the scheduled time if it's still in the future
+        // Never pre-fill the picker — always keep it blank
+        setSwapAt('');
+        // Store the DB schedule only for display as info text
         const swapRaw = d.whatsapp_link_swap_at;
         const isFuture = swapRaw && new Date(swapRaw) > new Date();
-        setSwapAt(isFuture ? toISTValue(swapRaw) : '');
+        setActiveSchedule(isFuture ? toISTValue(swapRaw) : '');
       });
   }
 
@@ -93,6 +96,7 @@ export default function WhatsAppLinksEditor({ token }) {
 
   const hasSchedule = pendingLink && swapAt;
   const swapDate = swapAt ? new Date(fromISTValue(swapAt)) : null;
+  const activeScheduleDate = activeSchedule ? new Date(fromISTValue(activeSchedule)) : null;
 
   return (
     <div style={{ maxWidth: 520 }}>
@@ -236,7 +240,27 @@ export default function WhatsAppLinksEditor({ token }) {
           )}
         </div>
 
-        {/* Scheduled status banner */}
+        {/* Currently saved schedule info (read-only, from DB) */}
+        {activeScheduleDate && !swapAt && (
+          <div style={{
+            background: 'rgba(245,243,255,1)', borderRadius: 10,
+            border: '1px solid rgba(139,92,246,0.25)', padding: '10px 14px',
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+          }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: '#5B21B6', lineHeight: 1.4 }}>
+              Scheduled auto-activate:{' '}
+              <strong>
+                {activeScheduleDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
+              </strong>
+              {' '}— pick a new date above to change it.
+            </span>
+          </div>
+        )}
+
+        {/* New schedule preview banner (when user picks a new date) */}
         {hasSchedule && (
           <div style={{
             background: 'rgba(245,243,255,1)', borderRadius: 10,
