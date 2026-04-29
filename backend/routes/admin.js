@@ -33,6 +33,8 @@ const configValidators = [
   body('kill_switch').optional().isBoolean(),
   body('pending_whatsapp_link').optional().isString(),
   body('whatsapp_link_swap_at').optional({ nullable: true }).isISO8601(),
+  body('pending_whatsapp_link_2').optional().isString(),
+  body('whatsapp_link_swap_at_2').optional({ nullable: true }).isISO8601(),
 ];
 
 router.put('/webinar-config', configValidators, async (req, res) => {
@@ -41,7 +43,7 @@ router.put('/webinar-config', configValidators, async (req, res) => {
     return res.status(422).json({ error: 'validation_failed', fields: errors.array() });
   }
 
-  const allowed = ['next_webinar_at', 'backup_webinar_at', 'tuesday_whatsapp_link', 'friday_whatsapp_link', 'kill_switch', 'pending_whatsapp_link', 'whatsapp_link_swap_at'];
+  const allowed = ['next_webinar_at', 'backup_webinar_at', 'tuesday_whatsapp_link', 'friday_whatsapp_link', 'kill_switch', 'pending_whatsapp_link', 'whatsapp_link_swap_at', 'pending_whatsapp_link_2', 'whatsapp_link_swap_at_2'];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
@@ -67,7 +69,7 @@ router.put('/webinar-config', configValidators, async (req, res) => {
 
     // Fetch fresh config and push to all connected clients immediately
     const { rows } = await pool.query(
-      'SELECT next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch, pending_whatsapp_link, whatsapp_link_swap_at FROM webinar_config WHERE id = 1'
+      'SELECT next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch, pending_whatsapp_link, whatsapp_link_swap_at, pending_whatsapp_link_2, whatsapp_link_swap_at_2 FROM webinar_config WHERE id = 1'
     );
     if (rows.length > 0) {
       const fresh = { ...rows[0] };
