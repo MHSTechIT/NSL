@@ -289,26 +289,6 @@ export default function AdminPage() {
                   <p style={{ fontSize: '0.68rem', color: 'rgba(91,33,182,0.42)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Admin Account</p>
                 </div>
 
-                {/* Change Password */}
-                <button
-                  onClick={() => { setShowDropdown(false); setShowChangePw(true); }}
-                  style={{
-                    width: '100%', padding: '11px 16px', border: 'none',
-                    background: 'transparent', textAlign: 'left',
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    fontFamily: 'Outfit,sans-serif', fontSize: '0.88rem', fontWeight: 600,
-                    color: '#3B0764', cursor: 'pointer',
-                    transition: 'background 150ms',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(237,234,248,0.55)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  Change Password
-                </button>
-
-                {/* Divider */}
-                <div style={{ height: 1, background: 'rgba(209,196,240,0.35)', margin: '0 12px' }} />
-
                 {/* Sign Out */}
                 <button
                   onClick={handleLogout}
