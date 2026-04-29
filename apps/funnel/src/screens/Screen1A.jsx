@@ -268,7 +268,7 @@ export default function Screen1A() {
     dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
     setLeaving(true);
     setTimeout(() => {
-      window.location.href = import.meta.env.VITE_DISQUALIFIED_URL || '/not-eligible';
+      window.location.href = (import.meta.env.VITE_DISQUALIFIED_URL || '') + '/not-tamil';
     }, 420);
   }
 
