@@ -76,6 +76,16 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
       setAmpm(h < 12 ? 'AM' : 'PM');
       setMinute(d.getMinutes());
       setSecond(d.getSeconds());
+    } else {
+      /* value cleared — reset picker to blank state */
+      setSelDate(null);
+      const now = new Date();
+      setViewYear(now.getFullYear());
+      setViewMonth(now.getMonth());
+      setHour12(7);
+      setMinute(0);
+      setSecond(0);
+      setAmpm('PM');
     }
   }, [value]);
 
