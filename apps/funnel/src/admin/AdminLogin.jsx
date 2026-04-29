@@ -128,62 +128,6 @@ export default function AdminLogin({ onLogin }) {
             </button>
           </form>
 
-          {/* ── Forgot password section ── */}
-          <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid rgba(209,196,240,0.45)' }}>
-            {fpSent ? (
-              /* Success state */
-              <div style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
-                background: 'rgba(237,234,248,0.55)', borderRadius: 12, padding: '14px 16px',
-                border: '1px solid rgba(147,51,234,0.15)',
-              }}>
-                <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg,#5B21B6,#9333EA)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>
-                </div>
-                <p style={{ fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.85rem', color: '#3B0764', margin: 0 }}>
-                  Reset link sent!
-                </p>
-                <p style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.75rem', color: 'rgba(91,33,182,0.55)', margin: 0, textAlign: 'center', lineHeight: 1.5 }}>
-                  Check <strong>marketing.integfarms@gmail.com</strong> for the password reset link.
-                </p>
-                <button
-                  onClick={() => { setFpSent(false); setFpError(''); }}
-                  style={{ marginTop: 4, fontFamily: 'Outfit,sans-serif', fontSize: '0.75rem', color: 'rgba(91,33,182,0.45)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                >
-                  Send again
-                </button>
-              </div>
-            ) : (
-              /* Link + optional error */
-              <div style={{ textAlign: 'center' }}>
-                {fpError && (
-                  <p style={{ fontFamily: 'Outfit,sans-serif', fontSize: '0.75rem', color: '#EF4444', marginBottom: 8 }}>
-                    ⚠ {fpError}
-                  </p>
-                )}
-                <button
-                  onClick={handleForgotPassword}
-                  disabled={fpLoading}
-                  style={{
-                    background: 'none', border: 'none', cursor: fpLoading ? 'not-allowed' : 'pointer',
-                    fontFamily: 'Outfit,sans-serif', fontSize: '0.82rem', fontWeight: 600,
-                    color: fpLoading ? 'rgba(91,33,182,0.35)' : '#5B21B6',
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    textDecoration: 'none',
-                    padding: 0,
-                  }}
-                >
-                  {fpLoading && (
-                    <svg style={{ animation: 'spin 1s linear infinite', width: 13, height: 13 }} viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                    </svg>
-                  )}
-                  {fpLoading ? 'Sending reset link...' : 'Forgot password?'}
-                </button>
-              </div>
-            )}
-          </div>
 
         </div>
       </div>
