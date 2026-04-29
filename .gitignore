@@ -29,3 +29,11 @@ backend/coverage/
 
 # Claude
 .claude/
+
+# Vercel
+.vercel
+
+# Temp env pull files
+*.env.prod.check
+*.env.verify
+*.env.vercel.local
