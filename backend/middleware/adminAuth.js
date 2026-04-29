@@ -3,7 +3,7 @@ const { getPassword } = require('../utils/adminConfig');
 
 function adminAuth(req, res, next) {
   const header   = req.headers.authorization || '';
-  const token    = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const token    = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   const expected = getPassword();
 
   if (!token || !expected) {

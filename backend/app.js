@@ -10,11 +10,14 @@ const authRouter          = require('./routes/auth');
 const app = express();
 
 // Auto-migrate: add slot-2 columns if they don't exist yet
-pool.query(`
+const _migrationResult = pool.query(`
   ALTER TABLE webinar_config
     ADD COLUMN IF NOT EXISTS pending_whatsapp_link_2 TEXT DEFAULT '',
     ADD COLUMN IF NOT EXISTS whatsapp_link_swap_at_2 TIMESTAMPTZ DEFAULT NULL
-`).catch(err => console.error('[Migration] slot-2 columns error:', err.message));
+`);
+if (_migrationResult && typeof _migrationResult.catch === 'function') {
+  _migrationResult.catch(err => console.error('[Migration] slot-2 columns error:', err.message));
+}
 
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
 app.use(express.json());

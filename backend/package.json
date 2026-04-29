@@ -11,7 +11,7 @@
   "jest": {
     "testEnvironment": "node",
     "testMatch": [
-      "**/__tests__/**/*.test.js"
+      "**/tests/**/*.test.js"
     ],
     "clearMocks": true,
     "testTimeout": 10000
