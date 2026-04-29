@@ -233,7 +233,9 @@ export default function Screen4() {
         }}>
         {[
           {
-            text: 'Every Sat & Tue',
+            text: state.webinarConfig?.next_webinar_at
+              ? new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(state.webinarConfig.next_webinar_at))
+              : 'Every Sat & Tue',
             icon: (
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.85)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
@@ -241,7 +243,9 @@ export default function Screen4() {
             ),
           },
           {
-            text: '7:00 PM IST',
+            text: state.webinarConfig?.next_webinar_at
+              ? new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(state.webinarConfig.next_webinar_at)) + ' IST'
+              : '7:00 PM IST',
             icon: (
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.85)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
