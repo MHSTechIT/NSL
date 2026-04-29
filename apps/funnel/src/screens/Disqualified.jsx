@@ -61,13 +61,13 @@ export default function Disqualified() {
           fontWeight: 900, fontSize: '1.45rem',
           color: '#2d0a6e', lineHeight: 1.2, marginBottom: 14,
         }}>
-          Want to Change Your{' '}
+          This workshop is{' '}
           <span style={{
-            background: 'linear-gradient(90deg, #16a34a, #22c55e)',
+            background: 'linear-gradient(90deg, #dc2626, #ef4444)',
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
           }}>
-            Lifestyle
-          </span>{' '}Naturally?
+            not right
+          </span>{' '}for you.
         </h2>
 
         {/* Divider */}
