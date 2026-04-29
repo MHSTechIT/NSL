@@ -42,21 +42,47 @@ export default function WhatsAppLinksEditor({ token }) {
   async function handleSave() {
     setSaving(true);
     setToast(null);
-    const cleanPending = extractURL(pendingLink);
-    setPendingLink(cleanPending);
+    const cleanLink = extractURL(pendingLink);
+    setPendingLink(cleanLink);
 
-    const body = {
-      pending_whatsapp_link: cleanPending,
-      whatsapp_link_swap_at: swapAt ? fromISTValue(swapAt) : null,
-    };
+    let body;
+    if (swapAt) {
+      // Scheduled swap — store as pending, activates at the set time
+      body = {
+        pending_whatsapp_link: cleanLink,
+        whatsapp_link_swap_at: fromISTValue(swapAt),
+      };
+    } else {
+      // No schedule → activate immediately
+      body = {
+        tuesday_whatsapp_link: cleanLink,
+        friday_whatsapp_link: cleanLink,
+        pending_whatsapp_link: '',
+        whatsapp_link_swap_at: null,
+      };
+    }
 
     const res = await fetch('/api/admin/webinar-config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
     });
+
+    if (res.ok && !swapAt) {
+      // Reflect the new active link immediately in the UI
+      setCurrentLink(cleanLink);
+      setPendingLink('');
+    }
+
     setSaving(false);
-    setToast({ ok: res.ok, msg: res.ok ? 'Scheduled! Link will auto-update at the set time.' : 'Failed to save. Try again.' });
+    setToast({
+      ok: res.ok,
+      msg: res.ok
+        ? swapAt
+          ? 'Scheduled! Link will auto-update at the set time.'
+          : 'Link updated! It is now live for all users.'
+        : 'Failed to save. Try again.',
+    });
     setTimeout(() => setToast(null), 4000);
   }
 
