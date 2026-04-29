@@ -24,7 +24,7 @@ export default function WhatsAppLinksEditor({ token }) {
   const [toast,         setToast]         = useState(null);
   const [copied,        setCopied]        = useState(false);
 
-  useEffect(() => {
+  function loadConfig() {
     fetch('/api/webinar-config')
       .then(r => r.json())
       .then(d => {
@@ -32,7 +32,9 @@ export default function WhatsAppLinksEditor({ token }) {
         setPendingLink(d.pending_whatsapp_link || '');
         setSwapAt(d.whatsapp_link_swap_at ? toISTValue(d.whatsapp_link_swap_at) : '');
       });
-  }, []);
+  }
+
+  useEffect(() => { loadConfig(); }, []);
 
   function extractURL(val) {
     const match = val.match(/https?:\/\/[^\s]+/);
@@ -68,13 +70,13 @@ export default function WhatsAppLinksEditor({ token }) {
       body: JSON.stringify(body),
     });
 
-    if (res.ok && !swapAt) {
-      // Reflect the new active link immediately in the UI
-      setCurrentLink(cleanLink);
-      setPendingLink('');
+    setSaving(false);
+
+    if (res.ok) {
+      // Always re-fetch from server so UI reflects exact DB state
+      loadConfig();
     }
 
-    setSaving(false);
     setToast({
       ok: res.ok,
       msg: res.ok
@@ -195,13 +197,38 @@ export default function WhatsAppLinksEditor({ token }) {
 
         {/* Auto-swap date & time */}
         <div>
-          <label style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.75rem', fontWeight: 700, color: '#4A1A94', display: 'block', marginBottom: 7 }}>
-            Auto-activate at (IST)
-          </label>
-          <DateTimePicker value={swapAt} onChange={setSwapAt} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+            <label style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.75rem', fontWeight: 700, color: '#4A1A94' }}>
+              Auto-activate at (IST) <span style={{ fontWeight: 400, color: 'rgba(91,33,182,0.50)' }}>— optional</span>
+            </label>
+            {swapAt && (
+              <button
+                type="button"
+                onClick={() => setSwapAt('')}
+                title="Clear schedule — link will activate immediately on Save"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 8px', borderRadius: 20,
+                  border: '1px solid rgba(220,38,38,0.35)',
+                  background: 'rgba(254,226,226,0.60)',
+                  fontFamily: 'Outfit, sans-serif', fontSize: '0.70rem', fontWeight: 700,
+                  color: '#DC2626', cursor: 'pointer',
+                }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                Clear schedule
+              </button>
+            )}
+          </div>
+          <DateTimePicker value={swapAt} onChange={setSwapAt} placeholder="Leave blank to update immediately" />
           {swapDate && (
             <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.73rem', color: 'rgba(91,33,182,0.55)', marginTop: 6 }}>
               {swapDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
+            </p>
+          )}
+          {!swapAt && pendingLink && (
+            <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.73rem', color: '#15803d', marginTop: 6, fontWeight: 600 }}>
+              ✓ No schedule set — will go live immediately on Save
             </p>
           )}
         </div>
