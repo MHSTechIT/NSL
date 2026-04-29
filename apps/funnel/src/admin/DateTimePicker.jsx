@@ -152,6 +152,11 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
     const d = new Date(viewYear, viewMonth, day, 23, 59, 59);
     return d < today;
   };
+  // True if the currently viewed month/year is entirely in the past
+  const isViewingPastMonth = () => {
+    return viewYear < today.getFullYear() ||
+      (viewYear === today.getFullYear() && viewMonth < today.getMonth());
+  };
 
   /* --- styles --- */
   const selStyle = {
@@ -212,7 +217,9 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
         <div style={dropdown}>
           {/* Month nav */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <button type="button" onClick={prevMonth} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(139,92,246,0.18)', background: 'rgba(237,234,248,0.50)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <button type="button" onClick={prevMonth}
+              disabled={!isViewingPastMonth() && viewYear === today.getFullYear() && viewMonth === today.getMonth()}
+              style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(139,92,246,0.18)', background: 'rgba(237,234,248,0.50)', cursor: (viewYear === today.getFullYear() && viewMonth === today.getMonth()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: (viewYear === today.getFullYear() && viewMonth === today.getMonth()) ? 0.3 : 1 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#3B0764' }}>{MONTHS[viewMonth]} {viewYear}</span>
@@ -244,13 +251,14 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
                   style={{
                     height: 26, borderRadius: 7, border: 'none',
                     background: sel ? '#5B21B6' : tod ? 'rgba(139,92,246,0.12)' : 'transparent',
-                    color: past ? 'rgba(91,33,182,0.20)' : sel ? '#fff' : tod ? '#5B21B6' : '#3B0764',
+                    color: past ? '#d1d5db' : sel ? '#fff' : tod ? '#5B21B6' : '#3B0764',
                     fontWeight: sel ? 700 : tod ? 600 : 400,
                     fontSize: '0.78rem',
                     cursor: past ? 'not-allowed' : 'pointer',
                     transition: 'all 150ms',
                     outline: tod && !sel ? '1.5px solid rgba(91,33,182,0.35)' : 'none',
                     textDecoration: past ? 'line-through' : 'none',
+                    opacity: past ? 0.5 : 1,
                   }}
                   onMouseEnter={e => { if (!sel && !past) e.currentTarget.style.background = 'rgba(139,92,246,0.15)'; }}
                   onMouseLeave={e => { if (!sel && !past) e.currentTarget.style.background = tod ? 'rgba(139,92,246,0.12)' : 'transparent'; }}
