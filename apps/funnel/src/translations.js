@@ -10,7 +10,7 @@ export const t = {
     },
     subheadline: {
       tamil: 'இலவச வெபினாரில் சேர்ந்து சர்க்கரை நோயை மாற்றும் ரகசியத்தை அறியுங்கள்!',
-      english: 'In 90 minutes, Dr. Prabhakar Raj will show you the exact science behind diabetes reversal — the same method 15,000+ of his students used to stop medicines permanently.',
+      english: 'In this special workshop, Dr. Prabhakar Raj will show you the exact science behind diabetes reversal — the same method 15,000+ of his students used to stop medicines permanently.',
     },
     cta: { tamil: 'ஆம், என்னிடம் சர்க்கரை நோய் உள்ளது →', english: 'Check Your Eligibility' },
     seats: { tamil: 'இன்று மட்டும் இடங்கள் வரையறுக்கப்பட்டுள்ளன', english: 'Limited seats available today' },
