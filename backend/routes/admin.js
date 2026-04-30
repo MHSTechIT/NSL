@@ -84,6 +84,29 @@ router.put('/webinar-config', configValidators, async (req, res) => {
   }
 });
 
+/* ── DELETE /api/admin/leads ── */
+router.delete('/leads', async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'No lead IDs provided.' });
+  }
+  // Validate all ids are integers
+  if (!ids.every(id => Number.isInteger(Number(id)))) {
+    return res.status(400).json({ error: 'Invalid IDs.' });
+  }
+  try {
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
+    const result = await pool.query(
+      `DELETE FROM leads WHERE id IN (${placeholders})`,
+      ids.map(Number)
+    );
+    res.json({ success: true, deleted: result.rowCount });
+  } catch (err) {
+    console.error('Delete leads error:', err.message);
+    res.status(500).json({ error: 'Failed to delete leads.' });
+  }
+});
+
 /* ── POST /api/admin/sync-sheet ── */
 router.post('/sync-sheet', async (_req, res) => {
   const result = await syncLeadsToSheet();
