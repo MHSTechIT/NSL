@@ -84,8 +84,8 @@ router.put('/webinar-config', configValidators, async (req, res) => {
   }
 });
 
-/* ── DELETE /api/admin/leads ── */
-router.delete('/leads', async (req, res) => {
+/* ── POST /api/admin/leads/delete ── */
+router.post('/leads/delete', async (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: 'No lead IDs provided.' });

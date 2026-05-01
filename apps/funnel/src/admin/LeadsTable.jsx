@@ -97,8 +97,8 @@ export default function LeadsTable({ token }) {
   async function handleDelete() {
     setDeleting(true);
     try {
-      const res = await fetch('/api/admin/leads', {
-        method: 'DELETE',
+      const res = await fetch('/api/admin/leads/delete', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ ids: [...selected] }),
       });
