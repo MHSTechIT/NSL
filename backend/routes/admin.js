@@ -86,19 +86,17 @@ router.put('/webinar-config', configValidators, async (req, res) => {
 
 /* ── POST /api/admin/leads/delete ── */
 router.post('/leads/delete', async (req, res) => {
-  const { ids } = req.body;
-  if (!Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ error: 'No lead IDs provided.' });
-  }
-  // Validate all ids are integers
-  if (!ids.every(id => Number.isInteger(Number(id)))) {
-    return res.status(400).json({ error: 'Invalid IDs.' });
+  // Accept ids from query string (?ids=1&ids=2&ids=3) to avoid body-parsing issues through proxies
+  const raw = [].concat(req.query.ids || []);
+  const ids = raw.map(Number).filter(n => Number.isInteger(n) && n > 0);
+  if (ids.length === 0) {
+    return res.status(400).json({ error: 'No valid lead IDs provided.' });
   }
   try {
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
     const result = await pool.query(
       `DELETE FROM leads WHERE id IN (${placeholders})`,
-      ids.map(Number)
+      ids
     );
     res.json({ success: true, deleted: result.rowCount });
   } catch (err) {

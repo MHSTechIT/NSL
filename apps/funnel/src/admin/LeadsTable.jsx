@@ -97,12 +97,14 @@ export default function LeadsTable({ token }) {
   async function handleDelete() {
     setDeleting(true);
     try {
-      const res = await fetch('/api/admin/leads/delete', {
+      const params = new URLSearchParams();
+      [...selected].forEach(id => params.append('ids', id));
+      const res = await fetch(`/api/admin/leads/delete?${params.toString()}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ids: [...selected] }),
+        headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : {};
       if (res.ok) {
         setSyncToast({ ok: true, msg: `✓ ${data.deleted} lead${data.deleted !== 1 ? 's' : ''} permanently deleted.` });
         setDeleteMode(false);
@@ -110,10 +112,10 @@ export default function LeadsTable({ token }) {
         setConfirmOpen(false);
         loadLeads();
       } else {
-        setSyncToast({ ok: false, msg: data.error || 'Delete failed.' });
+        setSyncToast({ ok: false, msg: data.error || `Delete failed (${res.status}).` });
       }
-    } catch {
-      setSyncToast({ ok: false, msg: 'Network error. Try again.' });
+    } catch (e) {
+      setSyncToast({ ok: false, msg: e?.message || 'Network error. Try again.' });
     } finally {
       setDeleting(false);
       setTimeout(() => setSyncToast(null), 4000);
