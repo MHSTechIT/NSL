@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { m } from 'framer-motion';
+import { trackEvent } from '../utils/trackEvent';
 
 /* ── Link expiry countdown ── */
 function LinkExpiryTimer() {
@@ -29,12 +30,16 @@ function LinkExpiryTimer() {
 
 export default function WhatsAppPage() {
   const [waLink, setWaLink] = useState('');
+  const [webinarAt, setWebinarAt] = useState(null);
 
   useEffect(() => {
     // Initial fetch — get current link immediately
     fetch(`/api/webinar-config?_=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
-      .then(data => setWaLink(data.tuesday_whatsapp_link || ''))
+      .then(data => {
+        setWaLink(data.tuesday_whatsapp_link || '');
+        setWebinarAt(data.next_webinar_at || null);
+      })
       .catch(() => {});
 
     // SSE — update the link in real-time whenever admin changes it
@@ -49,6 +54,7 @@ export default function WhatsAppPage() {
   }, []);
 
   function handleJoinClick() {
+    trackEvent('wa_join_clicked', webinarAt);
     // lead_id passed as URL param from the funnel registration page
     const params = new URLSearchParams(window.location.search);
     const leadId = params.get('lead_id') || localStorage.getItem('mhs_lead_id');

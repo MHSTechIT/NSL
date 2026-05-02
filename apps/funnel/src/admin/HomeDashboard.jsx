@@ -132,13 +132,29 @@ const STAT_BOXES = [
   },
 ];
 
-/* ── Funnel drop-off steps ── */
-const FUNNEL_STEPS = [
-  { label: 'CTA Clicked',         keys: ['cta_clicked'] },
-  { label: 'Sugar Selected',      keys: ['sugar_150_250', 'sugar_250_plus'] },
-  { label: 'Tamil: Yes',          keys: ['tamil_yes'] },
-  { label: 'Registered',          keys: ['registration_submitted'] },
-  { label: 'Joined WhatsApp',     keys: ['wa_join_clicked'] },
+
+/* ── Drop-off summary boxes ── */
+const DROPOFF_BOXES = [
+  {
+    label: 'CTA → Sugar Page',
+    entered: (c) => c.cta_clicked || 0,
+    acted:   (c) => (c.sugar_150_250 || 0) + (c.sugar_250_plus || 0) + (c.disqualified_no_diabetes || 0),
+  },
+  {
+    label: 'Sugar → Tamil Page',
+    entered: (c) => (c.sugar_150_250 || 0) + (c.sugar_250_plus || 0) + (c.disqualified_no_diabetes || 0),
+    acted:   (c) => (c.tamil_yes || 0) + (c.tamil_no || 0),
+  },
+  {
+    label: 'Tamil → Registration',
+    entered: (c) => (c.tamil_yes || 0) + (c.tamil_no || 0),
+    acted:   (c) => c.registration_submitted || 0,
+  },
+  {
+    label: 'Registration → WhatsApp',
+    entered: (c) => c.registration_submitted || 0,
+    acted:   (c) => c.wa_join_clicked || 0,
+  },
 ];
 
 /* ── Helper: format ISO → readable date ── */
@@ -211,6 +227,63 @@ function StatBox({ box, counts }) {
           color: 'rgba(91,33,182,0.50)', marginTop: 2,
         }}>
           {box.sub}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Drop-off summary box ── */
+function DropoffBox({ box, counts }) {
+  const entered = box.entered(counts);
+  const acted = box.acted(counts);
+  const noAction = Math.max(0, entered - acted);
+  const pct = entered > 0 ? Math.round((noAction / entered) * 100) : 0;
+
+  const color = pct > 50 ? '#DC2626' : pct > 25 ? '#D97706' : '#059669';
+  const bg = pct > 50 ? 'rgba(220,38,38,0.08)' : pct > 25 ? 'rgba(217,119,6,0.08)' : 'rgba(5,150,105,0.08)';
+  const ringBg = pct > 50 ? 'rgba(220,38,38,0.12)' : pct > 25 ? 'rgba(217,119,6,0.12)' : 'rgba(5,150,105,0.12)';
+
+  return (
+    <div style={{
+      borderRadius: 16,
+      border: '1px solid rgba(147,51,234,0.12)',
+      background: '#fff',
+      padding: '18px 16px 16px',
+      boxShadow: '0 2px 12px rgba(91,33,182,0.07)',
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 10,
+        background: ringBg,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: color,
+      }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>
+        </svg>
+      </div>
+      <div style={{
+        fontFamily: 'Outfit, sans-serif',
+        fontSize: '1.9rem', fontWeight: 800,
+        color: color, lineHeight: 1,
+      }}>
+        {pct}%
+      </div>
+      <div>
+        <div style={{
+          fontFamily: 'Outfit, sans-serif',
+          fontSize: '0.80rem', fontWeight: 700,
+          color: '#3B0764', lineHeight: 1.2,
+        }}>
+          {box.label}
+        </div>
+        <div style={{
+          fontFamily: 'Outfit, sans-serif',
+          fontSize: '0.68rem', fontWeight: 500,
+          color: 'rgba(91,33,182,0.50)', marginTop: 2,
+        }}>
+          {noAction} no action · {entered} entered
         </div>
       </div>
     </div>
@@ -362,12 +435,6 @@ export default function HomeDashboard({ token }) {
     return () => clearInterval(id);
   }, [fetchDashboard]);
 
-  /* ── Funnel drop-off data ── */
-  const funnelData = FUNNEL_STEPS.map(step => ({
-    label: step.label,
-    count: step.keys.reduce((s, k) => s + (counts[k] || 0), 0),
-  }));
-
   const inputStyle = {
     height: '2.1rem', borderRadius: 10, border: '1px solid rgba(139,92,246,0.25)',
     padding: '0 10px', fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
@@ -501,88 +568,19 @@ export default function HomeDashboard({ token }) {
         }
       </div>
 
-      {/* ── Funnel drop-off table ── */}
+      {/* ── Drop-off summary boxes ── */}
       {!loading && (
         <div style={{
-          borderRadius: 16, border: '1px solid rgba(147,51,234,0.12)',
-          background: '#fff', overflow: 'hidden',
-          boxShadow: '0 2px 12px rgba(91,33,182,0.07)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+          gap: 12, marginBottom: 28,
         }}>
-          <div style={{
-            padding: '14px 20px', borderBottom: '1px solid rgba(147,51,234,0.08)',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>
-            </svg>
-            <span style={{ fontWeight: 800, fontSize: '0.90rem', color: '#3B0764' }}>
-              Funnel Drop-off
-            </span>
-          </div>
-
-          <div style={{ padding: '8px 0' }}>
-            {funnelData.map((step, i) => {
-              const prev = i > 0 ? funnelData[i - 1].count : null;
-              const dropPct = prev && prev > 0
-                ? Math.round((1 - step.count / prev) * 100)
-                : null;
-
-              const barPct = funnelData[0].count > 0
-                ? Math.min(100, Math.round((step.count / funnelData[0].count) * 100))
-                : 0;
-
-              return (
-                <div key={step.label} style={{
-                  padding: '10px 20px',
-                  borderBottom: i < funnelData.length - 1 ? '1px solid rgba(147,51,234,0.06)' : 'none',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{
-                        width: 22, height: 22, borderRadius: 6,
-                        background: 'rgba(91,33,182,0.10)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '0.65rem', fontWeight: 800, color: '#5B21B6',
-                        flexShrink: 0,
-                      }}>
-                        {i + 1}
-                      </span>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#3B0764' }}>
-                        {step.label}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {dropPct !== null && (
-                        <span style={{
-                          fontSize: '0.70rem', fontWeight: 700,
-                          color: dropPct > 50 ? '#DC2626' : dropPct > 25 ? '#D97706' : '#059669',
-                          background: dropPct > 50 ? 'rgba(220,38,38,0.08)' : dropPct > 25 ? 'rgba(217,119,6,0.08)' : 'rgba(5,150,105,0.08)',
-                          padding: '2px 8px', borderRadius: 20,
-                        }}>
-                          −{dropPct}% drop
-                        </span>
-                      )}
-                      <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#5B21B6', minWidth: 40, textAlign: 'right' }}>
-                        {step.count.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Progress bar */}
-                  <div style={{ height: 4, borderRadius: 4, background: 'rgba(91,33,182,0.08)' }}>
-                    <div style={{
-                      height: '100%', borderRadius: 4,
-                      background: 'linear-gradient(90deg, #5B21B6, #9333EA)',
-                      width: `${barPct}%`,
-                      transition: 'width 600ms ease',
-                    }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {DROPOFF_BOXES.map(box => (
+            <DropoffBox key={box.label} box={box} counts={counts} />
+          ))}
         </div>
       )}
+
     </div>
   );
 }

@@ -67,12 +67,13 @@ export default function LeadsTable({ token }) {
   const paginated = sorted.slice((page - 1) * perPage, page * perPage);
 
   function exportCSV() {
-    const headers = ['Name', 'Phone', 'Sugar Level', 'Duration', 'Registered At', 'WA Clicked'];
+    const headers = ['Name', 'Phone', 'Sugar Level', 'Duration', 'Ad Source', 'Registered At', 'WA Clicked'];
     const rows = sorted.map(l => [
       l.full_name,
       '+91' + l.whatsapp_number,
       SUGAR_LABELS[l.sugar_level] || l.sugar_level,
       DURATION_LABELS[l.diabetes_duration] || l.diabetes_duration,
+      l.utm_content || '',
       new Date(l.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
       l.wa_clicked ? 'Yes' : 'No',
     ]);
@@ -147,6 +148,7 @@ export default function LeadsTable({ token }) {
     { key: 'whatsapp_number',   label: 'Phone' },
     { key: 'sugar_level',       label: 'Sugar Level' },
     { key: 'diabetes_duration', label: 'Duration' },
+    { key: 'utm_content',       label: 'Ad Source' },
     { key: 'created_at',        label: 'Registered' },
     { key: 'wa_clicked',        label: 'WhatsApp' },
   ];
@@ -379,6 +381,16 @@ export default function LeadsTable({ token }) {
                   </span>
                 </td>
                 <td className="px-3 py-3 text-gray-600 whitespace-nowrap text-xs">{DURATION_LABELS[l.diabetes_duration] || l.diabetes_duration}</td>
+                <td className="px-3 py-3 whitespace-nowrap text-xs">
+                  {l.utm_content ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill text-xs font-semibold bg-blue-50 text-blue-700" style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }} title={l.utm_content}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                      {l.utm_content}
+                    </span>
+                  ) : (
+                    <span className="text-gray-300">—</span>
+                  )}
+                </td>
                 <td className="px-3 py-3 text-gray-400 whitespace-nowrap text-xs">
                   {new Date(l.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                 </td>
@@ -398,7 +410,7 @@ export default function LeadsTable({ token }) {
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={deleteMode ? 7 : 6} className="px-3 py-16 text-center">
+                <td colSpan={deleteMode ? 8 : 7} className="px-3 py-16 text-center">
                   <div className="flex flex-col items-center gap-2 text-purple-300">
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
                     <p className="font-sans text-sm">No leads yet.</p>
