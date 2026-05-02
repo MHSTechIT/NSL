@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { m } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
+import { trackEvent } from '../utils/trackEvent';
 
 /* ── Link expiry countdown ── */
 function LinkExpiryTimer() {
@@ -34,6 +35,7 @@ export default function WhatsAppPage() {
   const waLink = state.webinarConfig?.tuesday_whatsapp_link || '';
 
   function handleJoinClick() {
+    trackEvent('wa_join_clicked', state.webinarConfig?.next_webinar_at);
     const leadId = localStorage.getItem('mhs_lead_id');
     if (leadId) {
       fetch(`/api/leads/${leadId}/wa-click`, { method: 'PATCH' }).catch(() => {});

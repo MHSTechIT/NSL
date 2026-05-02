@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { m } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
+import { trackEvent } from '../utils/trackEvent';
 
 const slideIn = {
   initial: { opacity: 0, y: 12 },
@@ -143,6 +144,7 @@ export default function Screen4() {
         payload: { leadId: data.lead_id, leadScore: data.lead_score, whatsappGroupLink: data.whatsapp_link },
       });
 
+      trackEvent('registration_submitted', state.webinarConfig?.next_webinar_at);
       setSubmitting(false);
       if (data.lead_id) localStorage.setItem('mhs_lead_id', data.lead_id);
       const waBase = import.meta.env.VITE_WHATSAPP_URL || '/whatsapp';

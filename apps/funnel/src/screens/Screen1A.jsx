@@ -4,6 +4,7 @@ import { m, AnimatePresence } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import CountdownTimer, { stopTick } from '../components/CountdownTimer';
+import { trackEvent } from '../utils/trackEvent';
 import Confetti from '../components/Confetti';
 import TrustBar from '../components/TrustBar';
 
@@ -240,6 +241,8 @@ export default function Screen1A() {
 
   function handleSugarSelect(opt) {
     stopTick();
+    const sugarEventMap = { '150-250': 'sugar_150_250', '250+': 'sugar_250_plus', 'none': 'disqualified_no_diabetes' };
+    if (sugarEventMap[opt.id]) trackEvent(sugarEventMap[opt.id], state.webinarConfig?.next_webinar_at);
     if (opt.disqualify) {
       dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
       setLeaving(true);
@@ -254,6 +257,7 @@ export default function Screen1A() {
   }
 
   function handleZoomYes() {
+    trackEvent('tamil_yes', state.webinarConfig?.next_webinar_at);
     setPopupLeaving(true);
     setTimeout(() => {
       setExpanded(false);
@@ -265,6 +269,7 @@ export default function Screen1A() {
   }
 
   function handleZoomNo() {
+    trackEvent('tamil_no', state.webinarConfig?.next_webinar_at);
     dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
     setLeaving(true);
     setTimeout(() => {
@@ -308,7 +313,7 @@ export default function Screen1A() {
         style={{ position: 'absolute', inset: 0, borderRadius: 50, background: 'rgba(139,92,246,0.55)', filter: 'blur(12px)', zIndex: 0 }}
       />
       <m.button
-        onClick={() => { stopTick(); setExpanded(true); }}
+        onClick={() => { stopTick(); trackEvent('cta_clicked', state.webinarConfig?.next_webinar_at); setExpanded(true); }}
         animate={{
           scale: [1, 1.04, 1],
           boxShadow: ['0 4px 20px rgba(91,33,182,0.45)', '0 6px 36px rgba(139,92,246,0.85)', '0 4px 20px rgba(91,33,182,0.45)'],

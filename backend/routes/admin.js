@@ -148,4 +148,52 @@ router.patch('/change-password',
   }
 );
 
+/* ── GET /api/admin/dashboard ── */
+router.get('/dashboard', async (req, res) => {
+  const { from, to, webinar_at } = req.query;
+  const params = [];
+  const conditions = [];
+
+  if (from) {
+    params.push(new Date(from + 'T00:00:00+05:30'));
+    conditions.push(`created_at >= $${params.length}`);
+  }
+  if (to) {
+    params.push(new Date(to + 'T23:59:59+05:30'));
+    conditions.push(`created_at <= $${params.length}`);
+  }
+  if (webinar_at) {
+    params.push(new Date(webinar_at));
+    conditions.push(`webinar_at = $${params.length}`);
+  }
+
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT event_name, COUNT(*)::int AS count
+       FROM click_events
+       ${where}
+       GROUP BY event_name`,
+      params
+    );
+
+    const { rows: sessions } = await pool.query(
+      `SELECT DISTINCT webinar_at
+       FROM click_events
+       WHERE webinar_at IS NOT NULL
+       ORDER BY webinar_at DESC
+       LIMIT 50`
+    );
+
+    const counts = {};
+    for (const row of rows) counts[row.event_name] = row.count;
+
+    res.json({ counts, sessions: sessions.map(r => r.webinar_at) });
+  } catch (err) {
+    console.error('Dashboard query error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+});
+
 module.exports = router;

@@ -1,10 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
 import AdminLogin from './AdminLogin';
+import HomeDashboard from './HomeDashboard';
 import LeadsTable from './LeadsTable';
 import WhatsAppLinksEditor from './WhatsAppLinksEditor';
 import TimerConfig from './TimerConfig';
 
 const TAB_ICONS = {
+  dashboard: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>
+  ),
   leads: (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
@@ -25,9 +32,10 @@ const TAB_ICONS = {
 };
 
 const TABS = [
-  { id: 'leads',    label: 'Leads' },
-  { id: 'whatsapp', label: 'WhatsApp Links' },
-  { id: 'timer',    label: 'Timer & Controls' },
+  { id: 'dashboard', label: 'Home Dashboard' },
+  { id: 'leads',     label: 'Leads' },
+  { id: 'whatsapp',  label: 'WhatsApp Links' },
+  { id: 'timer',     label: 'Timer & Controls' },
 ];
 
 /* ── Change Password Modal ── */
@@ -191,7 +199,7 @@ function ChangePwModal({ token, onClose, onSuccess }) {
 /* ══════════════════════ AdminPage ══════════════════════ */
 export default function AdminPage() {
   const [token, setToken]           = useState(() => sessionStorage.getItem('mhs_admin_token') || '');
-  const [tab, setTab]               = useState('leads');
+  const [tab, setTab]               = useState('dashboard');
   const [showDropdown, setShowDropdown] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
   const dropRef = useRef(null);
@@ -310,9 +318,10 @@ export default function AdminPage() {
 
         {/* Content card */}
         <div className="bg-white rounded-card shadow-card p-6">
-          {tab === 'leads'    && <LeadsTable token={token} />}
-          {tab === 'whatsapp' && <WhatsAppLinksEditor token={token} />}
-          {tab === 'timer'    && <TimerConfig token={token} />}
+          {tab === 'dashboard' && <HomeDashboard token={token} />}
+          {tab === 'leads'     && <LeadsTable token={token} />}
+          {tab === 'whatsapp'  && <WhatsAppLinksEditor token={token} />}
+          {tab === 'timer'     && <TimerConfig token={token} />}
         </div>
       </div>
 

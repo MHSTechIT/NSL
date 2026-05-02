@@ -12,6 +12,7 @@ import {
   pixelInitiateRegistration, pixelLead,
   pixelCompleteRegistration, pixelFormAbandoned,
 } from '../utils/pixel';
+import { trackEvent } from '../utils/trackEvent';
 
 const durationOptions = ['new', 'mid', 'long'];
 const HALF = 280; // ms per half-flip
@@ -169,6 +170,8 @@ export default function Screen3() {
   }
 
   function handleSelect(durKey) {
+    const durationEventMap = { new: 'duration_new', mid: 'duration_mid', long: 'duration_long' };
+    if (durationEventMap[durKey]) trackEvent(durationEventMap[durKey], state.webinarConfig?.next_webinar_at);
     dispatch({ type: 'SET_DURATION', payload: durKey });
     dispatch({ type: 'SET_NAV_DIRECTION', payload: 'forward' });
     pixelDurationSelected(durKey, computeLeadScore(state.sugarLevel, durKey));
@@ -200,6 +203,7 @@ export default function Screen3() {
       dispatch({ type: 'SET_FORM_FIELD', field: 'whatsappNumber', value: phone });
       dispatch({ type: 'SET_FORM_FIELD', field: 'email', value: email });
       dispatch({ type: 'SET_SUBMITTED', payload: { leadId: data.lead_id, leadScore: data.lead_score, whatsappGroupLink: data.whatsapp_link } });
+      trackEvent('registration_submitted', state.webinarConfig?.next_webinar_at);
       setWLink(data.whatsapp_link || '');
 
       /* show overlay immediately; confetti plays on top (z-index 9999) */
@@ -214,6 +218,7 @@ export default function Screen3() {
   }
 
   function handleJoinWA() {
+    trackEvent('wa_join_clicked', state.webinarConfig?.next_webinar_at);
     stopUrgencyTick();
     /* fire-and-forget: record that this lead clicked the WA button */
     const leadId = state.submittedLeadId;

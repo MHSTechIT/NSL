@@ -5,6 +5,7 @@ import { useFunnel } from '../context/FunnelContext';
 import { t } from '../translations';
 import { formatISTDateTime } from '../utils/time';
 import { pixelPurchase, pixelGroupJoinInitiated } from '../utils/pixel';
+import { trackEvent } from '../utils/trackEvent';
 const slideIn = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: 'easeOut' } },
@@ -31,6 +32,7 @@ export default function Screen5() {
   function handleJoin() {
     if (!state.whatsappGroupLink) return;
     setJoinState('joining');
+    trackEvent('wa_join_clicked', state.webinarConfig?.next_webinar_at);
     pixelGroupJoinInitiated();
     window.open(state.whatsappGroupLink, '_blank');
     setTimeout(() => setJoinState('joined'), 2000);
