@@ -58,17 +58,27 @@ router.post('/leads', validators, async (req, res) => {
     ? config.tuesday_whatsapp_link
     : config.friday_whatsapp_link;
 
+  // Look up the currently active webinar session
+  let webinar_id = null;
+  try {
+    const { rows: wRows } = await pool.query(
+      'SELECT id FROM webinars WHERE is_active = TRUE LIMIT 1'
+    );
+    webinar_id = wRows[0]?.id ?? null;
+  } catch (_) { /* webinars table may not exist yet — safe to skip */ }
+
   try {
     const { rows } = await pool.query(
       `INSERT INTO leads
         (full_name, whatsapp_number, email, sugar_level, diabetes_duration,
-         language_pref, lead_score, utm_source, utm_campaign, utm_content, fbclid)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         language_pref, lead_score, utm_source, utm_campaign, utm_content, fbclid, webinar_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING id`,
       [
         full_name, whatsapp_number, email, sugar_level, diabetes_duration,
         language_pref, lead_score,
         utm_source || null, utm_campaign || null, utm_content || null, fbclid || null,
+        webinar_id,
       ]
     );
 

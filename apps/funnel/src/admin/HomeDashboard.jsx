@@ -1,4 +1,59 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import DatePicker from './DatePicker';
+
+/* ── SVG Icons ── */
+const Icons = {
+  rocket: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>
+      <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>
+      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>
+    </svg>
+  ),
+  blood: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2a7 7 0 1 0 0 14A7 7 0 0 0 12 2z" style={{display:'none'}}/>
+      <path d="M12 2C6 9 4 13.5 4 16a8 8 0 0 0 16 0c0-2.5-2-7-8-14z"/>
+    </svg>
+  ),
+  xCircle: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>
+    </svg>
+  ),
+  checkCircle: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>
+    </svg>
+  ),
+  ban: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 14.14 14.14"/>
+    </svg>
+  ),
+  clipboard: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+      <path d="m9 14 2 2 4-4"/>
+    </svg>
+  ),
+  messageCircle: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>
+    </svg>
+  ),
+  youtube: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/>
+      <path d="m10 15 5-3-5-3z"/>
+    </svg>
+  ),
+  shoppingBag: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>
+    </svg>
+  ),
+};
 
 /* ── Stat box definitions (funnel order) ── */
 const STAT_BOXES = [
@@ -6,15 +61,15 @@ const STAT_BOXES = [
     key: 'cta_clicked',
     label: 'Start Registration',
     sub: 'CTA Button',
-    icon: '🚀',
+    icon: Icons.rocket,
     color: '#5B21B6',
     bg: 'rgba(91,33,182,0.08)',
   },
   {
-    key: '__sugar__',          // combined: sugar_150_250 + sugar_250_plus
+    key: '__sugar__',
     label: 'Sugar Level Selected',
     sub: '150–250 + 250+ mg/dL',
-    icon: '🩸',
+    icon: Icons.blood,
     color: '#DC2626',
     bg: 'rgba(220,38,38,0.08)',
     combined: ['sugar_150_250', 'sugar_250_plus'],
@@ -23,7 +78,7 @@ const STAT_BOXES = [
     key: 'disqualified_no_diabetes',
     label: 'No Diabetes',
     sub: 'Disqualified',
-    icon: '❌',
+    icon: Icons.xCircle,
     color: '#9CA3AF',
     bg: 'rgba(156,163,175,0.10)',
   },
@@ -31,7 +86,7 @@ const STAT_BOXES = [
     key: 'tamil_yes',
     label: 'Tamil: Yes',
     sub: 'Language Qualified',
-    icon: '✅',
+    icon: Icons.checkCircle,
     color: '#059669',
     bg: 'rgba(5,150,105,0.08)',
   },
@@ -39,39 +94,15 @@ const STAT_BOXES = [
     key: 'tamil_no',
     label: 'Tamil: No',
     sub: 'Language Disqualified',
-    icon: '🚫',
+    icon: Icons.ban,
     color: '#9CA3AF',
     bg: 'rgba(156,163,175,0.10)',
-  },
-  {
-    key: 'duration_new',
-    label: 'Duration: < 1 Year',
-    sub: 'Screen 3',
-    icon: '⏱',
-    color: '#7C3AED',
-    bg: 'rgba(124,58,237,0.08)',
-  },
-  {
-    key: 'duration_mid',
-    label: 'Duration: 1–5 Years',
-    sub: 'Screen 3',
-    icon: '⏱',
-    color: '#7C3AED',
-    bg: 'rgba(124,58,237,0.08)',
-  },
-  {
-    key: 'duration_long',
-    label: 'Duration: 5+ Years',
-    sub: 'Screen 3',
-    icon: '⏱',
-    color: '#7C3AED',
-    bg: 'rgba(124,58,237,0.08)',
   },
   {
     key: 'registration_submitted',
     label: 'Registration Submitted',
     sub: 'Form completed',
-    icon: '📋',
+    icon: Icons.clipboard,
     color: '#2563EB',
     bg: 'rgba(37,99,235,0.08)',
   },
@@ -79,9 +110,25 @@ const STAT_BOXES = [
     key: 'wa_join_clicked',
     label: 'WhatsApp Join Clicked',
     sub: 'Group link opened',
-    icon: '💬',
+    icon: Icons.messageCircle,
     color: '#16A34A',
     bg: 'rgba(22,163,74,0.08)',
+  },
+  {
+    key: 'youtube_clicked',
+    label: 'YouTube Clicked',
+    sub: 'Channel link opened',
+    icon: Icons.youtube,
+    color: '#DC2626',
+    bg: 'rgba(220,38,38,0.08)',
+  },
+  {
+    key: 'explore_product_clicked',
+    label: 'Explore Products',
+    sub: 'Product page opened',
+    icon: Icons.shoppingBag,
+    color: '#7C3AED',
+    bg: 'rgba(124,58,237,0.08)',
   },
 ];
 
@@ -90,7 +137,6 @@ const FUNNEL_STEPS = [
   { label: 'CTA Clicked',         keys: ['cta_clicked'] },
   { label: 'Sugar Selected',      keys: ['sugar_150_250', 'sugar_250_plus'] },
   { label: 'Tamil: Yes',          keys: ['tamil_yes'] },
-  { label: 'Duration Selected',   keys: ['duration_new', 'duration_mid', 'duration_long'] },
   { label: 'Registered',          keys: ['registration_submitted'] },
   { label: 'Joined WhatsApp',     keys: ['wa_join_clicked'] },
 ];
@@ -140,7 +186,7 @@ function StatBox({ box, counts }) {
         width: 36, height: 36, borderRadius: 10,
         background: box.bg,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '1.1rem',
+        color: box.color,
       }}>
         {box.icon}
       </div>
@@ -187,6 +233,70 @@ function Pill({ label, active, onClick }) {
     >
       {label}
     </button>
+  );
+}
+
+/* ── Custom Dropdown ── */
+function CustomSelect({ value, onChange, options, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const selected = options.find(o => o.value === value);
+
+  return (
+    <div ref={ref} style={{ position: 'relative', minWidth: 180 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%', height: '2.1rem', borderRadius: 10,
+          border: '1px solid rgba(139,92,246,0.25)', background: '#fff',
+          padding: '0 32px 0 12px', fontFamily: 'Outfit, sans-serif',
+          fontSize: '0.82rem', fontWeight: 600, color: '#3B0764',
+          cursor: 'pointer', outline: 'none', textAlign: 'left',
+          position: 'relative',
+        }}
+      >
+        {selected ? selected.label : placeholder}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{ position: 'absolute', right: 10, top: '50%', transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`, transition: 'transform 200ms' }}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: '#fff', borderRadius: 12, border: '1px solid rgba(139,92,246,0.20)',
+          boxShadow: '0 8px 24px rgba(91,33,182,0.15)', zIndex: 50,
+          padding: '4px 0', maxHeight: 200, overflowY: 'auto',
+        }}>
+          {options.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+              style={{
+                width: '100%', border: 'none', background: value === opt.value ? 'rgba(91,33,182,0.08)' : 'transparent',
+                padding: '8px 14px', fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem',
+                fontWeight: value === opt.value ? 700 : 500,
+                color: value === opt.value ? '#5B21B6' : '#3B0764',
+                cursor: 'pointer', textAlign: 'left',
+                transition: 'background 100ms',
+              }}
+              onMouseEnter={e => { if (value !== opt.value) e.target.style.background = 'rgba(91,33,182,0.05)'; }}
+              onMouseLeave={e => { if (value !== opt.value) e.target.style.background = 'transparent'; }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -259,14 +369,13 @@ export default function HomeDashboard({ token }) {
   }));
 
   const inputStyle = {
-    height: '2rem', borderRadius: 8, border: '1px solid rgba(91,33,182,0.20)',
-    padding: '0 10px', fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem',
-    color: '#3B0764', outline: 'none', background: '#fff',
+    height: '2.1rem', borderRadius: 10, border: '1px solid rgba(139,92,246,0.25)',
+    padding: '0 10px', fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
+    color: '#3B0764', outline: 'none', background: '#fff', cursor: 'pointer',
   };
 
   const selectStyle = {
-    ...inputStyle, cursor: 'pointer', paddingRight: 8,
-    maxWidth: 220,
+    ...inputStyle, paddingRight: 8, maxWidth: 220,
   };
 
   return (
@@ -282,7 +391,7 @@ export default function HomeDashboard({ token }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#3B0764' }}>
-            📊 Home Dashboard
+            Home Dashboard
           </h2>
           <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: 'rgba(91,33,182,0.50)' }}>
             Button click analytics across all funnel pages
@@ -308,14 +417,18 @@ export default function HomeDashboard({ token }) {
         </div>
       </div>
 
-      {/* ── Filter bar ── */}
+      {/* ── Filter bar — Date Range ── */}
       <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-        background: 'rgba(237,234,248,0.50)', borderRadius: 14, padding: '12px 14px',
-        marginBottom: 24,
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        background: 'rgba(237,234,248,0.50)', borderRadius: 14,
+        border: '1px solid rgba(139,92,246,0.15)',
+        padding: '10px 14px', marginBottom: sessions.length > 0 ? 10 : 24,
       }}>
-        {/* Date range pills */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.55)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', whiteSpace: 'nowrap' }}>Date Range</span>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           {[
             { id: 'all',    label: 'All Time' },
             { id: 'today',  label: 'Today' },
@@ -326,30 +439,44 @@ export default function HomeDashboard({ token }) {
             <Pill key={p.id} label={p.label} active={dateRange === p.id} onClick={() => setDateRange(p.id)} />
           ))}
         </div>
-
-        {/* Custom date inputs */}
         {dateRange === 'custom' && (
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={inputStyle} />
-            <span style={{ fontSize: '0.75rem', color: 'rgba(91,33,182,0.50)' }}>to</span>
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={inputStyle} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <DatePicker value={customFrom} onChange={setCustomFrom} placeholder="From date" />
+            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: 'rgba(91,33,182,0.45)', fontWeight: 600 }}>to</span>
+            <DatePicker value={customTo} onChange={setCustomTo} placeholder="To date" />
           </div>
         )}
-
-        {/* Webinar session filter */}
-        {sessions.length > 0 && (
-          <select
-            value={webinarAt}
-            onChange={e => setWebinarAt(e.target.value)}
-            style={selectStyle}
-          >
-            <option value="">All Webinars</option>
-            {sessions.map(s => (
-              <option key={s} value={s}>{fmtSession(s)}</option>
-            ))}
-          </select>
+        {(dateRange !== 'all' || webinarAt) && (
+          <button onClick={() => { setDateRange('all'); setCustomFrom(''); setCustomTo(''); setWebinarAt(''); }}
+            style={{ height: '2.1rem', padding: '0 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.30)', background: 'rgba(254,242,242,0.80)', fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: '#DC2626', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            ✕ Clear
+          </button>
         )}
       </div>
+
+      {/* ── Filter bar — Webinar Session ── */}
+      {sessions.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          background: 'rgba(237,234,248,0.50)', borderRadius: 14,
+          border: '1px solid rgba(139,92,246,0.15)',
+          padding: '10px 14px', marginBottom: 24,
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.55)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/>
+          </svg>
+          <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', whiteSpace: 'nowrap' }}>Webinar</span>
+          <CustomSelect
+            value={webinarAt}
+            onChange={setWebinarAt}
+            placeholder="All Webinars"
+            options={[
+              { value: '', label: 'All Webinars' },
+              ...sessions.map(s => ({ value: s, label: fmtSession(s) })),
+            ]}
+          />
+        </div>
+      )}
 
       {/* ── Error ── */}
       {error && (
@@ -369,7 +496,7 @@ export default function HomeDashboard({ token }) {
         gap: 12, marginBottom: 28,
       }}>
         {loading
-          ? Array.from({ length: 10 }).map((_, i) => <SkeletonBox key={i} />)
+          ? Array.from({ length: 9 }).map((_, i) => <SkeletonBox key={i} />)
           : STAT_BOXES.map(box => <StatBox key={box.key} box={box} counts={counts} />)
         }
       </div>
@@ -385,7 +512,9 @@ export default function HomeDashboard({ token }) {
             padding: '14px 20px', borderBottom: '1px solid rgba(147,51,234,0.08)',
             display: 'flex', alignItems: 'center', gap: 8,
           }}>
-            <span style={{ fontSize: '1rem' }}>📉</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>
+            </svg>
             <span style={{ fontWeight: 800, fontSize: '0.90rem', color: '#3B0764' }}>
               Funnel Drop-off
             </span>

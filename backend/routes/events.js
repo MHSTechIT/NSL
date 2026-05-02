@@ -14,6 +14,8 @@ const VALID_EVENTS = new Set([
   'duration_long',
   'registration_submitted',
   'wa_join_clicked',
+  'youtube_clicked',
+  'explore_product_clicked',
 ]);
 
 /* POST /api/events — public, fire-and-forget click tracking */

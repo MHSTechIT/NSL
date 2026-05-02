@@ -77,6 +77,19 @@ router.put('/webinar-config', configValidators, async (req, res) => {
       broadcast(fresh);
     }
 
+    // If a new webinar date was set, create a new active webinar session
+    if (updates.next_webinar_at) {
+      try {
+        await pool.query('UPDATE webinars SET is_active = FALSE');
+        await pool.query(
+          'INSERT INTO webinars (date_time, is_active) VALUES ($1, TRUE)',
+          [updates.next_webinar_at]
+        );
+      } catch (webinarErr) {
+        console.error('Webinar session create error:', webinarErr.message);
+      }
+    }
+
     res.json({ success: true, updated_at: updates.updated_at });
   } catch (err) {
     console.error('Update config error:', err.message);
@@ -84,11 +97,45 @@ router.put('/webinar-config', configValidators, async (req, res) => {
   }
 });
 
+/* ── GET /api/admin/webinars ── */
+router.get('/webinars', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        w.id,
+        w.date_time AS webinar_at,
+        w.is_active,
+        w.created_at,
+        COUNT(l.id)::int AS lead_count
+      FROM webinars w
+      LEFT JOIN leads l ON l.webinar_id = w.id
+      GROUP BY w.id
+      ORDER BY w.created_at DESC
+    `);
+    res.json({ webinars: rows });
+  } catch (err) {
+    // webinar_id column or webinars table may not exist yet (async migration race)
+    if (err.message && (err.message.includes('does not exist') || err.message.includes('column'))) {
+      try {
+        const { rows } = await pool.query(
+          `SELECT id, date_time AS webinar_at, is_active, created_at, 0::int AS lead_count
+           FROM webinars ORDER BY created_at DESC`
+        );
+        return res.json({ webinars: rows });
+      } catch (_) {
+        return res.json({ webinars: [] });
+      }
+    }
+    console.error('Get webinars error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch webinars' });
+  }
+});
+
 /* ── POST /api/admin/leads/delete ── */
 router.post('/leads/delete', async (req, res) => {
   // Accept ids from query string (?ids=1&ids=2&ids=3) to avoid body-parsing issues through proxies
   const raw = [].concat(req.query.ids || []);
-  const ids = raw.map(Number).filter(n => Number.isInteger(n) && n > 0);
+  const ids = raw.map(String).filter(s => s.length > 0);
   if (ids.length === 0) {
     return res.status(400).json({ error: 'No valid lead IDs provided.' });
   }

@@ -1,4 +1,5 @@
 import { m } from 'framer-motion';
+import { trackEvent } from '../utils/trackEvent';
 
 const slideIn = {
   initial: { opacity: 0, y: 12 },
@@ -102,6 +103,7 @@ export default function LanguageDisqualified() {
           href={YOUTUBE_URL}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={() => trackEvent('youtube_clicked')}
           whileTap={{ scale: 0.97 }}
           animate={{
             boxShadow: [

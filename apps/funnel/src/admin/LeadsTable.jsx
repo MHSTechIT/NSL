@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import DatePicker from './DatePicker';
 
 const DURATION_LABELS = { new: '< 1 yr', mid: '1–5 yrs', long: '5+ yrs', pre: 'Pre-diabetic' };
 const SUGAR_LABELS    = { '150-250': '150–250', '250+': '250+' };
@@ -281,11 +282,9 @@ export default function LeadsTable({ token }) {
         </svg>
         <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', whiteSpace: 'nowrap' }}>Date Range</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            style={{ height: '2.1rem', padding: '0 10px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.25)', background: '#fff', fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#3B0764', outline: 'none', cursor: 'pointer' }} />
+          <DatePicker value={dateFrom} onChange={setDateFrom} placeholder="From date" />
           <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: 'rgba(91,33,182,0.45)', fontWeight: 600 }}>to</span>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            style={{ height: '2.1rem', padding: '0 10px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.25)', background: '#fff', fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#3B0764', outline: 'none', cursor: 'pointer' }} />
+          <DatePicker value={dateTo} onChange={setDateTo} placeholder="To date" />
         </div>
         {(dateFrom || dateTo) && (
           <button onClick={() => { setDateFrom(''); setDateTo(''); }}

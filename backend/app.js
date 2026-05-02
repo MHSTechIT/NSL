@@ -20,6 +20,34 @@ if (_migrationResult && typeof _migrationResult.catch === 'function') {
   _migrationResult.catch(err => console.error('[Migration] slot-2 columns error:', err.message));
 }
 
+// Auto-migrate: create webinars table
+const _webinarTableMigration = pool.query(`
+  CREATE TABLE IF NOT EXISTS webinars (
+    id          BIGSERIAL PRIMARY KEY,
+    webinar_at  TIMESTAMPTZ NOT NULL,
+    is_active   BOOLEAN     NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`);
+if (_webinarTableMigration && typeof _webinarTableMigration.catch === 'function') {
+  _webinarTableMigration.catch(err => console.error('[Migration] webinars table error:', err.message));
+}
+
+// Auto-migrate: add webinar_id to leads (runs after webinars table exists)
+_webinarTableMigration.then(() =>
+  pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS webinar_id BIGINT REFERENCES webinars(id)`)
+).then(() => {
+  // Backfill: if webinars table is empty, seed it from the existing webinar_config row
+  return pool.query(`
+    INSERT INTO webinars (date_time, is_active)
+    SELECT next_webinar_at, TRUE
+    FROM webinar_config
+    WHERE id = 1
+      AND next_webinar_at IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM webinars)
+  `);
+}).catch(err => console.error('[Migration] leads.webinar_id / backfill error:', err.message));
+
 // Auto-migrate: create click_events table for button analytics
 const _clickMigration = pool.query(`
   CREATE TABLE IF NOT EXISTS click_events (
