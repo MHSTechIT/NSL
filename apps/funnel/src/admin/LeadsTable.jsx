@@ -15,6 +15,10 @@ export default function LeadsTable({ token }) {
   const [dateTo, setDateTo]         = useState('');
   const [syncToast, setSyncToast]   = useState(null);
 
+  // Pagination
+  const [page, setPage] = useState(1);
+  const perPage = 10;
+
   // Delete mode state
   const [deleteMode, setDeleteMode]     = useState(false);
   const [selected, setSelected]         = useState(new Set());
@@ -34,7 +38,11 @@ export default function LeadsTable({ token }) {
   function handleSort(key) {
     if (sortKey === key) setSortAsc(a => !a);
     else { setSortKey(key); setSortAsc(true); }
+    setPage(1);
   }
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [activeFilter, dateFrom, dateTo]);
 
   const filtered = leads.filter(l => {
     if (dateFrom || dateTo) {
@@ -54,6 +62,9 @@ export default function LeadsTable({ token }) {
     const vb = b[sortKey] ?? '';
     return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
   });
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / perPage));
+  const paginated = sorted.slice((page - 1) * perPage, page * perPage);
 
   function exportCSV() {
     const headers = ['Name', 'Phone', 'Sugar Level', 'Duration', 'Registered At', 'WA Clicked'];
@@ -340,7 +351,7 @@ export default function LeadsTable({ token }) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((l, idx) => (
+            {paginated.map((l, idx) => (
               <tr
                 key={l.id}
                 onClick={() => deleteMode && toggleSelect(l.id)}
@@ -398,6 +409,85 @@ export default function LeadsTable({ token }) {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {sorted.length > perPage && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginTop: 14, padding: '0 4px', flexWrap: 'wrap', gap: 10,
+        }}>
+          <span style={{
+            fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 500,
+            color: 'rgba(91,33,182,0.50)',
+          }}>
+            Showing {(page - 1) * perPage + 1}–{Math.min(page * perPage, sorted.length)} of {sorted.length}
+          </span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {/* Prev */}
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              style={{
+                width: 32, height: 32, borderRadius: 8,
+                border: '1px solid rgba(139,92,246,0.20)',
+                background: page === 1 ? 'rgba(237,234,248,0.30)' : 'rgba(237,234,248,0.60)',
+                color: page === 1 ? 'rgba(91,33,182,0.25)' : '#5B21B6',
+                cursor: page === 1 ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+
+            {/* Page numbers */}
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+              .reduce((acc, p, idx, arr) => {
+                if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((p, i) =>
+                p === '...' ? (
+                  <span key={`dot${i}`} style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: 'rgba(91,33,182,0.35)', padding: '0 4px' }}>…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    style={{
+                      minWidth: 32, height: 32, borderRadius: 8, border: 'none',
+                      fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem', fontWeight: p === page ? 700 : 500,
+                      background: p === page ? '#5B21B6' : 'transparent',
+                      color: p === page ? '#fff' : '#5B21B6',
+                      cursor: 'pointer', transition: 'all 150ms',
+                      boxShadow: p === page ? '0 2px 8px rgba(91,33,182,0.30)' : 'none',
+                    }}
+                  >
+                    {p}
+                  </button>
+                )
+              )
+            }
+
+            {/* Next */}
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              style={{
+                width: 32, height: 32, borderRadius: 8,
+                border: '1px solid rgba(139,92,246,0.20)',
+                background: page === totalPages ? 'rgba(237,234,248,0.30)' : 'rgba(237,234,248,0.60)',
+                color: page === totalPages ? 'rgba(91,33,182,0.25)' : '#5B21B6',
+                cursor: page === totalPages ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Confirm Delete Modal */}
       {confirmOpen && (
