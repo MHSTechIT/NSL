@@ -44,6 +44,29 @@ export default function LeadsTable({ token }) {
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [activeFilter, dateFrom, dateTo]);
 
+  // ── Duplicate detection ──
+  // Group by phone number, keep oldest (first registered) as original, rest are duplicates
+  const duplicateIds = (() => {
+    const phoneMap = {};
+    // Sort by created_at ascending so oldest comes first
+    const byDate = [...leads].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    for (const l of byDate) {
+      const phone = l.whatsapp_number;
+      if (!phoneMap[phone]) phoneMap[phone] = [];
+      phoneMap[phone].push(l.id);
+    }
+    const dupes = new Set();
+    for (const ids of Object.values(phoneMap)) {
+      if (ids.length > 1) {
+        // skip first (original), mark rest as duplicates
+        for (let i = 1; i < ids.length; i++) dupes.add(ids[i]);
+      }
+    }
+    return dupes;
+  })();
+
+  const duplicateCount = duplicateIds.size;
+
   const filtered = leads.filter(l => {
     if (dateFrom || dateTo) {
       const created = new Date(l.created_at);
@@ -54,6 +77,7 @@ export default function LeadsTable({ token }) {
     if (activeFilter === 'high_sugar') return l.sugar_level === '250+';
     if (activeFilter === 'wa_clicked') return l.wa_clicked === true;
     if (activeFilter === 'wa_not')     return !l.wa_clicked;
+    if (activeFilter === 'duplicates') return duplicateIds.has(l.id);
     return true;
   });
 
@@ -89,6 +113,7 @@ export default function LeadsTable({ token }) {
     setDeleteMode(v => !v);
     setSelected(new Set());
     setConfirmOpen(false);
+    if (activeFilter === 'duplicates') setActiveFilter('all');
   }
 
   function toggleSelect(id) {
@@ -100,21 +125,30 @@ export default function LeadsTable({ token }) {
   }
 
   function toggleSelectAll() {
-    if (selected.size === sorted.length) {
-      setSelected(new Set());
+    if (activeFilter === 'duplicates') {
+      // Only select duplicate leads (not originals)
+      const dupesInView = sorted.filter(l => duplicateIds.has(l.id));
+      if (selected.size === dupesInView.length) {
+        setSelected(new Set());
+      } else {
+        setSelected(new Set(dupesInView.map(l => l.id)));
+      }
     } else {
-      setSelected(new Set(sorted.map(l => l.id)));
+      if (selected.size === sorted.length) {
+        setSelected(new Set());
+      } else {
+        setSelected(new Set(sorted.map(l => l.id)));
+      }
     }
   }
 
   async function handleDelete() {
     setDeleting(true);
     try {
-      const params = new URLSearchParams();
-      [...selected].forEach(id => params.append('ids', id));
-      const res = await fetch(`/api/admin/leads/delete?${params.toString()}`, {
+      const res = await fetch('/api/admin/leads/delete', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...selected] }),
       });
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};
@@ -182,6 +216,35 @@ export default function LeadsTable({ token }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
 
+          {/* Duplicates filter */}
+          <button
+            onClick={() => {
+              if (activeFilter === 'duplicates') {
+                setActiveFilter('all');
+                setDeleteMode(false);
+                setSelected(new Set());
+              } else {
+                setActiveFilter('duplicates');
+                setDeleteMode(true);
+                setSelected(new Set());
+              }
+            }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              height: '2.4rem', padding: '0 16px', borderRadius: 50,
+              border: activeFilter === 'duplicates' ? '1.5px solid rgba(217,119,6,0.50)' : '1.5px solid rgba(217,119,6,0.35)',
+              background: activeFilter === 'duplicates' ? 'rgba(255,237,213,0.90)' : 'rgba(255,247,237,0.80)',
+              fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.82rem',
+              color: '#D97706', cursor: 'pointer', transition: 'all 180ms',
+              boxShadow: activeFilter === 'duplicates' ? '0 0 0 3px rgba(217,119,6,0.12)' : 'none',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="8" y="2" width="13" height="13" rx="2"/><path d="M3 9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2"/>
+            </svg>
+            Duplicates{duplicateCount > 0 ? ` (${duplicateCount})` : ''}
+          </button>
+
           {/* Delete mode toggle */}
           {!deleteMode ? (
             <button
@@ -238,14 +301,16 @@ export default function LeadsTable({ token }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <input
               type="checkbox"
-              checked={sorted.length > 0 && selected.size === sorted.length}
+              checked={activeFilter === 'duplicates'
+                ? duplicateIds.size > 0 && selected.size === sorted.filter(l => duplicateIds.has(l.id)).length
+                : sorted.length > 0 && selected.size === sorted.length}
               onChange={toggleSelectAll}
               style={{ width: 16, height: 16, accentColor: '#DC2626', cursor: 'pointer' }}
             />
             <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.83rem', fontWeight: 600, color: '#DC2626' }}>
               {selected.size === 0
-                ? 'Select leads to delete'
-                : `${selected.size} lead${selected.size !== 1 ? 's' : ''} selected`}
+                ? (activeFilter === 'duplicates' ? 'Select all duplicates' : 'Select leads to delete')
+                : `${selected.size} duplicate${selected.size !== 1 ? 's' : ''} selected`}
             </span>
           </div>
           {selected.size > 0 && (

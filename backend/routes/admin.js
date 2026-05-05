@@ -133,8 +133,8 @@ router.get('/webinars', async (req, res) => {
 
 /* ── POST /api/admin/leads/delete ── */
 router.post('/leads/delete', async (req, res) => {
-  // Accept ids from query string (?ids=1&ids=2&ids=3) to avoid body-parsing issues through proxies
-  const raw = [].concat(req.query.ids || []);
+  // Accept ids from body (JSON) or query string as fallback
+  const raw = [].concat(req.body?.ids || req.query.ids || []);
   const ids = raw.map(String).filter(s => s.length > 0);
   if (ids.length === 0) {
     return res.status(400).json({ error: 'No valid lead IDs provided.' });
