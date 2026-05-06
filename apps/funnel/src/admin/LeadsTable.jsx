@@ -293,8 +293,8 @@ export default function LeadsTable({ token }) {
       <style>{`
         @media (max-width: 640px) {
           .leads-header { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
-          .leads-actions { width: 100% !important; justify-content: flex-start !important; }
-          .leads-action-btn { padding: 0 12px !important; font-size: 0.75rem !important; height: 2.1rem !important; }
+          .leads-actions { width: 100% !important; justify-content: flex-start !important; flex-wrap: nowrap !important; }
+          .leads-action-btn { padding: 0 10px !important; font-size: 0.70rem !important; height: 2rem !important; gap: 4px !important; }
           .leads-stat-grid { grid-template-columns: repeat(2, 1fr) !important; }
         }
       `}</style>
@@ -379,7 +379,7 @@ export default function LeadsTable({ token }) {
           {/* Export CSV */}
           <button
             onClick={exportCSV}
-            className="inline-flex items-center gap-2 bg-purple text-white font-sans font-semibold text-sm px-4 py-2.5 rounded-pill hover:bg-purple-700 transition-colors shadow-[0_2px_12px_rgba(91,33,182,0.25)]"
+            className="leads-action-btn inline-flex items-center gap-2 bg-purple text-white font-sans font-semibold text-sm px-4 py-2.5 rounded-pill hover:bg-purple-700 transition-colors shadow-[0_2px_12px_rgba(91,33,182,0.25)]"
           >
             ↓ Export CSV
           </button>

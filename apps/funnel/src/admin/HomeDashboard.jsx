@@ -466,14 +466,14 @@ export default function HomeDashboard({ token }) {
           50%      { opacity: 0.45; }
         }
         @media (max-width: 640px) {
-          .dash-stat-grid { grid-template-columns: repeat(2, 1fr) !important; }
-          .dash-dropoff-grid { grid-template-columns: repeat(2, 1fr) !important; }
+          .dash-stat-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+          .dash-dropoff-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
           .dash-header { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
           .dash-filter-bar { padding: 8px 10px !important; gap: 6px !important; }
         }
         @media (max-width: 380px) {
-          .dash-stat-grid { grid-template-columns: 1fr !important; }
-          .dash-dropoff-grid { grid-template-columns: 1fr !important; }
+          .dash-stat-grid { grid-template-columns: repeat(2, 1fr) !important; }
+          .dash-dropoff-grid { grid-template-columns: repeat(2, 1fr) !important; }
         }
       `}</style>
 
@@ -582,7 +582,7 @@ export default function HomeDashboard({ token }) {
       {/* ── Stat grid ── */}
       <div className="dash-stat-grid" style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
         gap: 12, marginBottom: 28,
       }}>
         {loading

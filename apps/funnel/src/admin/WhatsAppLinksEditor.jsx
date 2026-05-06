@@ -148,7 +148,7 @@ function WebinarCard({ type, webinarDate, webinarId, links, setLinks, leadCount,
           background: isCurrent
             ? 'rgba(5,150,105,0.06)'
             : 'rgba(91,33,182,0.04)',
-          flexWrap: 'wrap', justifyContent: 'center', textAlign: 'center',
+          flexWrap: 'nowrap', justifyContent: 'center', textAlign: 'center',
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
             stroke={isCurrent ? '#059669' : '#5B21B6'}
@@ -434,8 +434,8 @@ export default function WhatsAppLinksEditor({ token }) {
         @media (max-width: 640px) {
           .wa-grid { grid-template-columns: 1fr !important; }
           .wa-card { min-width: 0 !important; }
-          .wa-card-header-pill { padding: 6px 12px !important; font-size: 0.72rem !important; }
-          .wa-card-header-pill span { font-size: 0.72rem !important; }
+          .wa-card-header-pill { padding: 6px 10px !important; }
+          .wa-card-header-pill span { font-size: 0.68rem !important; }
         }
       `}</style>
       <div style={{ marginBottom: 24 }}>
