@@ -14,7 +14,7 @@ export const t = {
     },
     cta: { tamil: 'ஆம், என்னிடம் சர்க்கரை நோய் உள்ளது →', english: 'Check Your Eligibility' },
     seats: { tamil: 'இன்று மட்டும் இடங்கள் வரையறுக்கப்பட்டுள்ளன', english: 'Limited seats available today' },
-    timerLabel: { tamil: 'அடுத்த வெபினார் தொடங்க:', english: 'Next Webinar Starts In:' },
+    timerLabel: { tamil: 'பதிவு முடிவடைகிறது:', english: 'Registration Closes In:' },
     days: { tamil: 'நாட்கள்', english: 'DAYS' },
     hrs: { tamil: 'மணி', english: 'HRS' },
     min: { tamil: 'நிமிடம்', english: 'MIN' },

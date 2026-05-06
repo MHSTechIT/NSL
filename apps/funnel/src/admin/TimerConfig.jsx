@@ -112,7 +112,8 @@ function SkeletonCard() {
 
 /* ══════════════════════════════════════════ */
 export default function TimerConfig({ token }) {
-  /* ── Left-side state (UNCHANGED) ── */
+  /* ── Left-side state ── */
+  const [currentWebinar, setCurrentWebinar] = useState('');
   const [nextWebinar, setNextWebinar] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -120,7 +121,10 @@ export default function TimerConfig({ token }) {
   useEffect(() => {
     fetch('/api/webinar-config')
       .then(r => r.json())
-      .then(d => setNextWebinar(toLocalDatetimeValue(d.next_webinar_at)));
+      .then(d => {
+        setCurrentWebinar(toLocalDatetimeValue(d.next_webinar_at));
+        setNextWebinar(toLocalDatetimeValue(d.backup_webinar_at));
+      });
   }, []);
 
   /* ── Right-side state ── */
@@ -144,12 +148,13 @@ export default function TimerConfig({ token }) {
 
   useEffect(() => { fetchWebinars(); }, [fetchWebinars]);
 
-  /* ── Save handler (UNCHANGED logic, + refresh webinars after) ── */
+  /* ── Save handler ── */
   async function handleSave() {
     setSaving(true);
     setToast(null);
     const body = {};
-    if (nextWebinar) body.next_webinar_at = fromLocalDatetimeValue(nextWebinar);
+    if (currentWebinar) body.next_webinar_at = fromLocalDatetimeValue(currentWebinar);
+    if (nextWebinar) body.backup_webinar_at = fromLocalDatetimeValue(nextWebinar);
 
     const res = await fetch('/api/admin/webinar-config', {
       method: 'PUT',
@@ -179,10 +184,46 @@ export default function TimerConfig({ token }) {
               </p>
             </div>
 
-            {/* Single date picker */}
+            {/* Current Webinar */}
             <div className="bg-white rounded-card border border-purple-100 p-5 hover:border-purple-300 transition-colors">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 8px', borderRadius: 20,
+                  fontFamily: 'Outfit, sans-serif', fontSize: '0.65rem', fontWeight: 700,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: 'rgba(5,150,105,0.10)', color: '#059669',
+                }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#059669', display: 'inline-block' }} />
+                  Live
+                </span>
+              </div>
+              <label className="block font-sans font-semibold text-purple-900 text-sm mb-1">Current Webinar</label>
+              <p className="font-sans text-xs text-purple-400 mb-3">Active countdown timer target</p>
+              <DateTimePicker value={currentWebinar} onChange={setCurrentWebinar} />
+              {currentWebinar && (
+                <p className="font-sans text-xs text-purple-400 mt-2">
+                  {new Date(fromLocalDatetimeValue(currentWebinar)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
+                </p>
+              )}
+            </div>
+
+            {/* Next Webinar */}
+            <div className="bg-white rounded-card border border-purple-100 p-5 hover:border-purple-300 transition-colors">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 8px', borderRadius: 20,
+                  fontFamily: 'Outfit, sans-serif', fontSize: '0.65rem', fontWeight: 700,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: 'rgba(37,99,235,0.10)', color: '#2563EB',
+                }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#2563EB', display: 'inline-block' }} />
+                  Upcoming
+                </span>
+              </div>
               <label className="block font-sans font-semibold text-purple-900 text-sm mb-1">Next Webinar</label>
-              <p className="font-sans text-xs text-purple-400 mb-3">Countdown timer target date &amp; time</p>
+              <p className="font-sans text-xs text-purple-400 mb-3">Auto-switches when current webinar ends</p>
               <DateTimePicker value={nextWebinar} onChange={setNextWebinar} />
               {nextWebinar && (
                 <p className="font-sans text-xs text-purple-400 mt-2">

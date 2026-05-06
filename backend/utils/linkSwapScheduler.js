@@ -34,7 +34,19 @@ async function runSwaps() {
         AND pending_whatsapp_link_2 != ''
     `);
 
-    // Fetch fresh after both updates
+    // Auto-switch: when current webinar has passed and backup exists, promote backup → current
+    await pool.query(`
+      UPDATE webinar_config
+      SET next_webinar_at    = backup_webinar_at,
+          backup_webinar_at  = NULL,
+          updated_at         = NOW()
+      WHERE id = 1
+        AND next_webinar_at IS NOT NULL
+        AND next_webinar_at < NOW()
+        AND backup_webinar_at IS NOT NULL
+    `);
+
+    // Fetch fresh after all updates
     const { rows, rowCount } = await pool.query(`
       SELECT next_webinar_at, backup_webinar_at, tuesday_whatsapp_link,
              friday_whatsapp_link, kill_switch,

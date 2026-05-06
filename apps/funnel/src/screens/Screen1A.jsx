@@ -201,6 +201,11 @@ export default function Screen1A() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
+  // Track page visit (fires once on mount)
+  useEffect(() => {
+    trackEvent('page_visited', state.webinarConfig?.next_webinar_at);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Intercept browser/device back button while popup is open
   useEffect(() => {
     if (!expanded) return;

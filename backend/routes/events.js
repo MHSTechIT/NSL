@@ -3,6 +3,7 @@ const router  = express.Router();
 const pool    = require('../db');
 
 const VALID_EVENTS = new Set([
+  'page_visited',
   'cta_clicked',
   'sugar_150_250',
   'sugar_250_plus',
