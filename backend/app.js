@@ -242,6 +242,16 @@ const _callNotesMigration = pool.query(`
   ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS interested TEXT;
   ALTER TABLE leads          ADD COLUMN IF NOT EXISTS last_note_interested TEXT;
 
+  -- Extended discovery fields captured during the call
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS hba1c                 TEXT;
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS other_languages       TEXT;
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS working_professional  TEXT;
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS location              TEXT;
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS already_paid          TEXT;
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS webinar_attended      TEXT;
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS available_for_webinar TEXT;
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS next_batch_joining    TEXT;
+
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_note_outcome TEXT;   -- 'completed' | 'follow_up'
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_note_at      TIMESTAMPTZ;
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_at      TIMESTAMPTZ;
@@ -263,10 +273,42 @@ const _clickMigration = pool.query(`
   CREATE INDEX IF NOT EXISTS idx_click_events_name       ON click_events (event_name);
   CREATE INDEX IF NOT EXISTS idx_click_events_webinar_at ON click_events (webinar_at);
   CREATE INDEX IF NOT EXISTS idx_click_events_created_at ON click_events (created_at);
+  -- Stable attribution: capture which webinar the visitor was registering for.
+  -- webinar_at alone is brittle because admins can edit the deadline.
+  ALTER TABLE click_events ADD COLUMN IF NOT EXISTS webinar_id UUID REFERENCES webinars(id) ON DELETE SET NULL;
+  CREATE INDEX IF NOT EXISTS idx_click_events_webinar_id ON click_events (webinar_id);
 `);
 if (_clickMigration && typeof _clickMigration.catch === 'function') {
   _clickMigration.catch(err => console.error('[Migration] click_events error:', err.message));
 }
+
+// One-shot backfill of click_events.webinar_id (idempotent — only fills NULLs).
+// Runs after both webinars and click_events tables exist.
+Promise.all([_webinarTableMigration, _clickMigration]).then(() =>
+  // Step 1: exact match — webinar_at matches some webinar's date_time
+  pool.query(`
+    UPDATE click_events ce
+       SET webinar_id = w.id
+      FROM webinars w
+     WHERE ce.webinar_id IS NULL
+       AND ce.webinar_at = w.date_time
+  `)
+).then(() =>
+  // Step 2: orphans — pick the webinar whose date_time is closest to the
+  // click's stored webinar_at, restricted to webinars that already existed
+  // at click time. This recovers attribution after admins edited deadlines.
+  pool.query(`
+    UPDATE click_events ce
+       SET webinar_id = (
+         SELECT w.id FROM webinars w
+          WHERE w.created_at <= ce.created_at
+          ORDER BY ABS(EXTRACT(EPOCH FROM (w.date_time - ce.webinar_at))) ASC
+          LIMIT 1
+       )
+     WHERE ce.webinar_id IS NULL
+       AND ce.webinar_at IS NOT NULL
+  `)
+).catch(err => console.error('[Migration] click_events.webinar_id backfill error:', err.message));
 
 // ── Security middleware ──
 app.use(helmet());

@@ -28,6 +28,16 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
   const sseRef = useRef(null);
   const rowRefs = useRef({});
 
+  /* Always-on auto-advance: when the modal saves a note (Complete / DNP /
+     auto-DNP), wait 5 s and dial the next lead in the current list. Toast
+     if no leads remain. Independent of the legacy autoMode toggle. */
+  const [advanceLeft, setAdvanceLeft] = useState(0);   // 5 → 0
+  const [advanceToast, setAdvanceToast] = useState('');
+  const advanceTimerRef = useRef(null);
+  function clearAdvanceTimer() {
+    if (advanceTimerRef.current) { clearInterval(advanceTimerRef.current); advanceTimerRef.current = null; }
+  }
+
   /* ── Auto-dial state machine ────────────────────────────────────────────
      Modes:
        'off'      — manual mode, default
@@ -379,15 +389,76 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
             // Closing modal mid auto-call without saving = caller bailed → exit auto.
             if (wasInAuto) stopAutoMode();
           }}
-          onSaved={() => {
+          onSaved={(_outcome, meta) => {
             const finishedLead = editLead;
             setEditLead(null);
-            setLeads(prev => prev.filter(x => x.id !== finishedLead.id));
+            const remaining = leads.filter(x => x.id !== finishedLead.id);
+            setLeads(remaining);
             if (autoMode === 'calling') {
+              // Legacy autoMode keeps its own queue
               startCooldown();
+              return;
+            }
+            // Always-on auto-advance after any save
+            if (meta?.autoAdvance) {
+              if (remaining.length === 0) {
+                setAdvanceToast('Queue is empty');
+                setTimeout(() => setAdvanceToast(''), 4000);
+                return;
+              }
+              const nextLead = remaining[0];
+              setAdvanceLeft(5);
+              clearAdvanceTimer();
+              advanceTimerRef.current = setInterval(() => {
+                setAdvanceLeft(prev => {
+                  if (prev <= 1) {
+                    clearAdvanceTimer();
+                    setTimeout(() => {
+                      triggerCall(nextLead).catch(e => setError(e.message || 'Call failed'));
+                      setEditLead(nextLead);
+                    }, 0);
+                    return 0;
+                  }
+                  return prev - 1;
+                });
+              }, 1000);
             }
           }}
         />
+      )}
+
+      {/* Always-on auto-advance: 5-sec countdown badge (top-right) */}
+      {advanceLeft > 0 && (
+        <div style={{
+          position: 'fixed', top: 18, right: 18, zIndex: 9600,
+          background: 'rgba(91,33,182,0.95)', color: '#fff',
+          padding: '10px 16px', borderRadius: 50,
+          fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.86rem',
+          boxShadow: '0 8px 24px rgba(91,33,182,0.40)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span>Next call in {advanceLeft}s</span>
+          <button
+            onClick={() => { clearAdvanceTimer(); setAdvanceLeft(0); }}
+            style={{ border: 'none', background: 'rgba(255,255,255,0.20)', color: '#fff',
+                     padding: '3px 10px', borderRadius: 50, cursor: 'pointer',
+                     fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.74rem' }}>
+            Stop
+          </button>
+        </div>
+      )}
+
+      {/* Empty-queue toast */}
+      {advanceToast && (
+        <div style={{
+          position: 'fixed', top: 18, right: 18, zIndex: 9600,
+          background: 'rgba(91,33,182,0.95)', color: '#fff',
+          padding: '10px 16px', borderRadius: 12,
+          fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.86rem',
+          boxShadow: '0 8px 24px rgba(91,33,182,0.40)',
+        }}>
+          ✓ {advanceToast}
+        </div>
       )}
 
       {/* 5-second cooldown card between auto-dialed leads */}

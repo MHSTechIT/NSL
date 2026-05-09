@@ -452,7 +452,7 @@ export default function HomeDashboard({ token }) {
   const [dateRange, setDateRange] = useState('all');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo]   = useState('');
-  const [webinarAt, setWebinarAt] = useState('');
+  const [webinarId, setWebinarId] = useState('');
 
   const fetchDashboard = useCallback(async () => {
     setError('');
@@ -475,7 +475,7 @@ export default function HomeDashboard({ token }) {
       params.set('from', customFrom);
       if (customTo) params.set('to', customTo);
     }
-    if (webinarAt) params.set('webinar_at', webinarAt);
+    if (webinarId) params.set('webinar_id', webinarId);
 
     try {
       const res = await fetch(`/api/admin/dashboard?${params}`, {
@@ -492,7 +492,7 @@ export default function HomeDashboard({ token }) {
     } finally {
       setLoading(false);
     }
-  }, [token, dateRange, customFrom, customTo, webinarAt]);
+  }, [token, dateRange, customFrom, customTo, webinarId]);
 
   /* Initial load */
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
@@ -591,8 +591,8 @@ export default function HomeDashboard({ token }) {
             <DatePicker value={customTo} onChange={setCustomTo} placeholder="To date" />
           </div>
         )}
-        {(dateRange !== 'all' || webinarAt) && (
-          <button onClick={() => { setDateRange('all'); setCustomFrom(''); setCustomTo(''); setWebinarAt(''); }}
+        {(dateRange !== 'all' || webinarId) && (
+          <button onClick={() => { setDateRange('all'); setCustomFrom(''); setCustomTo(''); setWebinarId(''); }}
             style={{ height: '2.1rem', padding: '0 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.30)', background: 'rgba(254,242,242,0.80)', fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: '#DC2626', cursor: 'pointer', whiteSpace: 'nowrap' }}>
             ✕ Clear
           </button>
@@ -612,19 +612,18 @@ export default function HomeDashboard({ token }) {
           </svg>
           <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', whiteSpace: 'nowrap' }}>Webinar</span>
           <CustomSelect
-            value={webinarAt}
-            onChange={setWebinarAt}
+            value={webinarId}
+            onChange={setWebinarId}
             placeholder="All Webinars"
             options={[
               { value: '', label: 'All Webinars' },
               ...sessions
-                .filter(s => {
-                  const at = s.webinar_at || s;
-                  return s.is_active || (at && new Date(at) <= new Date());
-                })
+                .filter(s => s.webinar_id)
                 .map(s => ({
-                  value: s.webinar_at || s,
-                  label: s.name ? s.name.replace(/^AWS-/, 'AWS - ') : fmtSession(s.webinar_at || s),
+                  value: s.webinar_id,
+                  label: s.name
+                    ? s.name.replace(/^AWS-/, 'AWS - ')
+                    : fmtSession(s.webinar_at),
                 })),
             ]}
           />

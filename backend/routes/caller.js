@@ -133,6 +133,8 @@ router.post('/leads/:id/note', async (req, res) => {
     full_name,
     sugar_confirmation, confirmed_range, range_for,
     patient_age, diet_status, takes_medicine, note,
+    hba1c, other_languages, working_professional, location,
+    already_paid, webinar_attended, available_for_webinar, next_batch_joining,
     outcome, follow_up_at, call_id,
     interested,
   } = req.body || {};
@@ -176,8 +178,10 @@ router.post('/leads/:id/note', async (req, res) => {
       `INSERT INTO lead_call_notes
          (lead_id, caller_id, call_id, sugar_confirmation, confirmed_range,
           range_for, patient_age, diet_status, takes_medicine, note,
+          hba1c, other_languages, working_professional, location,
+          already_paid, webinar_attended, available_for_webinar, next_batch_joining,
           outcome, follow_up_at, interested)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
        RETURNING id, created_at`,
       [
         lead_id, req.caller.id, call_id || null,
@@ -185,6 +189,10 @@ router.post('/leads/:id/note', async (req, res) => {
         range_for || null, patient_age || null,
         diet_status || null, takes_medicine || null,
         (note || '').trim() || null,
+        hba1c || null, other_languages || null,
+        working_professional || null, location || null,
+        already_paid || null, webinar_attended || null,
+        available_for_webinar || null, next_batch_joining || null,
         outcome,
         outcome === 'follow_up' ? follow_up_at : null,
         interested === 'yes' || interested === 'no' ? interested : null,

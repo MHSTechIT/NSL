@@ -3,6 +3,7 @@ import { useFunnel } from '../context/FunnelContext';
 import { getCountdownParts } from '../utils/time';
 import { t } from '../translations';
 import { FlipUnit } from './FlipCard';
+import NextWebinarCard from './NextWebinarCard';
 
 export function stopTick() {
   // no-op — tick sound removed
@@ -68,6 +69,10 @@ export default function CountdownTimer({ floating = false }) {
             )}
           </div>
         ))}
+      </div>
+
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(139,92,246,0.18)' }}>
+        <NextWebinarCard />
       </div>
     </div>
   );

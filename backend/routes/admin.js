@@ -9,7 +9,7 @@ const cache = require('../utils/webinarConfigCache');
 const { broadcast } = require('../utils/sseClients');
 const { syncLeadsToSheet } = require('../utils/leadsSheetSync');
 const { rotateLink }       = require('../utils/linkRotation');
-const { nextWebinarName }  = require('../utils/webinarName');
+const { nextWebinarName, nextUpcomingWebinarName } = require('../utils/webinarName');
 
 router.use(adminAuth);
 
@@ -116,13 +116,12 @@ router.put('/webinar-config', configValidators, async (req, res) => {
 
     if (updates.backup_webinar_at) {
       try {
-        // Find an existing "upcoming" webinar (inactive, 0 leads) to recycle.
-        // Whether we update an existing row or insert a new one, always assign
-        // the next sequential AWS-N name so numbering stays monotonic
-        // (e.g. current AWS-103 → next is AWS-104, not a stale AWS-101).
-        const name = await nextWebinarName();
+        // Reuse an existing "upcoming" webinar (inactive, 0 leads) and just bump
+        // its date — keep its AWS-N name so editing the timer doesn't churn the
+        // batch number. Only when no recyclable row exists do we allocate a new
+        // sequential name and INSERT a brand-new webinar.
         const { rowCount } = await pool.query(
-          `UPDATE webinars SET date_time = $1, name = $2
+          `UPDATE webinars SET date_time = $1
            WHERE id = (
              SELECT w.id FROM webinars w
              LEFT JOIN leads l ON l.webinar_id = w.id
@@ -131,10 +130,11 @@ router.put('/webinar-config', configValidators, async (req, res) => {
              HAVING COUNT(l.id) = 0
              ORDER BY w.created_at DESC LIMIT 1
            )`,
-          [updates.backup_webinar_at, name]
+          [updates.backup_webinar_at]
         );
 
         if (rowCount === 0) {
+          const name = await nextUpcomingWebinarName();
           await pool.query(
             'INSERT INTO webinars (date_time, is_active, name) VALUES ($1, FALSE, $2)',
             [updates.backup_webinar_at, name]
@@ -316,43 +316,55 @@ router.put('/wa-links', async (req, res) => {
   }
 });
 
-/* ── GET /api/admin/dashboard ── */
+/* ── GET /api/admin/dashboard ──
+   Filters and groups by webinar.id (UUID) instead of webinar_at, so admin
+   edits to a webinar's deadline don't fragment its event history.
+   Accepts `webinar_id` (preferred) or legacy `webinar_at` as the filter. */
 router.get('/dashboard', async (req, res) => {
-  const { from, to, webinar_at } = req.query;
+  const { from, to, webinar_id, webinar_at } = req.query;
   const params = [];
   const conditions = [];
 
   if (from) {
     params.push(new Date(from + 'T00:00:00+05:30'));
-    conditions.push(`created_at >= $${params.length}`);
+    conditions.push(`ce.created_at >= $${params.length}`);
   }
   if (to) {
     params.push(new Date(to + 'T23:59:59+05:30'));
-    conditions.push(`created_at <= $${params.length}`);
+    conditions.push(`ce.created_at <= $${params.length}`);
   }
-  if (webinar_at) {
+  if (webinar_id) {
+    params.push(webinar_id);
+    conditions.push(`ce.webinar_id = $${params.length}`);
+  } else if (webinar_at) {
+    // Legacy fallback — match by deadline if no id provided
     params.push(new Date(webinar_at));
-    conditions.push(`webinar_at = $${params.length}`);
+    conditions.push(`ce.webinar_at = $${params.length}`);
   }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
   try {
     const { rows } = await pool.query(
-      `SELECT event_name, COUNT(*)::int AS count
-       FROM click_events
-       ${where}
-       GROUP BY event_name`,
+      `SELECT ce.event_name, COUNT(*)::int AS count
+         FROM click_events ce
+         ${where}
+        GROUP BY ce.event_name`,
       params
     );
 
+    // Sessions list = every webinar that has at least one click_event tied to
+    // it. Identified by id, so each webinar appears exactly once regardless of
+    // how many times its deadline was edited.
     const { rows: sessions } = await pool.query(
-      `SELECT DISTINCT ce.webinar_at, w.name, w.is_active
-       FROM click_events ce
-       LEFT JOIN webinars w ON w.date_time = ce.webinar_at
-       WHERE ce.webinar_at IS NOT NULL
-       ORDER BY ce.webinar_at DESC
-       LIMIT 50`
+      `SELECT w.id           AS webinar_id,
+              w.date_time    AS webinar_at,
+              w.name,
+              w.is_active
+         FROM webinars w
+        WHERE EXISTS (SELECT 1 FROM click_events ce WHERE ce.webinar_id = w.id)
+        ORDER BY w.date_time DESC
+        LIMIT 50`
     );
 
     const counts = {};
@@ -360,7 +372,12 @@ router.get('/dashboard', async (req, res) => {
 
     res.json({
       counts,
-      sessions: sessions.map(r => ({ webinar_at: r.webinar_at, name: r.name, is_active: r.is_active })),
+      sessions: sessions.map(r => ({
+        webinar_id: r.webinar_id,
+        webinar_at: r.webinar_at,
+        name:       r.name,
+        is_active:  r.is_active,
+      })),
     });
   } catch (err) {
     console.error('Dashboard query error:', err.message);

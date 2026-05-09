@@ -28,6 +28,57 @@ const AGE_BUCKETS = [
 const RANGE_FOR  = [{ value: 'personal', label: 'Personal' }, { value: 'family', label: 'For Family' }];
 const DIET       = [{ value: 'yes', label: 'Yes' }, { value: 'not_interested', label: 'Not Interested' }];
 const MEDICINE   = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }];
+const YES_NO     = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }];
+
+const HBA1C = [
+  { value: 'gt_7_5',    label: 'HbA1c > 7.5' },
+  { value: '6_5_to_7_5', label: 'HbA1c 6.5 – 7.5' },
+  { value: '5_7_to_6_5', label: 'HbA1c 5.7 – 6.5' },
+];
+
+const WORKING_PROFESSIONAL = [
+  'Business', 'Daily Wages', 'Unemployed', 'House Wife', 'Private',
+  'IT', 'Retired', 'Student', 'Working Professional', 'Government', 'Not Working',
+].map(label => ({ value: label.toLowerCase().replace(/\s+/g, '_'), label }));
+
+// Raw location list — duplicates and case-variants stripped at module load.
+// Add or remove entries here; the dropdown rebuilds on next reload.
+const LOCATIONS_RAW = [
+  'chennai','madurai','bangalore','theni','thiruvallur','salem','thirupur','coimbatore','trichy','vellore',
+  'selam','villupuram','kerala','erode','kancheepuram','kanyakumari','viruthunagar','kadaloor','karur',
+  'madhurai','namakkal','thirupathur','tanjore','thanjavur','thenkasi','vilupuram','puthukottai','sivagangai',
+  'thiruvarur','thoothukudi','chengalpattu','dharmapuri','krishnagiri','pudhukottai','thiruchy',
+  'thiruvannamalai','ariyalur','coyamuthur','kadalor','kallakurichi','karnataka','nagapatinam','nagapattinam',
+  'ranipettai','thirunelveli','thiruppur','virudhunagar','dindigul','pondicherry','tirunelveli','dindukal',
+  'kadalur','kalakurichi','kallakuruchi','kanniyakumari','kumbakonam','mailadurai','namakal','oosur',
+  'pondicheery','thiruvanamalai','thuthukodi','thuthukudi','tiruppur','tiruvanamalai','aandhra','combathur',
+  'comibatore','dhindukal','kalakuruchi','kerela','mayiladuthurai','neelagiri','nilagiri','perambalur',
+  'pollachi','ramanadhapuram','ramnadu','sales','sivakasi','tenkasi','thanjaore','thirunalveli',
+  'thirunelvelli','thiruvalur','thiruvanmalai','thiruvaru','thoothukodi','thuthukoodi','trirupur','cuddalore',
+  'kirisnagriji','maiyiladurai','nilgiris','vellour','andamaan','andaman','andhra','andra pradhash',
+  'chagalpattu','iyambakkam','kadallour','kadallur','kanchipuram','karaikal','karaikkal','karaikudi',
+  'karanataka','karnaka','karnata','kirishanagiri','kirishnagiri','kirshnagiri','krishna giri','maharastra',
+  'mayiladudurai','mudurai','muduri','munnar','myladudurai','myladurai','nagai','nagalapuram','nangarkovil',
+  'nellur','osur','palani','pandichery','pera','permablur','pettaipettai','podicherry','pudhu',
+  'pudukkottai','pudukottai','rajapalayam','ramanadu','ramanathanpuram','ranipet','ranipett','salam',
+  'sithur','sivagagai','sivaganga','tanjavur','tanjjore','telungana','teni','thanjaur','thanvanamalai',
+  'tharmapuri','thirchy','thirichy','thirippathur','thiruchandhur','thirunallvalli','thiruppathur','thirupu',
+  'thiruthani','thiruvanandhapuram','thrichy','thricy','tirupattur','trichi','trivhy','ulunthurpettai',
+  'vadachennai','vandhavasi','virudachalam','viruthachalam','vithunagar','pondicherry',
+];
+const LOCATIONS = Array.from(new Set(LOCATIONS_RAW.map(s => s.trim().toLowerCase())))
+  .sort()
+  .map(v => ({ value: v, label: v.replace(/\b\w/g, c => c.toUpperCase()) }));
+
+/* Append the caller's "delay reasons" (one per timer expiry) to the note so
+   they're preserved in the saved record. */
+function buildNoteWithDelays(noteText, delayReasons) {
+  const note = (noteText || '').trim();
+  const delays = (delayReasons || []).filter(Boolean);
+  if (delays.length === 0) return note || null;
+  const block = `[Delay reasons]\n` + delays.map((r, i) => `  ${i + 1}. ${r}`).join('\n');
+  return note ? `${note}\n\n${block}` : block;
+}
 
 export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [fullName, setFullName]                   = useState(lead.full_name || '');
@@ -37,6 +88,14 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [dietStatus, setDietStatus]               = useState('');
   const [takesMedicine, setTakesMedicine]         = useState('');
   const [note, setNote]                           = useState('');
+  const [hba1c, setHba1c]                             = useState('');
+  const [otherLanguages, setOtherLanguages]           = useState('');
+  const [workingProfessional, setWorkingProfessional] = useState('');
+  const [location, setLocation]                       = useState('');
+  const [alreadyPaid, setAlreadyPaid]                 = useState('');
+  const [webinarAttended, setWebinarAttended]         = useState('');
+  const [availableForWebinar, setAvailableForWebinar] = useState('');
+  const [nextBatchJoining, setNextBatchJoining]       = useState('');
   const [interested, setInterested]               = useState('');   // '' | 'yes' | 'no'
   const [wantsFollowUp, setWantsFollowUp]         = useState(false);
   const [followUpAtLocal, setFollowUpAtLocal]     = useState(''); // 'YYYY-MM-DDTHH:mm:ss' (local time, from DateTimePicker)
@@ -45,8 +104,125 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [recalling, setRecalling]                 = useState(false);
   const [recallToast, setRecallToast]             = useState('');
 
+  /* ── Call lifecycle state machine ──────────────────────────────────────
+     Two outcomes once a call ends:
+       1) Customer never answered → auto-redial up to 2 total attempts
+          (no gap between them). After 2 failures, auto-submit DNP and let
+          the parent advance to the next lead.
+       2) Customer answered + hung up → start a 60-second form-fill timer.
+          If caller doesn't Complete within 60 s, an overlay asks for a
+          single-line "reason for delay". Submitting the reason restarts
+          the 60-second timer. Loop until the form is finished.            */
+  const [wasAnsweredRef]   = useState(() => ({ current: false }));   // ref-style flag
+  const [attempt, setAttempt]         = useState(1);                       // 1 or 2
+  const [autoRedialing, setAutoRedialing] = useState(false);
+  const [autoDnpFiring, setAutoDnpFiring] = useState(false);
+
+  const [formTimerSecs, setFormTimerSecs] = useState(0);   // 60 → 0 (form-fill window)
+  const [delayCardOpen, setDelayCardOpen] = useState(false);
+  const [delayReason, setDelayReason]     = useState('');
+  const [delayReasons, setDelayReasons]   = useState([]); // accumulated, appended on submit
+
+  // Listen for call lifecycle on the open modal
+  useEffect(() => {
+    if (!jwt || !lead?.id) return;
+    const url = `/api/caller/leads/events?token=${encodeURIComponent(jwt)}`;
+    const es  = new EventSource(url);
+    es.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg?.type !== 'call.update' || msg.call?.lead_id !== lead.id) return;
+        const st = msg.call.status;
+
+        if (st === 'answered') {
+          wasAnsweredRef.current = true;
+        }
+
+        if (['ended','missed','failed'].includes(st)) {
+          if (wasAnsweredRef.current) {
+            // Customer spoke and hung up → start (or keep) the form timer
+            setFormTimerSecs(prev => (prev > 0 ? prev : 60));
+          } else {
+            // Customer never picked → auto-redial flow
+            handleNoAnswer();
+          }
+        } else if (['initiated','ringing'].includes(st)) {
+          // A new dial started — reset the answered flag for THIS attempt
+          wasAnsweredRef.current = false;
+        }
+      } catch (_) {}
+    };
+    es.onerror = () => { /* auto-reconnect */ };
+    return () => es.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jwt, lead?.id]);
+
+  // Tick the 60s form-fill timer; open the "reason for delay" card when it hits 0
+  useEffect(() => {
+    if (formTimerSecs <= 0) return;
+    const id = setInterval(() => {
+      setFormTimerSecs(s => {
+        if (s <= 1) {
+          clearInterval(id);
+          setDelayCardOpen(true);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [formTimerSecs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleNoAnswer() {
+    if (autoDnpFiring || autoRedialing) return;
+    if (attempt < 2) {
+      // Immediate retry
+      setAutoRedialing(true);
+      setAttempt(a => a + 1);
+      try {
+        await fetch('/api/caller/calls/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+          body: JSON.stringify({ lead_id: lead.id }),
+        });
+      } catch (_) {}
+      setAutoRedialing(false);
+    } else {
+      // 2 attempts failed → auto-DNP and tell parent to advance
+      setAutoDnpFiring(true);
+      try {
+        await fetch(`/api/caller/leads/${lead.id}/note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+          body: JSON.stringify({
+            full_name: (fullName || lead.full_name || '').trim() || null,
+            outcome:   'not_picked',
+            note:      'Auto-marked: customer did not pick after 2 attempts.',
+          }),
+        });
+      } catch (_) {}
+      onSaved?.('not_picked', { autoAdvance: true });
+    }
+  }
+
+  function handleDelayReasonSubmit() {
+    const reason = delayReason.trim();
+    if (!reason) return;
+    setDelayReasons(prev => [...prev, reason]);
+    setDelayCardOpen(false);
+    setDelayReason('');
+    setFormTimerSecs(60); // restart the 1-min window
+  }
+
   async function handleRecall() {
     if (recalling) return;
+    // Manual recall = caller is trying again deliberately; cancel any pending
+    // auto-flow and reset the state machine so the new call's events drive UI.
+    wasAnsweredRef.current = false;
+    setAttempt(1);
+    setFormTimerSecs(0);
+    setDelayCardOpen(false);
+    setDelayReason('');
     setRecalling(true);
     setRecallToast('');
     try {
@@ -135,7 +311,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${jwt}` },
       }).catch(() => {});
-      onSaved?.('not_picked');
+      onSaved?.('not_picked', { autoAdvance: true });
     } catch (e) {
       setError(e.message || 'Failed to save.');
     } finally {
@@ -167,18 +343,26 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
         body: JSON.stringify({
-          full_name:          fullName.trim(),
-          sugar_confirmation: sugarConfirmation,
-          confirmed_range:    confirmedRange || null,
-          range_for:          rangeFor,
-          patient_age:        patientAge,
-          diet_status:        dietStatus,
-          takes_medicine:     takesMedicine || null,
-          note:               note.trim() || null,
-          outcome:            derivedOutcome,
-          follow_up_at:       followUpAt,
-          call_id:            lead.last_call_id || null,
-          interested:         interested || null,
+          full_name:             fullName.trim(),
+          sugar_confirmation:    sugarConfirmation,
+          confirmed_range:       confirmedRange || null,
+          range_for:             rangeFor,
+          patient_age:           patientAge,
+          diet_status:           dietStatus,
+          takes_medicine:        takesMedicine || null,
+          hba1c:                 hba1c || null,
+          other_languages:       otherLanguages || null,
+          working_professional:  workingProfessional || null,
+          location:              location || null,
+          already_paid:          alreadyPaid || null,
+          webinar_attended:      webinarAttended || null,
+          available_for_webinar: availableForWebinar || null,
+          next_batch_joining:    nextBatchJoining || null,
+          note:                  buildNoteWithDelays(note, delayReasons),
+          outcome:               derivedOutcome,
+          follow_up_at:          followUpAt,
+          call_id:               lead.last_call_id || null,
+          interested:            interested || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -192,7 +376,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         headers: { 'Authorization': `Bearer ${jwt}` },
       }).catch(() => { /* ignore — user already moved on */ });
 
-      onSaved?.(derivedOutcome);
+      onSaved?.(derivedOutcome, { autoAdvance: true });
     } catch (e) {
       setError(e.message || 'Failed to save.');
     } finally {
@@ -268,6 +452,89 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           }}>{recallToast}</div>
         )}
 
+        {/* Auto-redial banner (customer didn't pick — system is dialing again) */}
+        {(autoRedialing || autoDnpFiring) && (
+          <div style={{
+            margin: '-6px 0 12px', padding: '10px 14px', borderRadius: 10,
+            background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.40)',
+            color: '#B45309', fontSize: '0.84rem', fontWeight: 700,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%', background: '#F59E0B',
+              animation: 'fadeIn 1s ease-in-out infinite alternate',
+            }} />
+            {autoDnpFiring
+              ? 'Customer did not pick after 2 attempts — moving to Not Picked…'
+              : `Customer did not pick — auto-retrying (attempt ${attempt} of 2)…`}
+          </div>
+        )}
+
+        {/* 1-minute form-fill timer banner */}
+        {formTimerSecs > 0 && (
+          <div style={{
+            margin: '-6px 0 12px', padding: '10px 14px', borderRadius: 10,
+            background: formTimerSecs <= 10 ? 'rgba(220,38,38,0.10)' : 'rgba(245,158,11,0.10)',
+            border: `1px solid ${formTimerSecs <= 10 ? 'rgba(220,38,38,0.40)' : 'rgba(245,158,11,0.40)'}`,
+            color: formTimerSecs <= 10 ? '#B91C1C' : '#B45309',
+            fontSize: '0.86rem', fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              Fill the form within
+            </span>
+            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1rem', letterSpacing: '0.04em' }}>
+              {String(Math.floor(formTimerSecs / 60)).padStart(2, '0')}:{String(formTimerSecs % 60).padStart(2, '0')}
+            </span>
+          </div>
+        )}
+
+        {/* Delay-reason overlay card (1-min elapsed without form save) */}
+        {delayCardOpen && (
+          <div style={{
+            margin: '-6px 0 14px', padding: '14px 16px', borderRadius: 12,
+            background: 'rgba(220,38,38,0.06)', border: '1.5px solid rgba(220,38,38,0.40)',
+            display: 'flex', flexDirection: 'column', gap: 10,
+          }}>
+            <div style={{ fontWeight: 700, color: '#B91C1C', fontSize: '0.92rem' }}>
+              Time's up — what's holding you up?
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'rgba(91,33,182,0.65)' }}>
+              Type the reason for the delay. Submitting restarts the 1-minute timer.
+            </div>
+            <input
+              type="text"
+              value={delayReason}
+              onChange={e => setDelayReason(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleDelayReasonSubmit(); }}
+              placeholder="e.g. Looking up patient history, asking supervisor…"
+              autoFocus
+              style={{
+                height: '2.4rem', padding: '0 12px', borderRadius: 8,
+                border: '1px solid rgba(209,196,240,0.7)', background: '#fff',
+                fontFamily: 'Outfit,sans-serif', fontSize: '0.86rem', color: '#3B0764',
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleDelayReasonSubmit}
+              disabled={!delayReason.trim()}
+              style={{
+                alignSelf: 'flex-end',
+                padding: '8px 16px', borderRadius: 8, border: 'none',
+                background: delayReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
+                color: '#fff', fontWeight: 700, fontSize: '0.84rem',
+                cursor: delayReason.trim() ? 'pointer' : 'not-allowed',
+              }}
+            >
+              Submit reason → restart 1-min timer
+            </button>
+          </div>
+        )}
+
         <div>
           {/* Lead name — pre-filled, editable */}
           <FieldRow label="1. Name" mandatory>
@@ -316,8 +583,58 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
             <RadioRow options={MEDICINE} value={takesMedicine} onChange={setTakesMedicine} />
           </FieldRow>
 
+          {/* HbA1c */}
+          <FieldRow label="7. HbA1c" hint="(optional)">
+            <RadioRow options={HBA1C} value={hba1c} onChange={setHba1c} wrap />
+          </FieldRow>
+
+          {/* Other languages */}
+          <FieldRow label="8. Other Languages" hint="(optional)">
+            <RadioRow options={YES_NO} value={otherLanguages} onChange={setOtherLanguages} />
+          </FieldRow>
+
+          {/* Working professional */}
+          <FieldRow label="9. Working Professional" hint="(optional)">
+            <SelectField
+              value={workingProfessional}
+              onChange={setWorkingProfessional}
+              options={WORKING_PROFESSIONAL}
+              placeholder="Select occupation…"
+            />
+          </FieldRow>
+
+          {/* Location */}
+          <FieldRow label="10. Location" hint="(optional)">
+            <SelectField
+              value={location}
+              onChange={setLocation}
+              options={LOCATIONS}
+              placeholder="Select location…"
+            />
+          </FieldRow>
+
+          {/* Already paid */}
+          <FieldRow label="11. Already Paid" hint="(optional)">
+            <RadioRow options={YES_NO} value={alreadyPaid} onChange={setAlreadyPaid} />
+          </FieldRow>
+
+          {/* Webinar attended */}
+          <FieldRow label="12. Webinar Attended" hint="(optional)">
+            <RadioRow options={YES_NO} value={webinarAttended} onChange={setWebinarAttended} />
+          </FieldRow>
+
+          {/* Available for webinar */}
+          <FieldRow label="13. Available for Webinar" hint="(optional)">
+            <RadioRow options={YES_NO} value={availableForWebinar} onChange={setAvailableForWebinar} />
+          </FieldRow>
+
+          {/* Next batch joining */}
+          <FieldRow label="14. Next Batch Joining" hint="(optional)">
+            <RadioRow options={YES_NO} value={nextBatchJoining} onChange={setNextBatchJoining} />
+          </FieldRow>
+
           {/* Note */}
-          <FieldRow label="7. Note" mandatory={followUpOnly || noOverride} hint={(followUpOnly || noOverride) ? null : '(optional)'}>
+          <FieldRow label="15. Note" mandatory={followUpOnly || noOverride} hint={(followUpOnly || noOverride) ? null : '(optional)'}>
             <textarea
               value={note}
               onChange={e => setNote(e.target.value)}
@@ -335,7 +652,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
 
           {/* Follow-up schedule — appears only after the caller toggles "Follow Up" on */}
           {wantsFollowUp && (
-            <FieldRow label="8. Follow-up schedule" mandatory>
+            <FieldRow label="16. Follow-up schedule" mandatory>
               <DateTimePicker
                 value={followUpAtLocal}
                 onChange={setFollowUpAtLocal}
@@ -519,6 +836,29 @@ function RadioRow({ options, value, onChange, wrap }) {
         );
       })}
     </div>
+  );
+}
+
+function SelectField({ value, onChange, options, placeholder }) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      style={{
+        width: '100%', height: '2.6rem', padding: '0 12px',
+        borderRadius: 10,
+        border: '1px solid rgba(209,196,240,0.8)',
+        background: 'rgba(237,234,248,0.30)',
+        fontFamily: 'Outfit,sans-serif', fontSize: '0.88rem',
+        color: value ? '#3B0764' : 'rgba(91,33,182,0.50)',
+        outline: 'none', boxSizing: 'border-box', cursor: 'pointer',
+      }}
+    >
+      <option value="">{placeholder || 'Select…'}</option>
+      {options.map(opt => (
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
   );
 }
 
