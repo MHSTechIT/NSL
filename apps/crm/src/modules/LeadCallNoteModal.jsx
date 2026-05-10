@@ -293,7 +293,11 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jwt, lead?.id]);
 
-  /* Polling fallback — derive typed events from the latest call row. */
+  /* Polling fallback — Tata webhooks arrive with their own provider_call_id
+     that doesn't always match the /calls/start row, so a single logical call
+     can fragment across multiple `calls` rows in the DB. We aggregate signals
+     across the most recent N rows for this lead so a hangup signal landing on
+     ANY fragment is enough to advance the state machine. */
   useEffect(() => {
     if (!jwt || !lead?.id) return;
     const ACTIVE = new Set([
@@ -309,36 +313,41 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         });
         if (!res.ok) return;
         const data = await res.json();
-        const c = data.calls?.[0];
-        if (cancelled || !c) return;
-        // Derive missing events from timestamp columns. Always process answered
-        // events first so the *.missed guards can short-circuit cleanly.
-        if (c.agent_answered_at && !wasAgentAnsweredRef.current) {
-          handleCallEvent('agent.answered', { ...c, lead_id: lead.id });
+        const calls = Array.isArray(data.calls) ? data.calls.slice(0, 6) : [];
+        if (cancelled || calls.length === 0) return;
+
+        // Merge signals across all recent fragments for this lead.
+        const merged = {
+          id:                   calls[0].id,
+          status:               calls[0].status,
+          agent_answered_at:    calls.find(c => c.agent_answered_at)?.agent_answered_at    || null,
+          customer_answered_at: calls.find(c => c.customer_answered_at)?.customer_answered_at || null,
+          customer_missed_at:   calls.find(c => c.customer_missed_at)?.customer_missed_at   || null,
+          ended_at:             calls.find(c => c.ended_at)?.ended_at             || null,
+          recording_url:        calls.find(c => c.recording_url)?.recording_url   || null,
+          duration_sec:         calls.find(c => c.duration_sec != null && Number(c.duration_sec) > 0)?.duration_sec || null,
+          hangup_by:            calls.find(c => c.hangup_by)?.hangup_by || null,
+        };
+
+        // Process answered events first so the *.missed guards can short-circuit.
+        if (merged.agent_answered_at && !wasAgentAnsweredRef.current) {
+          handleCallEvent('agent.answered', { ...merged, lead_id: lead.id });
         }
-        if (c.customer_answered_at && !wasCustomerAnsweredRef.current) {
-          handleCallEvent('customer.answered', { ...c, lead_id: lead.id });
+        if (merged.customer_answered_at && !wasCustomerAnsweredRef.current) {
+          handleCallEvent('customer.answered', { ...merged, lead_id: lead.id });
         }
-        if (c.customer_missed_at) {
-          handleCallEvent('customer.missed', { ...c, lead_id: lead.id });
+        if (merged.customer_missed_at) {
+          handleCallEvent('customer.missed', { ...merged, lead_id: lead.id });
         }
-        // Detect call-end via any of these database signals — many Tata
-        // accounts don't fire the dedicated /hangup webhook reliably for
-        // click-to-call, but at least one of these always populates after
-        // the call really ends:
-        //   1. ended_at      — set by /hangup or /missed webhook
-        //   2. recording_url — set by /recording (PCA) webhook AFTER the
-        //                       full call cycle completes
-        //   3. duration_sec  — set when any terminal-status event arrives
-        //   4. status changed away from initiated/ringing/answered to a
-        //      terminal value
+        // Detect call-end via any of these database signals.
         const TERMINAL = new Set(['ended','missed','failed']);
-        const callEnded = !!c.ended_at || !!c.recording_url
-          || (c.duration_sec != null && Number(c.duration_sec) > 0)
-          || TERMINAL.has(c.status);
+        const anyTerminalStatus = calls.some(c => TERMINAL.has(c.status));
+        const callEnded = !!merged.ended_at || !!merged.recording_url
+          || (merged.duration_sec != null && Number(merged.duration_sec) > 0)
+          || anyTerminalStatus;
         if (callEnded) {
-          if (!c.agent_answered_at) handleCallEvent('agent.missed', { ...c, lead_id: lead.id });
-          handleCallEvent('call.hangup', { ...c, lead_id: lead.id });
+          if (!merged.agent_answered_at) handleCallEvent('agent.missed', { ...merged, lead_id: lead.id });
+          handleCallEvent('call.hangup', { ...merged, lead_id: lead.id });
         }
       } catch (_) {}
     };
