@@ -198,10 +198,19 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     }
 
     if (eventType === 'customer.missed') {
-      // Customer ALREADY answered this call → not actually a miss; ignore.
-      if (customerAnswered) return;
-      // Once we're in form_window / form_reason_card / dnp_alert / auto_paused,
-      // the call is past the retry decision point — never retry from here.
+      // Tata's "Call missed by Customer" trigger fires on the customer leg
+      // ending regardless of whether they picked up. If the customer DID
+      // answer first, this event is actually telling us the customer hung up
+      // — repurpose it as a hangup signal so we move into the form window
+      // even when the dedicated /hangup webhook didn't fire.
+      if (customerAnswered) {
+        if (phase !== 'form_window' && phase !== 'form_reason_card') {
+          setCallPhase('form_window');
+          setFormTimerSecs(prev => (prev > 0 ? prev : FORM_WINDOW_SECS));
+        }
+        return;
+      }
+      // Past the decision point already — don't retry from form / DNP / etc.
       if (['form_window','form_reason_card','dnp_alert','auto_paused','recall_ringing'].includes(phase)) return;
       if (customerAttemptRef.current < 2) {
         retryCallToCustomer();
@@ -286,8 +295,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         if (c.customer_answered_at && !wasCustomerAnsweredRef.current) {
           handleCallEvent('customer.answered', { ...c, lead_id: lead.id });
         }
-        // Only fire customer.missed if the customer never actually answered.
-        if (c.customer_missed_at && !c.customer_answered_at) {
+        if (c.customer_missed_at) {
+          // After-answer customer_missed_at means Tata fired the trigger on
+          // the customer hangup. Use the typed event — the handler routes it
+          // to form_window in that case.
           handleCallEvent('customer.missed', { ...c, lead_id: lead.id });
         }
         if (c.ended_at) {
@@ -698,6 +709,12 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           starting={recalling}
           onStart={startAutoCall}
           customerAttempt={customerAttempt}
+          onEndCall={() => {
+            // Manual safety net: caller knows the call ended even if Tata's
+            // hangup webhook didn't reach us. Move straight into form_window.
+            setCallPhase('form_window');
+            setFormTimerSecs(FORM_WINDOW_SECS);
+          }}
         />
 
         <div className="lcn-form-grid">
@@ -944,7 +961,7 @@ function RadioRow({ options, value, onChange, wrap }) {
 /* Yellow status banner — the in-flight call message at the top of the modal.
    Action prompts (extension check, reason cards, DNP alert) live in the
    centered overlay rendered separately. */
-function BannerStatus({ phase, formTimerSecs, totalWindow, starting, onStart, customerAttempt }) {
+function BannerStatus({ phase, formTimerSecs, totalWindow, starting, onStart, customerAttempt, onEndCall }) {
   const cardBase = {
     marginBottom: 16, padding: '14px 18px',
     borderRadius: 12, border: '1.5px dashed #F59E0B',
@@ -1001,7 +1018,22 @@ function BannerStatus({ phase, formTimerSecs, totalWindow, starting, onStart, cu
   if (phase === 'customer_on_call') {
     return (
       <div style={{ ...cardBase, border: '1.5px dashed #059669', background: 'rgba(220,252,231,0.55)', color: '#065F46' }}>
-        <Row><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', animation: 'pulseDot 1s ease-in-out infinite', flexShrink: 0 }} /><span>Customer is on the call.</span></Row>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <Row><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', animation: 'pulseDot 1s ease-in-out infinite', flexShrink: 0 }} /><span>Customer is on the call.</span></Row>
+          {onEndCall && (
+            <button type="button" onClick={onEndCall}
+              title="Click after the customer disconnects, in case the auto-detect misses it"
+              style={{
+                padding: '6px 14px', borderRadius: 50, border: 'none',
+                background: '#059669', color: '#fff',
+                fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '0.78rem',
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                boxShadow: '0 2px 8px rgba(5,150,105,0.35)',
+              }}>
+              ✓ Call ended → start form timer
+            </button>
+          )}
+        </div>
       </div>
     );
   }
