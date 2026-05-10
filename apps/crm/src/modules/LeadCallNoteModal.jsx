@@ -144,6 +144,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const wasAgentAnsweredRef = useRef(false);
   const wasCustomerAnsweredRef = useRef(false);
   const lastSeenSigsRef    = useRef(new Set());
+  const customerMissedTimerRef = useRef(null);
   const activeCallIdRef    = useRef(lead?.last_call_id || null);
   useEffect(() => { callPhaseRef.current = callPhase; },             [callPhase]);
   useEffect(() => { agentAttemptsRef.current = agentAttempts; },     [agentAttempts]);
@@ -193,6 +194,11 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
 
     if (eventType === 'customer.answered') {
       wasCustomerAnsweredRef.current = true;
+      // Cancel any pending customer.missed retry timer — customer DID answer.
+      if (customerMissedTimerRef.current) {
+        clearTimeout(customerMissedTimerRef.current);
+        customerMissedTimerRef.current = null;
+      }
       setCallPhase('customer_on_call');
       return;
     }
@@ -200,12 +206,13 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     if (eventType === 'customer.missed') {
       // Tata fires "Call missed by Customer" right after customer.answered
       // (within ~1 s) on every click-to-call, even when the customer picked
-      // up. We can't trust this event as a hangup signal at low elapsed
-      // times. If the customer DID answer:
-      //   – elapsed < 8 s  → spurious post-answer fire, IGNORE
-      //   – elapsed ≥ 8 s  → likely the customer hung up after a real call,
-      //                       move into form_window (used as a fallback when
-      //                       the dedicated /hangup webhook isn't firing).
+      // up. Two scenarios:
+      //   (A) Both events arrive in order, customerAnswered already true
+      //       → elapsed < 8 s = spurious post-answer fire, IGNORE
+      //       → elapsed ≥ 8 s = real customer hangup, go to form_window
+      //   (B) customer.missed lands BEFORE customer.answered (race)
+      //       → defer the retry decision 3 s; if customer.answered arrives
+      //          during the wait, cancel the retry entirely.
       if (customerAnswered) {
         const ans = call?.customer_answered_at ? new Date(call.customer_answered_at).getTime() : null;
         const miss = call?.customer_missed_at ? new Date(call.customer_missed_at).getTime() : Date.now();
@@ -219,12 +226,21 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         return;
       }
       // Past the decision point already — don't retry from form / DNP / etc.
-      if (['form_window','form_reason_card','dnp_alert','auto_paused','recall_ringing'].includes(phase)) return;
-      if (customerAttemptRef.current < 2) {
-        retryCallToCustomer();
-      } else {
-        triggerDnp();
-      }
+      if (['form_window','form_reason_card','dnp_alert','auto_paused','recall_ringing','customer_on_call'].includes(phase)) return;
+      // Race protection: defer the retry. If customer.answered arrives
+      // within 3 s OR phase moves into a non-retryable state, abort.
+      if (customerMissedTimerRef.current) clearTimeout(customerMissedTimerRef.current);
+      customerMissedTimerRef.current = setTimeout(() => {
+        customerMissedTimerRef.current = null;
+        if (wasCustomerAnsweredRef.current) return;
+        const p = callPhaseRef.current;
+        if (['form_window','form_reason_card','dnp_alert','auto_paused','recall_ringing','customer_on_call'].includes(p)) return;
+        if (customerAttemptRef.current < 2) {
+          retryCallToCustomer();
+        } else {
+          triggerDnp();
+        }
+      }, 3000);
       return;
     }
 
@@ -351,6 +367,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     wasAgentAnsweredRef.current = false;
     wasCustomerAnsweredRef.current = false;
     lastSeenSigsRef.current = new Set();
+    if (customerMissedTimerRef.current) {
+      clearTimeout(customerMissedTimerRef.current);
+      customerMissedTimerRef.current = null;
+    }
   }
 
   async function postStartCall() {
