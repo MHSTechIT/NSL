@@ -147,6 +147,13 @@ function makeTataHandler(routeKind) {
       if (routeKind === 'hangup' && event.hangup_by) {
         sets.push(`hangup_by = COALESCE(hangup_by, $${i++})`); params.push(event.hangup_by);
       }
+      // Route-based ended_at — Tata's payload often carries call_status='answered'
+      // even on the hangup webhook (because the call WAS answered), causing
+      // status-based ended_at logic to skip. The route itself is a definitive
+      // signal that the call ended (or in PCA's case, has fully completed).
+      if (routeKind === 'hangup' || routeKind === 'recording') {
+        sets.push('ended_at = COALESCE(ended_at, NOW())');
+      }
       if (event.duration_sec != null) { sets.push(`duration_sec = $${i++}`); params.push(event.duration_sec); }
       if (event.recording_url) { sets.push(`recording_url = $${i++}`); params.push(event.recording_url); }
       if (event.error_message) { sets.push(`error_message = $${i++}`); params.push(event.error_message); }
