@@ -196,15 +196,12 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   function handleCallEvent(eventType, call) {
     if (call && call.lead_id && call.lead_id !== lead.id) return;
 
-    // Stale-event filter — drop events from call rows started BEFORE the
-    // current attempt's session began. Without this, a delayed webhook from
-    // a previous attempt (or a fragment row whose Tata webhook arrives
-    // late) can corrupt the new attempt's state machine.
-    if (call?.started_at && sessionStartIsoRef.current
-        && call.started_at < sessionStartIsoRef.current) {
-      return;
-    }
-
+    // Dedup by (call.id, eventType). lastSeenSigsRef is NEVER cleared (only
+    // grown) so a stale Tata retry of an event from a previous attempt's
+    // call.id can't slip past — the signature is already in the set from
+    // the first time we processed it. Tata uses different call.ids per
+    // attempt and per leg (agent leg vs customer leg), so genuine new
+    // events always have fresh signatures.
     const sig = `${call?.id || ''}:${eventType}`;
     if (lastSeenSigsRef.current.has(sig)) return;
     lastSeenSigsRef.current.add(sig);
@@ -373,12 +370,19 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         const data = await res.json();
         const since = sessionStartIsoRef.current;
         const all = Array.isArray(data.calls) ? data.calls : [];
-        // Only consider rows from THIS attempt's session. Without this,
-        // a previous completed call's recording_url / ended_at would leak
-        // into the merged signals and prematurely fire form_window the
-        // moment a new attempt begins.
+        // Only consider rows that received any activity during THIS session.
+        // We filter by updated_at (NOT started_at) because Tata's click-to-call
+        // splits one logical call into two rows by leg (agent leg with a
+        // numeric provider_call_id, customer leg with a hex one). The
+        // customer-leg row may have been created before this session started
+        // — its events for the CURRENT call still arrive and bump updated_at.
+        // Falling back to started_at would drop the customer-leg row and
+        // strand the modal at customer_ringing.
         const calls = (since
-          ? all.filter(c => c.started_at && c.started_at >= since)
+          ? all.filter(c => {
+              const stamp = c.updated_at || c.started_at;
+              return stamp && stamp >= since;
+            })
           : all
         ).slice(0, 6);
         if (cancelled || calls.length === 0) return;
@@ -496,7 +500,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   function resetCallSignalForNewAttempt() {
     wasAgentAnsweredRef.current = false;
     wasCustomerAnsweredRef.current = false;
-    lastSeenSigsRef.current = new Set();
+    // DON'T clear lastSeenSigsRef — keep dedup history forever so a stale
+    // Tata retry of an event from the previous attempt's call.id can't slip
+    // past. Tata uses fresh call.ids for each new attempt's events, so this
+    // doesn't block legitimate signals.
     sessionStartIsoRef.current = new Date(Date.now() - 2000).toISOString();
     if (customerMissedTimerRef.current) {
       clearTimeout(customerMissedTimerRef.current);
