@@ -66,6 +66,24 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
     return data;
   }
 
+  /* Trigger a Tata call AND open the modal with the freshly-created
+     last_call_id so the modal can immediately reflect the in-flight call
+     (banner = "Your first call is triggered. Please pick the call.")
+     instead of sitting at the idle "Ready to start auto call." banner.
+
+     If the call POST fails, we still open the modal — the user can retry
+     via the Start Auto Call button — but with last_call_id explicitly
+     null so the modal stays at idle (no stale id leaking in). */
+  async function triggerCallAndOpen(lead, errorSetter) {
+    try {
+      const data = await triggerCall(lead);
+      setEditLead({ ...lead, last_call_id: data?.call_id || null });
+    } catch (e) {
+      (errorSetter || setError)(e.message || 'Call failed');
+      setEditLead({ ...lead, last_call_id: null });
+    }
+  }
+
   function clearCooldownTimer() {
     if (cooldownTimerRef.current) {
       clearInterval(cooldownTimerRef.current);
@@ -92,8 +110,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
     setAutoError('');
     setAutoMode('calling');
     const first = queue[0];
-    triggerCall(first).catch(e => setAutoError(e.message || 'Call failed'));
-    setEditLead(first);
+    triggerCallAndOpen(first, setAutoError);
   }
 
   /* Called after the "Complete Call" button submits the note OR when the
@@ -115,8 +132,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
       setAutoIndex(i => i + 1);
       setAutoMode('calling');
       setAutoError('');
-      triggerCall(next).catch(e => setAutoError(e.message || 'Call failed'));
-      setEditLead(next);
+      triggerCallAndOpen(next, setAutoError);
       return remaining;
     });
   }
@@ -381,6 +397,10 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
 
       {editLead && (
         <LeadCallNoteModal
+          // Force a fresh modal instance per lead — without this React reuses
+          // the same component when editLead changes, leaking phase / refs /
+          // dedup history from the previous lead's call into the new one.
+          key={editLead.id}
           jwt={jwt}
           lead={editLead}
           onClose={() => {
@@ -413,10 +433,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
                 setAdvanceLeft(prev => {
                   if (prev <= 1) {
                     clearAdvanceTimer();
-                    setTimeout(() => {
-                      triggerCall(nextLead).catch(e => setError(e.message || 'Call failed'));
-                      setEditLead(nextLead);
-                    }, 0);
+                    setTimeout(() => triggerCallAndOpen(nextLead), 0);
                     return 0;
                   }
                   return prev - 1;
