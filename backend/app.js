@@ -332,6 +332,14 @@ const _sourceMigration = Promise.all([_webinarTableMigration, _clickMigration]).
     UPDATE webinar_config SET source = 'meta' WHERE source IS NULL;
     ALTER TABLE webinar_config ALTER COLUMN source SET NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS webinar_config_source_uniq ON webinar_config (source);
+
+    -- webinars: a legacy partial-unique index "webinars_one_active_idx" was
+    -- added in production to enforce one active webinar globally. With the
+    -- source dimension, each source needs its own active webinar — replace
+    -- the old constraint with one scoped per source.
+    DROP INDEX IF EXISTS webinars_one_active_idx;
+    CREATE UNIQUE INDEX IF NOT EXISTS webinars_one_active_per_source_idx
+      ON webinars (source) WHERE is_active = TRUE;
   `)
 ).then(() =>
   // Seed YT row (uses defaults for everything; admin will set values via CRM).
@@ -341,6 +349,16 @@ const _sourceMigration = Promise.all([_webinarTableMigration, _clickMigration]).
     INSERT INTO webinar_config (id, source, kill_switch, tuesday_whatsapp_link, friday_whatsapp_link)
     VALUES (2, 'yt', false, '', '')
     ON CONFLICT (source) DO NOTHING
+  `)
+).then(() =>
+  // Seed a baseline active webinar row per source so the admin's first timer
+  // save can UPDATE (instead of relying on a dynamic INSERT that historically
+  // failed silently in production). 'YT-101' picked to avoid colliding with
+  // Meta's 'AWS-N' name space.
+  pool.query(`
+    INSERT INTO webinars (date_time, is_active, name, source)
+    SELECT NOW() + INTERVAL '4 days', TRUE, 'YT-101', 'yt'
+    WHERE NOT EXISTS (SELECT 1 FROM webinars WHERE source = 'yt')
   `)
 ).catch(err => console.error('[Migration] source dimension error:', err.message));
 

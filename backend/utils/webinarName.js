@@ -1,37 +1,47 @@
 const pool = require('../db');
 
-const PREFIX = 'AWS-';
+const PREFIX_BY_SOURCE = { meta: 'AWS-', yt: 'YT-' };
 const START = 101;
 
-// Per-source name space: Meta and YT each have their own AWS-N counter so
-// the two pipelines stay independent.
+function prefixFor(source) {
+  return PREFIX_BY_SOURCE[source] || 'AWS-';
+}
+
+// Per-source name space so Meta and YT can't ever produce duplicate names
+// (e.g. both starting at AWS-101). Meta keeps 'AWS-N', YT uses 'YT-N'.
 async function nextWebinarName(source = 'meta') {
+  const prefix = prefixFor(source);
+  const numRegex   = `${prefix}(\\d+)`;        // capture group for SUBSTRING
+  const matchRegex = `^${prefix}\\d+$`;        // ~ regex match
+
   const { rows } = await pool.query(
     `SELECT COALESCE(
-       MAX((substring(name FROM 'AWS-(\\d+)'))::int),
+       MAX((substring(name FROM $3))::int),
        $1 - 1
      ) AS max_num
      FROM webinars
-     WHERE name ~ '^AWS-\\d+$' AND source = $2`,
-    [START, source]
+     WHERE name ~ $4 AND source = $2`,
+    [START, source, numRegex, matchRegex]
   );
   const next = (rows[0]?.max_num ?? START - 1) + 1;
-  return `${PREFIX}${next}`;
+  return `${prefix}${next}`;
 }
 
-// The "Next Webinar" slot is always (current active webinar number) + 1.
-// e.g. Current AWS-103 → Next AWS-104. Falls back to the source's max + 1 only
-// when no active webinar exists for that source.
+// "Next Webinar" = (current active webinar number for this source) + 1.
 async function nextUpcomingWebinarName(source = 'meta') {
+  const prefix = prefixFor(source);
+  const numRegex   = `${prefix}(\\d+)`;
+  const matchRegex = `^${prefix}\\d+$`;
+
   const { rows } = await pool.query(
-    `SELECT (substring(name FROM 'AWS-(\\d+)'))::int AS num
+    `SELECT (substring(name FROM $1))::int AS num
        FROM webinars
-      WHERE is_active = TRUE AND name ~ '^AWS-\\d+$' AND source = $1
+      WHERE is_active = TRUE AND name ~ $2 AND source = $3
       ORDER BY num DESC LIMIT 1`,
-    [source]
+    [numRegex, matchRegex, source]
   );
   const activeNum = rows[0]?.num;
-  if (typeof activeNum === 'number') return `${PREFIX}${activeNum + 1}`;
+  if (typeof activeNum === 'number') return `${prefix}${activeNum + 1}`;
   return nextWebinarName(source);
 }
 

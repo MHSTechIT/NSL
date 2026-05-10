@@ -106,6 +106,7 @@ router.put('/webinar-config', configValidators, async (req, res) => {
     }
 
     // Sync webinar sessions for this source — UPDATE existing row, only INSERT if none exists
+    let webinarWarning = null;
     if (updates.next_webinar_at) {
       try {
         const { rowCount } = await pool.query(
@@ -118,9 +119,11 @@ router.put('/webinar-config', configValidators, async (req, res) => {
             'INSERT INTO webinars (date_time, is_active, name, source) VALUES ($1, TRUE, $2, $3)',
             [updates.next_webinar_at, name, source]
           );
+          console.log(`[admin] Created active ${source} webinar: ${name}`);
         }
       } catch (webinarErr) {
-        console.error('Webinar session update error:', webinarErr.message);
+        webinarWarning = `active webinar: ${webinarErr.message}${webinarErr.code ? ` [${webinarErr.code}]` : ''}`;
+        console.error(`[admin] ${source} active webinar update error:`, webinarErr.message, webinarErr.code, webinarErr.detail);
       }
     }
 
@@ -147,13 +150,16 @@ router.put('/webinar-config', configValidators, async (req, res) => {
             'INSERT INTO webinars (date_time, is_active, name, source) VALUES ($1, FALSE, $2, $3)',
             [updates.backup_webinar_at, name, source]
           );
+          console.log(`[admin] Created upcoming ${source} webinar: ${name}`);
         }
       } catch (webinarErr) {
-        console.error('Upcoming webinar update error:', webinarErr.message);
+        webinarWarning = (webinarWarning ? webinarWarning + '; ' : '') +
+          `upcoming webinar: ${webinarErr.message}${webinarErr.code ? ` [${webinarErr.code}]` : ''}`;
+        console.error(`[admin] ${source} upcoming webinar update error:`, webinarErr.message, webinarErr.code, webinarErr.detail);
       }
     }
 
-    res.json({ success: true, updated_at: updates.updated_at });
+    res.json({ success: true, updated_at: updates.updated_at, webinarWarning });
   } catch (err) {
     console.error('Update config error:', err.message);
     res.status(500).json({ error: 'Failed to update config' });
