@@ -304,13 +304,23 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           handleCallEvent('customer.answered', { ...c, lead_id: lead.id });
         }
         if (c.customer_missed_at) {
-          // After-answer customer_missed_at means Tata fired the trigger on
-          // the customer hangup. Use the typed event — the handler routes it
-          // to form_window in that case.
           handleCallEvent('customer.missed', { ...c, lead_id: lead.id });
         }
-        if (c.ended_at) {
-          // Only fire agent.missed if the agent never actually answered.
+        // Detect call-end via any of these database signals — many Tata
+        // accounts don't fire the dedicated /hangup webhook reliably for
+        // click-to-call, but at least one of these always populates after
+        // the call really ends:
+        //   1. ended_at      — set by /hangup or /missed webhook
+        //   2. recording_url — set by /recording (PCA) webhook AFTER the
+        //                       full call cycle completes
+        //   3. duration_sec  — set when any terminal-status event arrives
+        //   4. status changed away from initiated/ringing/answered to a
+        //      terminal value
+        const TERMINAL = new Set(['ended','missed','failed']);
+        const callEnded = !!c.ended_at || !!c.recording_url
+          || (c.duration_sec != null && Number(c.duration_sec) > 0)
+          || TERMINAL.has(c.status);
+        if (callEnded) {
           if (!c.agent_answered_at) handleCallEvent('agent.missed', { ...c, lead_id: lead.id });
           handleCallEvent('call.hangup', { ...c, lead_id: lead.id });
         }
@@ -717,12 +727,6 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           starting={recalling}
           onStart={startAutoCall}
           customerAttempt={customerAttempt}
-          onEndCall={() => {
-            // Manual safety net: caller knows the call ended even if Tata's
-            // hangup webhook didn't reach us. Move straight into form_window.
-            setCallPhase('form_window');
-            setFormTimerSecs(FORM_WINDOW_SECS);
-          }}
         />
 
         <div className="lcn-form-grid">
@@ -969,7 +973,7 @@ function RadioRow({ options, value, onChange, wrap }) {
 /* Yellow status banner — the in-flight call message at the top of the modal.
    Action prompts (extension check, reason cards, DNP alert) live in the
    centered overlay rendered separately. */
-function BannerStatus({ phase, formTimerSecs, totalWindow, starting, onStart, customerAttempt, onEndCall }) {
+function BannerStatus({ phase, formTimerSecs, totalWindow, starting, onStart, customerAttempt }) {
   const cardBase = {
     marginBottom: 16, padding: '14px 18px',
     borderRadius: 12, border: '1.5px dashed #F59E0B',
@@ -1026,22 +1030,7 @@ function BannerStatus({ phase, formTimerSecs, totalWindow, starting, onStart, cu
   if (phase === 'customer_on_call') {
     return (
       <div style={{ ...cardBase, border: '1.5px dashed #059669', background: 'rgba(220,252,231,0.55)', color: '#065F46' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-          <Row><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', animation: 'pulseDot 1s ease-in-out infinite', flexShrink: 0 }} /><span>Customer is on the call.</span></Row>
-          {onEndCall && (
-            <button type="button" onClick={onEndCall}
-              title="Click after the customer disconnects, in case the auto-detect misses it"
-              style={{
-                padding: '6px 14px', borderRadius: 50, border: 'none',
-                background: '#059669', color: '#fff',
-                fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '0.78rem',
-                cursor: 'pointer', whiteSpace: 'nowrap',
-                boxShadow: '0 2px 8px rgba(5,150,105,0.35)',
-              }}>
-              ✓ Call ended → start form timer
-            </button>
-          )}
-        </div>
+        <Row><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', animation: 'pulseDot 1s ease-in-out infinite', flexShrink: 0 }} /><span>Customer is on the call.</span></Row>
       </div>
     );
   }

@@ -205,20 +205,26 @@ function makeTataHandler(routeKind) {
         'customer-answered': 'customer.answered',
         'customer-missed':   'customer.missed',
         'hangup':            'call.hangup',
+        // PCA fires AFTER the call has fully ended. Treat it as a call-end
+        // signal so the auto-call state machine can advance even when the
+        // dedicated /hangup webhook didn't fire (which is common on
+        // click-to-call accounts that only have the recording webhook
+        // configured for terminal events).
+        'recording':         'call.hangup',
       };
       const typed = TYPED[routeKind];
       if (typed) {
         callerSse.pushTo(callRow.caller_id, { type: typed, call: callRow });
       }
 
-      // On hangup with no agent-answered, we infer the agent (caller) never
-      // picked the SmartFlow ring. Click-to-call mode doesn't expose a
-      // dedicated "Call missed by Agent" trigger, so this is how the state
-      // machine learns the caller missed their leg.
-      if (routeKind === 'hangup' && !callRow.agent_answered_at) {
+      // On hangup-style events with no agent-answered, we infer the agent
+      // (caller) never picked the SmartFlow ring. Click-to-call mode doesn't
+      // expose a dedicated "Call missed by Agent" trigger, so this is how the
+      // state machine learns the caller missed their leg.
+      if ((routeKind === 'hangup' || routeKind === 'recording') && !callRow.agent_answered_at) {
         callerSse.pushTo(callRow.caller_id, { type: 'agent.missed', call: callRow });
         console.warn('[auto-call] caller missed SmartFlow leg', {
-          call_id: callRow.id, lead_id: callRow.lead_id, caller_id: callRow.caller_id,
+          call_id: callRow.id, lead_id: callRow.lead_id, caller_id: callRow.caller_id, routeKind,
         });
       }
     }
