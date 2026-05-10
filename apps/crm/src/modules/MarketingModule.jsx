@@ -37,7 +37,7 @@ const TABS = [
   { id: 'timer',     label: 'Timer & Controls' },
 ];
 
-export default function MarketingModule({ token }) {
+export default function MarketingModule({ token, source = 'meta' }) {
   const [tab, setTab] = useState('dashboard');
 
   return (
@@ -76,10 +76,10 @@ export default function MarketingModule({ token }) {
 
       {/* Content card */}
       <div className="marketing-content-card bg-white rounded-card shadow-card p-6">
-        {tab === 'dashboard' && <HomeDashboard token={token} />}
-        {tab === 'leads'     && <LeadsTable token={token} />}
-        {tab === 'whatsapp'  && <WhatsAppLinksEditor token={token} />}
-        {tab === 'timer'     && <TimerConfig token={token} />}
+        {tab === 'dashboard' && <HomeDashboard token={token} source={source} />}
+        {tab === 'leads'     && <LeadsTable token={token} source={source} />}
+        {tab === 'whatsapp'  && <WhatsAppLinksEditor token={token} source={source} />}
+        {tab === 'timer'     && <TimerConfig token={token} source={source} />}
       </div>
     </div>
   );

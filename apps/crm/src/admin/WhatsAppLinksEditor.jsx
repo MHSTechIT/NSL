@@ -324,7 +324,7 @@ function WebinarCard({ type, webinarDate, webinarId, webinarName, links, setLink
 }
 
 /* ══════════════════════ WhatsAppLinksEditor ══════════════════════ */
-export default function WhatsAppLinksEditor({ token }) {
+export default function WhatsAppLinksEditor({ token, source = 'meta' }) {
   const [webinars, setWebinars] = useState([]);
   const [config, setConfig]     = useState({});
 
@@ -351,20 +351,20 @@ export default function WhatsAppLinksEditor({ token }) {
   function loadData() {
     // Fetch webinars + config in parallel
     Promise.all([
-      fetch('/api/admin/webinars', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
-      fetch('/api/webinar-config').then(r => r.json()),
+      fetch(`/api/admin/webinars?source=${source}`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+      fetch(`/api/webinar-config?source=${source}`).then(r => r.json()),
     ]).then(([wData, cData]) => {
       setWebinars(wData.webinars || []);
       setConfig(cData);
     }).catch(() => {});
   }
 
-  useEffect(() => { loadData(); }, [token]);
+  useEffect(() => { loadData(); }, [token, source]);
 
   // Load links when webinars change
   useEffect(() => {
     if (activeWebinar?.id) {
-      fetch(`/api/admin/wa-links?webinar_id=${activeWebinar.id}`, {
+      fetch(`/api/admin/wa-links?webinar_id=${activeWebinar.id}&source=${source}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(r => r.json())
@@ -380,11 +380,11 @@ export default function WhatsAppLinksEditor({ token }) {
         })
         .catch(() => {});
     }
-  }, [activeWebinar?.id, token, config.tuesday_whatsapp_link]);
+  }, [activeWebinar?.id, token, source, config.tuesday_whatsapp_link]);
 
   useEffect(() => {
     if (upcomingWebinar?.id) {
-      fetch(`/api/admin/wa-links?webinar_id=${upcomingWebinar.id}`, {
+      fetch(`/api/admin/wa-links?webinar_id=${upcomingWebinar.id}&source=${source}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(r => r.json())
@@ -396,7 +396,7 @@ export default function WhatsAppLinksEditor({ token }) {
     } else {
       setUpLinks([{ link_url: '', order_index: 1 }]);
     }
-  }, [upcomingWebinar?.id, token]);
+  }, [upcomingWebinar?.id, token, source]);
 
   async function handleSave(webinarId, links, setSaving, setToast) {
     setSaving(true);
@@ -408,6 +408,7 @@ export default function WhatsAppLinksEditor({ token }) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           webinar_id: webinarId,
+          source,
           links: links
             .map((l, i) => ({ link_url: (l.link_url || '').trim(), order_index: i + 1 }))
             .filter(l => l.link_url),

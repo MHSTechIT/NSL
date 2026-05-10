@@ -133,7 +133,7 @@ function SkeletonCard() {
 }
 
 /* ══════════════════════════════════════════ */
-export default function TimerConfig({ token }) {
+export default function TimerConfig({ token, source = 'meta' }) {
   /* ── Left-side state ── */
   const [currentWebinar, setCurrentWebinar] = useState('');         // registration deadline (next_webinar_at)
   const [currentWebinarDate, setCurrentWebinarDate] = useState(''); // actual webinar date (current_webinar_date)
@@ -143,7 +143,7 @@ export default function TimerConfig({ token }) {
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
-    fetch('/api/webinar-config')
+    fetch(`/api/webinar-config?source=${source}`)
       .then(r => r.json())
       .then(d => {
         setCurrentWebinar(toLocalDatetimeValue(d.next_webinar_at));
@@ -151,7 +151,7 @@ export default function TimerConfig({ token }) {
         setNextWebinar(toLocalDatetimeValue(d.backup_webinar_at));
         setNextWebinarDate(toLocalDatetimeValue(d.next_webinar_date));
       });
-  }, []);
+  }, [source]);
 
   /* ── Right-side state ── */
   const [webinars, setWebinars]           = useState([]);
@@ -160,7 +160,7 @@ export default function TimerConfig({ token }) {
   const fetchWebinars = useCallback(async () => {
     setWebinarsLoading(true);
     try {
-      const res = await fetch('/api/admin/webinars', {
+      const res = await fetch(`/api/admin/webinars?source=${source}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -170,7 +170,7 @@ export default function TimerConfig({ token }) {
     } finally {
       setWebinarsLoading(false);
     }
-  }, [token]);
+  }, [token, source]);
 
   useEffect(() => { fetchWebinars(); }, [fetchWebinars]);
 
@@ -194,7 +194,7 @@ export default function TimerConfig({ token }) {
     const res = await fetch('/api/admin/webinar-config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, source }),
     });
     setSaving(false);
     setToast({ ok: res.ok, msg: res.ok ? 'Settings saved! Countdown timer updated.' : 'Failed to save settings.' });

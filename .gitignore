@@ -4,11 +4,17 @@ backend/node_modules/
 apps/funnel/node_modules/
 apps/whatsapp/node_modules/
 apps/disqualified/node_modules/
+apps/funnel-yt/node_modules/
+apps/whatsapp-yt/node_modules/
+apps/disqualified-yt/node_modules/
 
 # Build output
 apps/funnel/dist/
 apps/whatsapp/dist/
 apps/disqualified/dist/
+apps/funnel-yt/dist/
+apps/whatsapp-yt/dist/
+apps/disqualified-yt/dist/
 
 # Environment files
 backend/.env

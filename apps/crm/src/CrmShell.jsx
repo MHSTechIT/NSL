@@ -66,10 +66,26 @@ function ComingSoonPanel({ label }) {
   );
 }
 
+const WORKSPACES = [
+  { id: 'meta', label: 'Meta' },
+  { id: 'yt',   label: 'YT'   },
+];
+
 export default function CrmShell() {
   const [token, setToken]           = useState(() => sessionStorage.getItem('mhs_admin_token') || '');
   const [activeModule, setActive]   = useState('marketing');
   const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
+  const [workspace, setWorkspace]   = useState(() => sessionStorage.getItem('mhs_crm_workspace') || 'meta');
+  const [wsOpen, setWsOpen]         = useState(false);
+
+  useEffect(() => { sessionStorage.setItem('mhs_crm_workspace', workspace); }, [workspace]);
+
+  useEffect(() => {
+    if (!wsOpen) return;
+    function onDocClick() { setWsOpen(false); }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [wsOpen]);
 
   useEffect(() => {
     document.body.style.maxWidth = 'none';
@@ -148,7 +164,66 @@ export default function CrmShell() {
 
         {/* Module list */}
         <nav style={{ padding: '14px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', minHeight: 0 }}>
-          <p style={{ fontSize: '0.66rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(91,33,182,0.40)', margin: '4px 8px 8px' }}>Modules</p>
+          {/* Workspace dropdown (replaces the old "MODULES" label) */}
+          <div style={{ position: 'relative', margin: '4px 4px 8px' }} onMouseDown={e => e.stopPropagation()}>
+            <button
+              onClick={() => setWsOpen(o => !o)}
+              style={{
+                width: '100%',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '6px 8px', borderRadius: 8, border: 'none',
+                background: wsOpen ? 'rgba(91,33,182,0.08)' : 'transparent',
+                color: 'rgba(91,33,182,0.60)',
+                fontFamily: 'Outfit, sans-serif',
+                fontSize: '0.66rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { if (!wsOpen) e.currentTarget.style.background = 'rgba(91,33,182,0.05)'; }}
+              onMouseLeave={e => { if (!wsOpen) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span>Modules · {WORKSPACES.find(w => w.id === workspace)?.label}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: wsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }}>
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {wsOpen && (
+              <div
+                style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+                  background: '#fff', borderRadius: 10,
+                  border: '1px solid rgba(209,196,240,0.50)',
+                  boxShadow: '0 8px 24px rgba(91,33,182,0.14)',
+                  padding: 4,
+                  zIndex: 10,
+                }}
+              >
+                {WORKSPACES.map(w => {
+                  const sel = w.id === workspace;
+                  return (
+                    <button
+                      key={w.id}
+                      onClick={() => { setWorkspace(w.id); setWsOpen(false); if (w.id === 'meta') setActive('marketing'); }}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 10px', borderRadius: 8, border: 'none',
+                        background: sel ? 'rgba(91,33,182,0.10)' : 'transparent',
+                        color: sel ? '#5B21B6' : 'rgba(59,7,100,0.85)',
+                        fontFamily: 'Outfit, sans-serif',
+                        fontWeight: sel ? 700 : 600, fontSize: '0.86rem',
+                        cursor: 'pointer', textAlign: 'left',
+                      }}
+                      onMouseEnter={e => { if (!sel) e.currentTarget.style.background = 'rgba(91,33,182,0.05)'; }}
+                      onMouseLeave={e => { if (!sel) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: sel ? '#5B21B6' : 'rgba(91,33,182,0.25)' }} />
+                      <span>{w.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {MODULES.map(m => {
             const isActive = activeModule === m.id;
             return (
@@ -217,7 +292,7 @@ export default function CrmShell() {
       {/* Main content */}
       <main className="crm-main" style={{ flex: 1, padding: 28, minWidth: 0 }}>
         {/* Top bar with hamburger (mobile only) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: (activeModule === 'marketing' || activeModule === 'sales') ? 0 : 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: (activeModule === 'marketing' || (workspace === 'meta' && activeModule === 'sales')) ? 0 : 20 }}>
           <button
             className="crm-hamburger"
             onClick={() => setSidebarOpen(true)}
@@ -235,7 +310,12 @@ export default function CrmShell() {
               <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
           </button>
-          {activeModule !== 'marketing' && activeModule !== 'sales' && (
+          {workspace === 'yt' && activeModule !== 'marketing' ? (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h1 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#3B0764' }}>YT · {MODULE_TITLES[activeModule]?.title || 'Dashboard'}</h1>
+              <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)' }}>YouTube workspace</p>
+            </div>
+          ) : (activeModule !== 'marketing' && activeModule !== 'sales') && (
             <div style={{ flex: 1, minWidth: 0 }}>
               <h1 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#3B0764' }}>
                 {MODULE_TITLES[activeModule]?.title || 'Dashboard'}
@@ -247,10 +327,15 @@ export default function CrmShell() {
           )}
         </div>
 
-        {/* Active module */}
-        {activeModule === 'marketing' && <MarketingModule token={token} />}
-        {activeModule === 'users'     && <UsersModule token={token} />}
-        {activeModule === 'sales'     && <SalesDashboardModule token={token} />}
+        {/* Active module — Marketing is wired for both Meta and YT (filtered by source).
+            Users + Sales are Meta-only for now; YT shows a coming-soon placeholder. */}
+        {activeModule === 'marketing' && <MarketingModule token={token} source={workspace} />}
+        {activeModule === 'users' && (workspace === 'meta'
+          ? <UsersModule token={token} />
+          : <ComingSoonPanel label="YT · Users" />)}
+        {activeModule === 'sales' && (workspace === 'meta'
+          ? <SalesDashboardModule token={token} />
+          : <ComingSoonPanel label="YT · Sales" />)}
       </main>
     </div>
   );

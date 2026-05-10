@@ -310,6 +310,40 @@ Promise.all([_webinarTableMigration, _clickMigration]).then(() =>
   `)
 ).catch(err => console.error('[Migration] click_events.webinar_id backfill error:', err.message));
 
+// Auto-migrate: add `source` dimension ('meta' | 'yt') to all source-tagged tables.
+// Existing rows backfill to 'meta'; new YT pipeline starts empty.
+const _sourceMigration = Promise.all([_webinarTableMigration, _clickMigration]).then(() =>
+  pool.query(`
+    ALTER TABLE leads          ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'meta';
+    ALTER TABLE click_events   ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'meta';
+    ALTER TABLE webinars       ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'meta';
+    ALTER TABLE whatsapp_links ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'meta';
+    CREATE INDEX IF NOT EXISTS idx_leads_source        ON leads        (source);
+    CREATE INDEX IF NOT EXISTS idx_click_events_source ON click_events (source);
+    CREATE INDEX IF NOT EXISTS idx_webinars_source     ON webinars     (source);
+    CREATE INDEX IF NOT EXISTS idx_wa_links_source     ON whatsapp_links (source);
+
+    -- webinar_config: turn into one row per source. Existing id=1 row is Meta;
+    -- a new YT row is seeded with blank defaults so the YT pipeline has a
+    -- config target on first deploy. The original schema enforced single_row
+    -- via CHECK (id = 1) — drop it so we can have a second row.
+    ALTER TABLE webinar_config DROP CONSTRAINT IF EXISTS single_row;
+    ALTER TABLE webinar_config ADD COLUMN IF NOT EXISTS source TEXT;
+    UPDATE webinar_config SET source = 'meta' WHERE source IS NULL;
+    ALTER TABLE webinar_config ALTER COLUMN source SET NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS webinar_config_source_uniq ON webinar_config (source);
+  `)
+).then(() =>
+  // Seed YT row (uses defaults for everything; admin will set values via CRM).
+  // Explicit id=2 since the column has no SERIAL/sequence — id=1 is the
+  // pre-existing Meta row.
+  pool.query(`
+    INSERT INTO webinar_config (id, source, kill_switch, tuesday_whatsapp_link, friday_whatsapp_link)
+    VALUES (2, 'yt', false, '', '')
+    ON CONFLICT (source) DO NOTHING
+  `)
+).catch(err => console.error('[Migration] source dimension error:', err.message));
+
 // ── Security middleware ──
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));

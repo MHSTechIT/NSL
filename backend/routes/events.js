@@ -19,6 +19,8 @@ const VALID_EVENTS = new Set([
   'explore_product_clicked',
 ]);
 
+const ALLOWED_SOURCES = new Set(['meta', 'yt']);
+
 /* POST /api/events — public, fire-and-forget click tracking */
 router.post('/events', async (req, res) => {
   // Respond immediately — never block the user
@@ -27,19 +29,22 @@ router.post('/events', async (req, res) => {
   const { event_name, webinar_at } = req.body || {};
   if (!VALID_EVENTS.has(event_name)) return;
 
+  const source = ALLOWED_SOURCES.has(req.body?.source) ? req.body.source : 'meta';
   const ts = webinar_at ? new Date(webinar_at) : null;
-  // Capture the active webinar's id so analytics survive deadline edits.
+  // Capture the active webinar's id (scoped to this source) so analytics
+  // survive deadline edits.
   let webinar_id = null;
   try {
     const { rows } = await pool.query(
-      'SELECT id FROM webinars WHERE is_active = TRUE LIMIT 1'
+      'SELECT id FROM webinars WHERE is_active = TRUE AND source = $1 LIMIT 1',
+      [source]
     );
     webinar_id = rows[0]?.id ?? null;
   } catch (_) { /* webinars table may not exist yet — safe to skip */ }
 
   pool.query(
-    'INSERT INTO click_events (event_name, webinar_at, webinar_id) VALUES ($1, $2, $3)',
-    [event_name, ts && !isNaN(ts) ? ts : null, webinar_id]
+    'INSERT INTO click_events (event_name, webinar_at, webinar_id, source) VALUES ($1, $2, $3, $4)',
+    [event_name, ts && !isNaN(ts) ? ts : null, webinar_id, source]
   ).catch(err => console.error('[events] insert error:', err.message));
 });
 

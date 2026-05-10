@@ -85,7 +85,7 @@ function WebinarSelect({ value, onChange, webinars }) {
   );
 }
 
-export default function LeadsTable({ token }) {
+export default function LeadsTable({ token, source = 'meta' }) {
   const [leads, setLeads]           = useState([]);
   const [total, setTotal]           = useState(0);
   const [loading, setLoading]       = useState(true);
@@ -110,21 +110,21 @@ export default function LeadsTable({ token }) {
 
   function loadLeads() {
     setLoading(true);
-    fetch('/api/admin/leads', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`/api/admin/leads?source=${source}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => { setLeads(d.leads || []); setTotal(d.total || 0); })
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { loadLeads(); }, [token]);
+  useEffect(() => { loadLeads(); }, [token, source]);
 
   // Fetch webinar sessions for filter dropdown
   useEffect(() => {
-    fetch('/api/admin/webinars', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`/api/admin/webinars?source=${source}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setWebinars(d.webinars || []))
       .catch(() => {});
-  }, [token]);
+  }, [token, source]);
 
   function handleSort(key) {
     if (sortKey === key) setSortAsc(a => !a);
@@ -240,7 +240,7 @@ export default function LeadsTable({ token }) {
       const res = await fetch('/api/admin/leads/delete', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: [...selected] }),
+        body: JSON.stringify({ ids: [...selected], source }),
       });
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};

@@ -13,8 +13,15 @@ const { nextWebinarName, nextUpcomingWebinarName } = require('../utils/webinarNa
 
 router.use(adminAuth);
 
+const ALLOWED_SOURCES = new Set(['meta', 'yt']);
+function getSource(req) {
+  const v = req.query.source ?? req.body?.source;
+  return ALLOWED_SOURCES.has(v) ? v : 'meta';
+}
+
 /* ── GET /api/admin/leads ── */
 router.get('/leads', async (req, res) => {
+  const source = getSource(req);
   try {
     const { rows } = await pool.query(`
       SELECT l.*,
@@ -22,14 +29,15 @@ router.get('/leads', async (req, res) => {
              u.role      AS assigned_to_role
         FROM leads l
         LEFT JOIN crm_users u ON u.id = l.assigned_user_id
+       WHERE l.source = $1
        ORDER BY l.created_at DESC
-    `);
+    `, [source]);
     res.json({ leads: rows, total: rows.length });
   } catch (err) {
     // assigned_user_id column may be missing on a stale schema — fallback
     if (err.message && err.message.includes('column')) {
       try {
-        const { rows } = await pool.query('SELECT * FROM leads ORDER BY created_at DESC');
+        const { rows } = await pool.query('SELECT * FROM leads WHERE source = $1 ORDER BY created_at DESC', [source]);
         return res.json({ leads: rows, total: rows.length });
       } catch (_) { /* fallthrough */ }
     }
@@ -59,6 +67,8 @@ router.put('/webinar-config', configValidators, async (req, res) => {
     return res.status(422).json({ error: 'validation_failed', fields: errors.array() });
   }
 
+  const source = getSource(req);
+
   const allowed = ['next_webinar_at', 'backup_webinar_at', 'current_webinar_date', 'next_webinar_date', 'tuesday_whatsapp_link', 'friday_whatsapp_link', 'kill_switch', 'pending_whatsapp_link', 'whatsapp_link_swap_at', 'pending_whatsapp_link_2', 'whatsapp_link_swap_at_2'];
   const updates = {};
   for (const key of allowed) {
@@ -77,36 +87,36 @@ router.put('/webinar-config', configValidators, async (req, res) => {
   const values = keys.map(k => updates[k]);
 
   try {
+    values.push(source);
     await pool.query(
-      `UPDATE webinar_config SET ${setClause} WHERE id = 1`,
+      `UPDATE webinar_config SET ${setClause} WHERE source = $${values.length}`,
       values
     );
-    cache.invalidate();
+    cache.invalidate(source);
 
-    // Fetch fresh config and push to all connected clients immediately
+    // Fetch fresh config and push to all connected clients (this source) immediately
     const { rows } = await pool.query(
-      'SELECT next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch, pending_whatsapp_link, whatsapp_link_swap_at, pending_whatsapp_link_2, whatsapp_link_swap_at_2, current_webinar_date, next_webinar_date FROM webinar_config WHERE id = 1'
+      'SELECT next_webinar_at, backup_webinar_at, tuesday_whatsapp_link, friday_whatsapp_link, kill_switch, pending_whatsapp_link, whatsapp_link_swap_at, pending_whatsapp_link_2, whatsapp_link_swap_at_2, current_webinar_date, next_webinar_date FROM webinar_config WHERE source = $1',
+      [source]
     );
     if (rows.length > 0) {
       const fresh = { ...rows[0] };
-      cache.set(fresh);
-      broadcast(fresh);
+      cache.set(fresh, source);
+      broadcast(fresh, source);
     }
 
-    // Sync webinar sessions — UPDATE existing row, only INSERT if none exists
+    // Sync webinar sessions for this source — UPDATE existing row, only INSERT if none exists
     if (updates.next_webinar_at) {
       try {
-        // Try to update the currently active webinar's date
         const { rowCount } = await pool.query(
-          'UPDATE webinars SET date_time = $1 WHERE is_active = TRUE',
-          [updates.next_webinar_at]
+          'UPDATE webinars SET date_time = $1 WHERE is_active = TRUE AND source = $2',
+          [updates.next_webinar_at, source]
         );
-        // If no active webinar existed, create one
         if (rowCount === 0) {
-          const name = await nextWebinarName();
+          const name = await nextWebinarName(source);
           await pool.query(
-            'INSERT INTO webinars (date_time, is_active, name) VALUES ($1, TRUE, $2)',
-            [updates.next_webinar_at, name]
+            'INSERT INTO webinars (date_time, is_active, name, source) VALUES ($1, TRUE, $2, $3)',
+            [updates.next_webinar_at, name, source]
           );
         }
       } catch (webinarErr) {
@@ -116,28 +126,26 @@ router.put('/webinar-config', configValidators, async (req, res) => {
 
     if (updates.backup_webinar_at) {
       try {
-        // Reuse an existing "upcoming" webinar (inactive, 0 leads) and just bump
-        // its date — keep its AWS-N name so editing the timer doesn't churn the
-        // batch number. Only when no recyclable row exists do we allocate a new
-        // sequential name and INSERT a brand-new webinar.
+        // Reuse an existing "upcoming" webinar for this source (inactive, 0 leads)
+        // and just bump its date.
         const { rowCount } = await pool.query(
           `UPDATE webinars SET date_time = $1
            WHERE id = (
              SELECT w.id FROM webinars w
              LEFT JOIN leads l ON l.webinar_id = w.id
-             WHERE w.is_active = FALSE
+             WHERE w.is_active = FALSE AND w.source = $2
              GROUP BY w.id
              HAVING COUNT(l.id) = 0
              ORDER BY w.created_at DESC LIMIT 1
            )`,
-          [updates.backup_webinar_at]
+          [updates.backup_webinar_at, source]
         );
 
         if (rowCount === 0) {
-          const name = await nextUpcomingWebinarName();
+          const name = await nextUpcomingWebinarName(source);
           await pool.query(
-            'INSERT INTO webinars (date_time, is_active, name) VALUES ($1, FALSE, $2)',
-            [updates.backup_webinar_at, name]
+            'INSERT INTO webinars (date_time, is_active, name, source) VALUES ($1, FALSE, $2, $3)',
+            [updates.backup_webinar_at, name, source]
           );
         }
       } catch (webinarErr) {
@@ -154,6 +162,7 @@ router.put('/webinar-config', configValidators, async (req, res) => {
 
 /* ── GET /api/admin/webinars ── */
 router.get('/webinars', async (req, res) => {
+  const source = getSource(req);
   try {
     const { rows } = await pool.query(`
       SELECT
@@ -165,9 +174,10 @@ router.get('/webinars', async (req, res) => {
         COUNT(l.id)::int AS lead_count
       FROM webinars w
       LEFT JOIN leads l ON l.webinar_id = w.id
+      WHERE w.source = $1
       GROUP BY w.id
       ORDER BY w.created_at DESC
-    `);
+    `, [source]);
     res.json({ webinars: rows });
   } catch (err) {
     // webinar_id column or webinars table may not exist yet (async migration race)
@@ -175,7 +185,8 @@ router.get('/webinars', async (req, res) => {
       try {
         const { rows } = await pool.query(
           `SELECT id, date_time AS webinar_at, is_active, created_at, name, 0::int AS lead_count
-           FROM webinars ORDER BY created_at DESC`
+           FROM webinars WHERE source = $1 ORDER BY created_at DESC`,
+          [source]
         );
         return res.json({ webinars: rows });
       } catch (_) {
@@ -189,6 +200,7 @@ router.get('/webinars', async (req, res) => {
 
 /* ── POST /api/admin/leads/delete ── */
 router.post('/leads/delete', async (req, res) => {
+  const source = getSource(req);
   // Accept ids from body (JSON) or query string as fallback
   const raw = [].concat(req.body?.ids || req.query.ids || []);
   const ids = raw.map(String).filter(s => s.length > 0);
@@ -198,8 +210,8 @@ router.post('/leads/delete', async (req, res) => {
   try {
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
     const result = await pool.query(
-      `DELETE FROM leads WHERE id IN (${placeholders})`,
-      ids
+      `DELETE FROM leads WHERE id IN (${placeholders}) AND source = $${ids.length + 1}`,
+      [...ids, source]
     );
     res.json({ success: true, deleted: result.rowCount });
   } catch (err) {
@@ -254,12 +266,18 @@ router.patch('/change-password',
 /* ── GET /api/admin/wa-links?webinar_id=X ── */
 router.get('/wa-links', async (req, res) => {
   const { webinar_id } = req.query;
+  const source = getSource(req);
   if (!webinar_id) return res.status(400).json({ error: 'webinar_id required' });
 
   try {
+    // Inner join on webinars enforces the webinar belongs to this source.
     const { rows } = await pool.query(
-      'SELECT id, webinar_id, link_url, order_index FROM whatsapp_links WHERE webinar_id = $1 ORDER BY order_index',
-      [webinar_id]
+      `SELECT wl.id, wl.webinar_id, wl.link_url, wl.order_index
+         FROM whatsapp_links wl
+         JOIN webinars w ON w.id = wl.webinar_id
+        WHERE wl.webinar_id = $1 AND w.source = $2
+        ORDER BY wl.order_index`,
+      [webinar_id, source]
     );
     res.json({ links: rows });
   } catch (err) {
@@ -275,12 +293,22 @@ router.get('/wa-links', async (req, res) => {
 /* ── PUT /api/admin/wa-links — save all links for a webinar (upsert) ── */
 router.put('/wa-links', async (req, res) => {
   const { webinar_id, links } = req.body;
+  const source = getSource(req);
   if (!webinar_id || !Array.isArray(links)) {
     return res.status(400).json({ error: 'webinar_id and links[] required' });
   }
 
   const client = await pool.connect();
   try {
+    // Verify the webinar belongs to this source before touching anything.
+    const { rows: wOwn } = await client.query(
+      'SELECT is_active FROM webinars WHERE id = $1 AND source = $2',
+      [webinar_id, source]
+    );
+    if (wOwn.length === 0) {
+      return res.status(404).json({ error: 'Webinar not found for this source.' });
+    }
+
     await client.query('BEGIN');
 
     // Delete existing links for this webinar
@@ -290,19 +318,15 @@ router.put('/wa-links', async (req, res) => {
     for (const link of links) {
       if (!link.link_url) continue;
       await client.query(
-        'INSERT INTO whatsapp_links (webinar_id, link_url, order_index) VALUES ($1, $2, $3)',
-        [webinar_id, link.link_url.trim(), link.order_index || 1]
+        'INSERT INTO whatsapp_links (webinar_id, link_url, order_index, source) VALUES ($1, $2, $3, $4)',
+        [webinar_id, link.link_url.trim(), link.order_index || 1, source]
       );
     }
 
     await client.query('COMMIT');
 
     // If this is the active webinar, rotate the link immediately
-    const { rows: wRows } = await pool.query(
-      'SELECT is_active FROM webinars WHERE id = $1',
-      [webinar_id]
-    );
-    if (wRows.length > 0 && wRows[0].is_active) {
+    if (wOwn[0].is_active) {
       await rotateLink(webinar_id);
     }
 
@@ -322,8 +346,9 @@ router.put('/wa-links', async (req, res) => {
    Accepts `webinar_id` (preferred) or legacy `webinar_at` as the filter. */
 router.get('/dashboard', async (req, res) => {
   const { from, to, webinar_id, webinar_at } = req.query;
-  const params = [];
-  const conditions = [];
+  const source = getSource(req);
+  const params = [source];
+  const conditions = [`ce.source = $1`];
 
   if (from) {
     params.push(new Date(from + 'T00:00:00+05:30'));
@@ -342,7 +367,7 @@ router.get('/dashboard', async (req, res) => {
     conditions.push(`ce.webinar_at = $${params.length}`);
   }
 
-  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const where = 'WHERE ' + conditions.join(' AND ');
 
   try {
     const { rows } = await pool.query(
@@ -353,18 +378,19 @@ router.get('/dashboard', async (req, res) => {
       params
     );
 
-    // Sessions list = every webinar that has at least one click_event tied to
-    // it. Identified by id, so each webinar appears exactly once regardless of
-    // how many times its deadline was edited.
+    // Sessions list = every webinar (this source) that has at least one
+    // click_event tied to it.
     const { rows: sessions } = await pool.query(
       `SELECT w.id           AS webinar_id,
               w.date_time    AS webinar_at,
               w.name,
               w.is_active
          FROM webinars w
-        WHERE EXISTS (SELECT 1 FROM click_events ce WHERE ce.webinar_id = w.id)
+        WHERE w.source = $1
+          AND EXISTS (SELECT 1 FROM click_events ce WHERE ce.webinar_id = w.id)
         ORDER BY w.date_time DESC
-        LIMIT 50`
+        LIMIT 50`,
+      [source]
     );
 
     const counts = {};

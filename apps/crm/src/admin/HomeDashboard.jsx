@@ -442,7 +442,7 @@ function CustomSelect({ value, onChange, options, placeholder }) {
 }
 
 /* ══════════════════ Main component ══════════════════ */
-export default function HomeDashboard({ token }) {
+export default function HomeDashboard({ token, source = 'meta' }) {
   const [counts, setCounts]       = useState({});
   const [sessions, setSessions]   = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -457,6 +457,7 @@ export default function HomeDashboard({ token }) {
   const fetchDashboard = useCallback(async () => {
     setError('');
     const params = new URLSearchParams();
+    params.set('source', source);
 
     if (dateRange === 'today') {
       const d = new Date().toISOString().slice(0, 10);
@@ -492,7 +493,7 @@ export default function HomeDashboard({ token }) {
     } finally {
       setLoading(false);
     }
-  }, [token, dateRange, customFrom, customTo, webinarAt]);
+  }, [token, dateRange, customFrom, customTo, webinarAt, source]);
 
   /* Initial load */
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);

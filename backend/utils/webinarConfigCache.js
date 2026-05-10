@@ -1,21 +1,20 @@
 const TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-let cached = null;
-let cachedAt = 0;
+const store = new Map(); // source -> { data, at }
 
-function get() {
-  if (cached && Date.now() - cachedAt < TTL_MS) return cached;
+function get(source = 'meta') {
+  const hit = store.get(source);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.data;
   return null;
 }
 
-function set(data) {
-  cached = data;
-  cachedAt = Date.now();
+function set(data, source = 'meta') {
+  store.set(source, { data, at: Date.now() });
 }
 
-function invalidate() {
-  cached = null;
-  cachedAt = 0;
+function invalidate(source) {
+  if (source) store.delete(source);
+  else store.clear();
 }
 
 module.exports = { get, set, invalidate };

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import DateTimePicker from '../admin/DateTimePicker';
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -105,23 +105,83 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [recallToast, setRecallToast]             = useState('');
 
   /* ── Call lifecycle state machine ──────────────────────────────────────
-     Two outcomes once a call ends:
-       1) Customer never answered → auto-redial up to 2 total attempts
-          (no gap between them). After 2 failures, auto-submit DNP and let
-          the parent advance to the next lead.
-       2) Customer answered + hung up → start a 60-second form-fill timer.
-          If caller doesn't Complete within 60 s, an overlay asks for a
-          single-line "reason for delay". Submitting the reason restarts
-          the 60-second timer. Loop until the form is finished.            */
+     callPhase drives the yellow status card at the top of the modal:
+       'idle'         — modal opened, no call started yet (Start Auto Call shown)
+       'calling_1'    — first call dialed, ringing
+       'rejected_1'   — first call ended without answer (about to retry)
+       'calling_2'    — second call dialed, ringing
+       'rejected_2'   — second call also failed → auto-DNP fires
+       'in_progress'  — customer answered, still on the line
+       'form_window'  — call ended after answer, 30 s to fill form
+       'delay_reason' — 30 s expired, asking for delay reason; submit restarts timer
+     The cycle repeats from 'delay_reason' → 'form_window' until the caller
+     completes the form.                                                      */
+  const [callPhase, setCallPhase] = useState('idle');
   const [wasAnsweredRef]   = useState(() => ({ current: false }));   // ref-style flag
   const [attempt, setAttempt]         = useState(1);                       // 1 or 2
   const [autoRedialing, setAutoRedialing] = useState(false);
   const [autoDnpFiring, setAutoDnpFiring] = useState(false);
 
-  const [formTimerSecs, setFormTimerSecs] = useState(0);   // 60 → 0 (form-fill window)
+  // Live mirrors of the above so the SSE callback (set up once at mount) always
+  // reads the freshest values instead of stale closure snapshots. Without these
+  // a 'missed' SSE event for call 1 wouldn't reliably trigger call 2.
+  const attemptRef       = useRef(1);
+  const autoRedialingRef = useRef(false);
+  const autoDnpFiringRef = useRef(false);
+  const callPhaseRef     = useRef('idle');
+  const lastSeenCallIdRef = useRef(null);
+  useEffect(() => { attemptRef.current = attempt; }, [attempt]);
+  useEffect(() => { autoRedialingRef.current = autoRedialing; }, [autoRedialing]);
+  useEffect(() => { autoDnpFiringRef.current = autoDnpFiring; }, [autoDnpFiring]);
+  useEffect(() => { callPhaseRef.current = callPhase; }, [callPhase]);
+
+  const [formTimerSecs, setFormTimerSecs] = useState(0);   // 30 → 0 (form-fill window)
   const [delayCardOpen, setDelayCardOpen] = useState(false);
   const [delayReason, setDelayReason]     = useState('');
   const [delayReasons, setDelayReasons]   = useState([]); // accumulated, appended on submit
+  const FORM_WINDOW_SECS = 30;
+
+  /* If the modal was opened mid-call (auto-dial flow from parent), reflect that
+     in the yellow card — the SSE handler will then move us through the phases. */
+  useEffect(() => {
+    if (lead?.last_call_id && callPhase === 'idle') setCallPhase('calling_1');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead?.last_call_id]);
+
+  /* Drive the phase machine from a single call object — used by SSE pushes
+     and the polling fallback. Reads ref values so it always sees the latest
+     attempt + guard flags regardless of when the closure was created. */
+  function dispatchCallUpdate(call) {
+    if (!call || call.lead_id !== lead.id) return;
+    const st = call.status;
+    // De-dupe identical pushes (SSE + poll both fire)
+    const sig = `${call.id}:${st}`;
+    if (lastSeenCallIdRef.current === sig) return;
+    lastSeenCallIdRef.current = sig;
+
+    if (st === 'answered') {
+      wasAnsweredRef.current = true;
+      setCallPhase('in_progress');
+      return;
+    }
+    if (['initiated','ringing'].includes(st)) {
+      wasAnsweredRef.current = false;
+      setCallPhase(attemptRef.current === 2 ? 'calling_2' : 'calling_1');
+      return;
+    }
+    if (['ended','missed','failed'].includes(st)) {
+      if (wasAnsweredRef.current || call.answered_at) {
+        wasAnsweredRef.current = true;
+        if (callPhaseRef.current !== 'form_window' && callPhaseRef.current !== 'delay_reason') {
+          setCallPhase('form_window');
+          setFormTimerSecs(prev => (prev > 0 ? prev : FORM_WINDOW_SECS));
+        }
+      } else {
+        setCallPhase(attemptRef.current < 2 ? 'rejected_1' : 'rejected_2');
+        handleNoAnswer();
+      }
+    }
+  }
 
   // Listen for call lifecycle on the open modal
   useEffect(() => {
@@ -131,25 +191,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     es.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg?.type !== 'call.update' || msg.call?.lead_id !== lead.id) return;
-        const st = msg.call.status;
-
-        if (st === 'answered') {
-          wasAnsweredRef.current = true;
-        }
-
-        if (['ended','missed','failed'].includes(st)) {
-          if (wasAnsweredRef.current) {
-            // Customer spoke and hung up → start (or keep) the form timer
-            setFormTimerSecs(prev => (prev > 0 ? prev : 60));
-          } else {
-            // Customer never picked → auto-redial flow
-            handleNoAnswer();
-          }
-        } else if (['initiated','ringing'].includes(st)) {
-          // A new dial started — reset the answered flag for THIS attempt
-          wasAnsweredRef.current = false;
-        }
+        if (msg?.type === 'call.update') dispatchCallUpdate(msg.call);
       } catch (_) {}
     };
     es.onerror = () => { /* auto-reconnect */ };
@@ -157,7 +199,32 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jwt, lead?.id]);
 
-  // Tick the 60s form-fill timer; open the "reason for delay" card when it hits 0
+  /* Polling fallback — SSE can drop messages or land before the EventSource
+     finishes connecting. While we're actively in a calling/in_progress phase,
+     re-check the latest call row every 4 s so we never get stranded. */
+  useEffect(() => {
+    if (!jwt || !lead?.id) return;
+    const ACTIVE = new Set(['calling_1', 'calling_2', 'in_progress', 'rejected_1']);
+    if (!ACTIVE.has(callPhase)) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/caller/calls?lead_id=${encodeURIComponent(lead.id)}`, {
+          headers: { Authorization: `Bearer ${jwt}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const latest = data.calls?.[0];
+        if (cancelled || !latest) return;
+        dispatchCallUpdate({ ...latest, lead_id: lead.id });
+      } catch (_) { /* network blip — try again next tick */ }
+    };
+    const id = setInterval(tick, 4000);
+    return () => { cancelled = true; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jwt, lead?.id, callPhase]);
+
+  // Tick the 30 s form-fill timer; open the "reason for delay" card when it hits 0
   useEffect(() => {
     if (formTimerSecs <= 0) return;
     const id = setInterval(() => {
@@ -165,6 +232,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         if (s <= 1) {
           clearInterval(id);
           setDelayCardOpen(true);
+          setCallPhase('delay_reason');
           return 0;
         }
         return s - 1;
@@ -174,11 +242,18 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   }, [formTimerSecs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleNoAnswer() {
-    if (autoDnpFiring || autoRedialing) return;
-    if (attempt < 2) {
+    // Read live state from refs — stale closure values would block legitimate retries.
+    if (autoDnpFiringRef.current || autoRedialingRef.current) return;
+    if (attemptRef.current < 2) {
       // Immediate retry
+      autoRedialingRef.current = true;
       setAutoRedialing(true);
-      setAttempt(a => a + 1);
+      attemptRef.current = attemptRef.current + 1;
+      setAttempt(attemptRef.current);
+      // Allow the next terminal status to be processed even if it carries the
+      // same call.id signature in some edge case
+      lastSeenCallIdRef.current = null;
+      setCallPhase('calling_2');
       try {
         await fetch('/api/caller/calls/start', {
           method: 'POST',
@@ -186,9 +261,11 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           body: JSON.stringify({ lead_id: lead.id }),
         });
       } catch (_) {}
+      autoRedialingRef.current = false;
       setAutoRedialing(false);
     } else {
       // 2 attempts failed → auto-DNP and tell parent to advance
+      autoDnpFiringRef.current = true;
       setAutoDnpFiring(true);
       try {
         await fetch(`/api/caller/leads/${lead.id}/note`, {
@@ -211,7 +288,44 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     setDelayReasons(prev => [...prev, reason]);
     setDelayCardOpen(false);
     setDelayReason('');
-    setFormTimerSecs(60); // restart the 1-min window
+    setFormTimerSecs(FORM_WINDOW_SECS);
+    setCallPhase('form_window');
+  }
+
+  /* Start Auto Call — caller hits the button on the yellow status card.
+     Same backend endpoint as Recall but updates the phase machine. */
+  async function startAutoCall() {
+    if (recalling) return;
+    wasAnsweredRef.current = false;
+    attemptRef.current = 1;
+    autoRedialingRef.current = false;
+    autoDnpFiringRef.current = false;
+    lastSeenCallIdRef.current = null;
+    setAttempt(1);
+    setAutoRedialing(false);
+    setAutoDnpFiring(false);
+    setFormTimerSecs(0);
+    setDelayCardOpen(false);
+    setDelayReason('');
+    setRecalling(true);
+    setRecallToast('');
+    setCallPhase('calling_1');
+    try {
+      const res = await fetch('/api/caller/calls/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ lead_id: lead.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || data?.error || 'Failed to start call');
+      // SSE will drive the rest of the phase transitions
+    } catch (e) {
+      setCallPhase('idle');
+      setRecallToast(e.message || 'Call failed — Smartflo extension off?');
+      setTimeout(() => setRecallToast(''), 3500);
+    } finally {
+      setRecalling(false);
+    }
   }
 
   async function handleRecall() {
@@ -219,12 +333,19 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     // Manual recall = caller is trying again deliberately; cancel any pending
     // auto-flow and reset the state machine so the new call's events drive UI.
     wasAnsweredRef.current = false;
+    attemptRef.current = 1;
+    autoRedialingRef.current = false;
+    autoDnpFiringRef.current = false;
+    lastSeenCallIdRef.current = null;
     setAttempt(1);
+    setAutoRedialing(false);
+    setAutoDnpFiring(false);
     setFormTimerSecs(0);
     setDelayCardOpen(false);
     setDelayReason('');
     setRecalling(true);
     setRecallToast('');
+    setCallPhase('calling_1');
     try {
       const res = await fetch('/api/caller/calls/start', {
         method: 'POST',
@@ -399,10 +520,18 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
       <style>{`
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes scaleIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+        .lcn-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; row-gap: 0; }
+        .lcn-form-grid > .lcn-wide { grid-column: 1 / -1; }
+        @media (max-width: 720px) {
+          .lcn-form-grid { grid-template-columns: 1fr; }
+        }
+        /* Hide scrollbar chrome but keep scroll functionality */
+        .lcn-modal { scrollbar-width: none; -ms-overflow-style: none; }
+        .lcn-modal::-webkit-scrollbar { width: 0; height: 0; display: none; }
       `}</style>
 
-      <div style={{
-        width: '100%', maxWidth: 560, maxHeight: '92vh',
+      <div className="lcn-modal" style={{
+        width: '100%', maxWidth: 920, maxHeight: '92vh',
         background: 'rgba(255,255,255,0.97)',
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
         borderRadius: 22,
@@ -452,92 +581,21 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           }}>{recallToast}</div>
         )}
 
-        {/* Auto-redial banner (customer didn't pick — system is dialing again) */}
-        {(autoRedialing || autoDnpFiring) && (
-          <div style={{
-            margin: '-6px 0 12px', padding: '10px 14px', borderRadius: 10,
-            background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.40)',
-            color: '#B45309', fontSize: '0.84rem', fontWeight: 700,
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span style={{
-              width: 8, height: 8, borderRadius: '50%', background: '#F59E0B',
-              animation: 'fadeIn 1s ease-in-out infinite alternate',
-            }} />
-            {autoDnpFiring
-              ? 'Customer did not pick after 2 attempts — moving to Not Picked…'
-              : `Customer did not pick — auto-retrying (attempt ${attempt} of 2)…`}
-          </div>
-        )}
+        <CallStatusCard
+          phase={callPhase}
+          attempt={attempt}
+          formTimerSecs={formTimerSecs}
+          starting={recalling}
+          onStart={startAutoCall}
+          delayReason={delayReason}
+          onDelayReasonChange={setDelayReason}
+          onDelayReasonSubmit={handleDelayReasonSubmit}
+          totalWindow={FORM_WINDOW_SECS}
+        />
 
-        {/* 1-minute form-fill timer banner */}
-        {formTimerSecs > 0 && (
-          <div style={{
-            margin: '-6px 0 12px', padding: '10px 14px', borderRadius: 10,
-            background: formTimerSecs <= 10 ? 'rgba(220,38,38,0.10)' : 'rgba(245,158,11,0.10)',
-            border: `1px solid ${formTimerSecs <= 10 ? 'rgba(220,38,38,0.40)' : 'rgba(245,158,11,0.40)'}`,
-            color: formTimerSecs <= 10 ? '#B91C1C' : '#B45309',
-            fontSize: '0.86rem', fontWeight: 700,
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-              </svg>
-              Fill the form within
-            </span>
-            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1rem', letterSpacing: '0.04em' }}>
-              {String(Math.floor(formTimerSecs / 60)).padStart(2, '0')}:{String(formTimerSecs % 60).padStart(2, '0')}
-            </span>
-          </div>
-        )}
-
-        {/* Delay-reason overlay card (1-min elapsed without form save) */}
-        {delayCardOpen && (
-          <div style={{
-            margin: '-6px 0 14px', padding: '14px 16px', borderRadius: 12,
-            background: 'rgba(220,38,38,0.06)', border: '1.5px solid rgba(220,38,38,0.40)',
-            display: 'flex', flexDirection: 'column', gap: 10,
-          }}>
-            <div style={{ fontWeight: 700, color: '#B91C1C', fontSize: '0.92rem' }}>
-              Time's up — what's holding you up?
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'rgba(91,33,182,0.65)' }}>
-              Type the reason for the delay. Submitting restarts the 1-minute timer.
-            </div>
-            <input
-              type="text"
-              value={delayReason}
-              onChange={e => setDelayReason(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') handleDelayReasonSubmit(); }}
-              placeholder="e.g. Looking up patient history, asking supervisor…"
-              autoFocus
-              style={{
-                height: '2.4rem', padding: '0 12px', borderRadius: 8,
-                border: '1px solid rgba(209,196,240,0.7)', background: '#fff',
-                fontFamily: 'Outfit,sans-serif', fontSize: '0.86rem', color: '#3B0764',
-              }}
-            />
-            <button
-              type="button"
-              onClick={handleDelayReasonSubmit}
-              disabled={!delayReason.trim()}
-              style={{
-                alignSelf: 'flex-end',
-                padding: '8px 16px', borderRadius: 8, border: 'none',
-                background: delayReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
-                color: '#fff', fontWeight: 700, fontSize: '0.84rem',
-                cursor: delayReason.trim() ? 'pointer' : 'not-allowed',
-              }}
-            >
-              Submit reason → restart 1-min timer
-            </button>
-          </div>
-        )}
-
-        <div>
+        <div className="lcn-form-grid">
           {/* Lead name — pre-filled, editable */}
-          <FieldRow label="1. Name" mandatory>
+          <FieldRow label="1. Name" mandatory wide>
             <input
               type="text"
               value={fullName}
@@ -634,7 +692,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           </FieldRow>
 
           {/* Note */}
-          <FieldRow label="15. Note" mandatory={followUpOnly || noOverride} hint={(followUpOnly || noOverride) ? null : '(optional)'}>
+          <FieldRow label="15. Note" mandatory={followUpOnly || noOverride} hint={(followUpOnly || noOverride) ? null : '(optional)'} wide>
             <textarea
               value={note}
               onChange={e => setNote(e.target.value)}
@@ -652,7 +710,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
 
           {/* Follow-up schedule — appears only after the caller toggles "Follow Up" on */}
           {wantsFollowUp && (
-            <FieldRow label="16. Follow-up schedule" mandatory>
+            <FieldRow label="16. Follow-up schedule" mandatory wide>
               <DateTimePicker
                 value={followUpAtLocal}
                 onChange={setFollowUpAtLocal}
@@ -662,7 +720,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           )}
 
           {error && (
-            <div style={{ background: 'rgba(254,242,242,0.95)', border: '1px solid rgba(248,113,113,0.4)', borderRadius: 10, padding: '8px 12px', marginTop: 6 }}>
+            <div className="lcn-wide" style={{ background: 'rgba(254,242,242,0.95)', border: '1px solid rgba(248,113,113,0.4)', borderRadius: 10, padding: '8px 12px', marginTop: 6 }}>
               <p style={{ fontSize: '0.80rem', color: '#DC2626', margin: 0 }}>⚠ {error}</p>
             </div>
           )}
@@ -670,7 +728,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           {/* Two independent dimensions:
                 - INTERESTED — yes / no / unset (one-of)
                 - FOLLOW UP  — toggle (can combine with either YES or NO)        */}
-          <div style={{ marginTop: 18, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'stretch' }}>
+          <div className="lcn-wide" style={{ marginTop: 18, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'stretch' }}>
             {/* Interested YES / NO segmented toggle */}
             <div style={{ flex: '1 1 240px', display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{
@@ -798,9 +856,9 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
 
 /* ── Subcomponents ── */
 
-function FieldRow({ label, mandatory, hint, children }) {
+function FieldRow({ label, mandatory, hint, wide, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div className={wide ? 'lcn-wide' : undefined} style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
         <span style={fieldLabelStyle}>{label}</span>
         {mandatory && <span style={{ color: '#DC2626', fontSize: '0.70rem' }}>*</span>}
@@ -837,6 +895,132 @@ function RadioRow({ options, value, onChange, wrap }) {
       })}
     </div>
   );
+}
+
+/* Yellow status card — Tata Tele call lifecycle.
+   Drives caller through Start → Call 1/2 → optional retry → form-fill window. */
+function CallStatusCard({
+  phase, attempt, formTimerSecs, starting, onStart,
+  delayReason, onDelayReasonChange, onDelayReasonSubmit, totalWindow,
+}) {
+  const cardBase = {
+    marginBottom: 16,
+    padding: '14px 18px',
+    borderRadius: 12,
+    border: '1.5px dashed #F59E0B',
+    background: 'rgba(254,243,199,0.55)',
+    color: '#92400E',
+    fontFamily: 'Outfit, sans-serif',
+    fontSize: '0.86rem',
+    fontWeight: 600,
+  };
+  const dot = (
+    <span style={{
+      width: 8, height: 8, borderRadius: '50%', background: '#F59E0B',
+      animation: 'fadeIn 1s ease-in-out infinite alternate', flexShrink: 0,
+    }} />
+  );
+  const Row = ({ children }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>{children}</div>
+  );
+
+  if (phase === 'idle') {
+    return (
+      <div style={cardBase}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <span>Ready to start auto call. Make sure the Smartflo extension is online.</span>
+          <button
+            type="button"
+            onClick={onStart}
+            disabled={starting}
+            style={{
+              padding: '8px 18px', borderRadius: 50, border: 'none',
+              background: starting ? 'rgba(245,158,11,0.55)' : '#F59E0B',
+              color: '#fff', fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '0.84rem',
+              cursor: starting ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+              boxShadow: starting ? 'none' : '0 4px 12px rgba(245,158,11,0.35)',
+            }}
+          >
+            {starting ? 'Calling…' : '▶ Start Auto Call'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'calling_1') {
+    return <div style={cardBase}><Row>{dot}<span>First call triggered — ringing the customer…</span></Row></div>;
+  }
+  if (phase === 'rejected_1') {
+    return <div style={cardBase}><Row>{dot}<span>Customer rejected the call. Making a second try…</span></Row></div>;
+  }
+  if (phase === 'calling_2') {
+    return <div style={cardBase}><Row>{dot}<span>Second call triggered — ringing the customer…</span></Row></div>;
+  }
+  if (phase === 'rejected_2') {
+    return <div style={cardBase}><Row>{dot}<span>Customer didn't pick after 2 attempts — moving to Not Picked.</span></Row></div>;
+  }
+  if (phase === 'in_progress') {
+    return <div style={cardBase}><Row>{dot}<span>Customer on the line — speak with them, then hang up to fill the form.</span></Row></div>;
+  }
+  if (phase === 'form_window') {
+    const urgent = formTimerSecs <= 10;
+    return (
+      <div style={{
+        ...cardBase,
+        border: urgent ? '1.5px dashed #DC2626' : cardBase.border,
+        background: urgent ? 'rgba(254,226,226,0.55)' : cardBase.background,
+        color: urgent ? '#991B1B' : cardBase.color,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <Row>{dot}<span>Call ended — please fill the form within {totalWindow} s.</span></Row>
+          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1.05rem', fontWeight: 800, letterSpacing: '0.04em' }}>
+            00:{String(formTimerSecs).padStart(2, '0')}
+          </span>
+        </div>
+      </div>
+    );
+  }
+  if (phase === 'delay_reason') {
+    return (
+      <div style={{ ...cardBase, border: '1.5px dashed #DC2626', background: 'rgba(254,226,226,0.55)', color: '#991B1B', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontWeight: 800, fontSize: '0.92rem' }}>
+          Time's up — what's holding you up?
+        </div>
+        <div style={{ fontSize: '0.78rem', color: 'rgba(153,27,27,0.85)', fontWeight: 600 }}>
+          Type the reason; submitting restarts the {totalWindow}-second timer.
+        </div>
+        <input
+          type="text"
+          value={delayReason}
+          onChange={e => onDelayReasonChange(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') onDelayReasonSubmit(); }}
+          placeholder="e.g. Looking up patient history, asking supervisor…"
+          autoFocus
+          style={{
+            height: '2.4rem', padding: '0 12px', borderRadius: 8,
+            border: '1px solid rgba(220,38,38,0.30)', background: '#fff',
+            fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', color: '#3B0764',
+          }}
+        />
+        <button
+          type="button"
+          onClick={onDelayReasonSubmit}
+          disabled={!delayReason.trim()}
+          style={{
+            alignSelf: 'flex-end',
+            padding: '8px 16px', borderRadius: 8, border: 'none',
+            background: delayReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
+            color: '#fff', fontWeight: 700, fontSize: '0.84rem',
+            cursor: delayReason.trim() ? 'pointer' : 'not-allowed',
+          }}
+        >
+          Go to form → restart {totalWindow}s timer
+        </button>
+      </div>
+    );
+  }
+  return null;
 }
 
 function SelectField({ value, onChange, options, placeholder }) {
