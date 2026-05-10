@@ -1212,6 +1212,14 @@ function BannerStatus({ phase, formTimerSecs, totalWindow, starting, onStart, cu
     );
   }
   if (phase === 'agent_ringing_1') {
+    // When this is the SECOND whole-call attempt to the customer (i.e. the
+    // first attempt's customer leg never picked up), the wording focuses on
+    // the customer angle even though Tata is technically ringing the agent
+    // first — the caller's phone is already configured to auto-pick on
+    // retry from the user's perspective.
+    if (customerAttempt === 2) {
+      return <div style={cardBase}><Row>{dot}<span>Second call is triggered. Calling customer…</span></Row></div>;
+    }
     return <div style={cardBase}><Row>{dot}<span>Your first call is triggered. Please pick the call.</span></Row></div>;
   }
   if (phase === 'agent_ringing_2') {
