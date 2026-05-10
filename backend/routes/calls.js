@@ -238,7 +238,9 @@ router.get('/calls', async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT c.id, c.status, c.duration_sec, c.recording_url,
-              c.started_at, c.answered_at, c.ended_at, c.error_message
+              c.started_at, c.answered_at, c.ended_at, c.error_message,
+              c.agent_answered_at, c.customer_answered_at, c.customer_missed_at,
+              c.hangup_by
          FROM calls c
          JOIN leads l ON l.id = c.lead_id
         WHERE c.lead_id = $1

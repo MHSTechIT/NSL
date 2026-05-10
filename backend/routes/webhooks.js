@@ -94,119 +94,168 @@ async function resolveLeadId(event, payload) {
   return null;
 }
 
-/* Single handler used by both webhook paths */
-async function handleTataWebhook(req, res) {
-  // 0. Acknowledge first so Smartflo doesn't retry
-  res.status(200).json({ ok: true });
+/* Single handler used by every Tata webhook path. The `routeKind` argument
+   identifies which Tata trigger fired and drives:
+     – which per-leg timestamp column gets stamped on the calls row
+     – which typed SSE event ('agent.answered' | 'customer.answered' |
+       'customer.missed' | 'call.hangup' | 'agent.missed' | 'call.update') is
+       pushed to the caller's tab so the auto-call state machine can react.
+   The legacy generic 'call.update' event is still emitted alongside typed
+   events for backward compat with anything reading the generic feed. */
+function makeTataHandler(routeKind) {
+  return async function handleTataWebhook(req, res) {
+    // 0. Acknowledge first so Smartflo doesn't retry
+    res.status(200).json({ ok: true });
 
-  // 1. Verify signature (when secret is set)
-  const signature =
-    req.headers['x-tata-signature'] ||
-    req.headers['x-smartflo-signature'] ||
-    req.headers['x-webhook-signature'] ||
-    '';
-  if (!tata.verifyWebhookSignature(req.rawBody || '', signature)) {
-    console.warn('[webhooks/tata] bad signature — dropping payload');
-    return;
-  }
-
-  // 2. Normalize
-  const event = tata.normalizeWebhookEvent(req.body);
-  if (!event || !event.provider_call_id) {
-    console.warn('[webhooks/tata] unrecognized payload:', JSON.stringify(req.body).slice(0, 500));
-    return;
-  }
-
-  // 3. Resolve lead
-  let leadId = null;
-  try { leadId = await resolveLeadId(event, req.body); } catch (e) { /* non-fatal */ }
-
-  // 4. Upsert calls row by provider_call_id
-  let callRow = null;
-  try {
-    const sets = ['raw_payload = $2', 'updated_at = NOW()'];
-    const params = [event.provider_call_id, req.body];
-    let i = 3;
-    if (event.status) {
-      sets.push(`status = $${i++}`); params.push(event.status);
-      if (event.status === 'answered') sets.push('answered_at = COALESCE(answered_at, NOW())');
-      if (['ended','missed','failed'].includes(event.status)) sets.push('ended_at = COALESCE(ended_at, NOW())');
+    // 1. Verify signature (when secret is set)
+    const signature =
+      req.headers['x-tata-signature'] ||
+      req.headers['x-smartflo-signature'] ||
+      req.headers['x-webhook-signature'] ||
+      '';
+    if (!tata.verifyWebhookSignature(req.rawBody || '', signature)) {
+      console.warn('[webhooks/tata] bad signature — dropping payload');
+      return;
     }
-    if (event.duration_sec != null) { sets.push(`duration_sec = $${i++}`); params.push(event.duration_sec); }
-    if (event.recording_url) { sets.push(`recording_url = $${i++}`); params.push(event.recording_url); }
-    if (event.error_message) { sets.push(`error_message = $${i++}`); params.push(event.error_message); }
-    if (leadId) { sets.push(`lead_id = COALESCE(lead_id, $${i++})`); params.push(leadId); }
 
-    const { rows } = await pool.query(
-      `UPDATE calls SET ${sets.join(', ')}
-        WHERE provider_call_id = $1
-        RETURNING id, lead_id, caller_id, status, recording_url, duration_sec, provider_call_id`,
-      params
-    );
+    // 2. Normalize
+    const event = tata.normalizeWebhookEvent(req.body);
+    if (!event || !event.provider_call_id) {
+      console.warn('[webhooks/tata] unrecognized payload:', JSON.stringify(req.body).slice(0, 500));
+      return;
+    }
 
-    if (rows.length === 0) {
-      // Webhook for a call we never recorded (e.g. inbound, or out-of-order arrival)
-      // Insert a fresh row so we don't lose the recording.
-      const ins = await pool.query(
-        `INSERT INTO calls (lead_id, provider_call_id, status, duration_sec,
-                            recording_url, error_message, raw_payload,
-                            answered_at, ended_at)
-         VALUES ($1, $2, COALESCE($3,'ended'), $4, $5, $6, $7,
-                 CASE WHEN $3 = 'answered' THEN NOW() ELSE NULL END,
-                 CASE WHEN $3 IN ('ended','missed','failed') THEN NOW() ELSE NULL END)
-         RETURNING id, lead_id, caller_id, status, recording_url, duration_sec, provider_call_id`,
-        [
-          leadId, event.provider_call_id, event.status, event.duration_sec,
-          event.recording_url, event.error_message, req.body,
-        ]
+    // 3. Resolve lead
+    let leadId = null;
+    try { leadId = await resolveLeadId(event, req.body); } catch (e) { /* non-fatal */ }
+
+    // 4. Upsert calls row by provider_call_id
+    let callRow = null;
+    try {
+      const sets = ['raw_payload = $2', 'updated_at = NOW()'];
+      const params = [event.provider_call_id, req.body];
+      let i = 3;
+      if (event.status) {
+        sets.push(`status = $${i++}`); params.push(event.status);
+        if (event.status === 'answered') sets.push('answered_at = COALESCE(answered_at, NOW())');
+        if (['ended','missed','failed'].includes(event.status)) sets.push('ended_at = COALESCE(ended_at, NOW())');
+      }
+      // Per-leg timestamps driven by the route the webhook hit
+      if (routeKind === 'agent-answered')    sets.push('agent_answered_at    = COALESCE(agent_answered_at,    NOW())');
+      if (routeKind === 'customer-answered') sets.push('customer_answered_at = COALESCE(customer_answered_at, NOW())');
+      if (routeKind === 'customer-missed')   sets.push('customer_missed_at   = COALESCE(customer_missed_at,   NOW())');
+      if (routeKind === 'hangup' && event.hangup_by) {
+        sets.push(`hangup_by = COALESCE(hangup_by, $${i++})`); params.push(event.hangup_by);
+      }
+      if (event.duration_sec != null) { sets.push(`duration_sec = $${i++}`); params.push(event.duration_sec); }
+      if (event.recording_url) { sets.push(`recording_url = $${i++}`); params.push(event.recording_url); }
+      if (event.error_message) { sets.push(`error_message = $${i++}`); params.push(event.error_message); }
+      if (leadId) { sets.push(`lead_id = COALESCE(lead_id, $${i++})`); params.push(leadId); }
+
+      const { rows } = await pool.query(
+        `UPDATE calls SET ${sets.join(', ')}
+          WHERE provider_call_id = $1
+          RETURNING id, lead_id, caller_id, status, recording_url, duration_sec, provider_call_id,
+                    agent_answered_at, customer_answered_at, customer_missed_at, ended_at, hangup_by`,
+        params
       );
-      callRow = ins.rows[0] || null;
-    } else {
-      callRow = rows[0];
+
+      if (rows.length === 0) {
+        // Webhook for a call we never recorded (e.g. inbound, or out-of-order arrival)
+        // Insert a fresh row so we don't lose the recording.
+        const ins = await pool.query(
+          `INSERT INTO calls (lead_id, provider_call_id, status, duration_sec,
+                              recording_url, error_message, raw_payload,
+                              answered_at, ended_at,
+                              agent_answered_at, customer_answered_at, customer_missed_at, hangup_by)
+           VALUES ($1, $2, COALESCE($3,'ended'), $4, $5, $6, $7,
+                   CASE WHEN $3 = 'answered' THEN NOW() ELSE NULL END,
+                   CASE WHEN $3 IN ('ended','missed','failed') THEN NOW() ELSE NULL END,
+                   CASE WHEN $8 = 'agent-answered'    THEN NOW() ELSE NULL END,
+                   CASE WHEN $8 = 'customer-answered' THEN NOW() ELSE NULL END,
+                   CASE WHEN $8 = 'customer-missed'   THEN NOW() ELSE NULL END,
+                   $9)
+           RETURNING id, lead_id, caller_id, status, recording_url, duration_sec, provider_call_id,
+                     agent_answered_at, customer_answered_at, customer_missed_at, ended_at, hangup_by`,
+          [
+            leadId, event.provider_call_id, event.status, event.duration_sec,
+            event.recording_url, event.error_message, req.body,
+            routeKind, event.hangup_by || null,
+          ]
+        );
+        callRow = ins.rows[0] || null;
+      } else {
+        callRow = rows[0];
+      }
+    } catch (err) {
+      console.error('[webhooks/tata] db error:', err.message);
+      return;
     }
-  } catch (err) {
-    console.error('[webhooks/tata] db error:', err.message);
-    return;
-  }
 
-  if (!callRow) return;
+    if (!callRow) return;
 
-  // 5. Push SSE update to the caller's CRM tab (if assigned)
-  if (callRow.caller_id) {
-    callerSse.pushTo(callRow.caller_id, { type: 'call.update', call: callRow });
-  }
+    // 5. Push SSE updates to the caller's CRM tab (if assigned).
+    //    Always emit the legacy generic 'call.update' for backward compat,
+    //    plus a typed event the new auto-call state machine reacts to.
+    if (callRow.caller_id) {
+      callerSse.pushTo(callRow.caller_id, { type: 'call.update', call: callRow });
 
-  // 6. Background-download the recording so the URL never expires
-  if (event.recording_url && callRow.recording_url && !callRow.recording_url.startsWith('/uploads/')) {
-    setImmediate(() => {
-      downloadRecording({
-        callId:       callRow.id,
-        recordingUrl: event.recording_url,
-        callerId:     callRow.caller_id,
-      })
-      .then(() => {
-        // Push a follow-up SSE so the audio src refreshes to the local copy
-        if (callRow.caller_id) {
-          pool.query(
-            `SELECT id, lead_id, caller_id, status, recording_url, duration_sec
-               FROM calls WHERE id = $1`,
-            [callRow.id]
-          ).then(r => {
-            if (r.rows[0]) callerSse.pushTo(callRow.caller_id, { type: 'call.update', call: r.rows[0] });
-          }).catch(() => {});
-        }
-      })
-      .catch(e => console.error('[webhooks/tata] recording download error:', e.message));
-    });
-  }
+      const TYPED = {
+        'agent-answered':    'agent.answered',
+        'customer-answered': 'customer.answered',
+        'customer-missed':   'customer.missed',
+        'hangup':            'call.hangup',
+      };
+      const typed = TYPED[routeKind];
+      if (typed) {
+        callerSse.pushTo(callRow.caller_id, { type: typed, call: callRow });
+      }
+
+      // On hangup with no agent-answered, we infer the agent (caller) never
+      // picked the SmartFlow ring. Click-to-call mode doesn't expose a
+      // dedicated "Call missed by Agent" trigger, so this is how the state
+      // machine learns the caller missed their leg.
+      if (routeKind === 'hangup' && !callRow.agent_answered_at) {
+        callerSse.pushTo(callRow.caller_id, { type: 'agent.missed', call: callRow });
+        console.warn('[auto-call] caller missed SmartFlow leg', {
+          call_id: callRow.id, lead_id: callRow.lead_id, caller_id: callRow.caller_id,
+        });
+      }
+    }
+
+    // 6. Background-download the recording so the URL never expires
+    if (event.recording_url && callRow.recording_url && !callRow.recording_url.startsWith('/uploads/')) {
+      setImmediate(() => {
+        downloadRecording({
+          callId:       callRow.id,
+          recordingUrl: event.recording_url,
+          callerId:     callRow.caller_id,
+        })
+        .then(() => {
+          // Push a follow-up SSE so the audio src refreshes to the local copy
+          if (callRow.caller_id) {
+            pool.query(
+              `SELECT id, lead_id, caller_id, status, recording_url, duration_sec
+                 FROM calls WHERE id = $1`,
+              [callRow.id]
+            ).then(r => {
+              if (r.rows[0]) callerSse.pushTo(callRow.caller_id, { type: 'call.update', call: r.rows[0] });
+            }).catch(() => {});
+          }
+        })
+        .catch(e => console.error('[webhooks/tata] recording download error:', e.message));
+      });
+    }
+  };
 }
 
-router.post('/tata',                    rawBodyParser, handleTataWebhook);
-router.post('/tata-tele/recording',     rawBodyParser, handleTataWebhook);
-router.post('/tata-tele/answered-by-agent',    rawBodyParser, handleTataWebhook);
-router.post('/tata-tele/answered-by-customer', rawBodyParser, handleTataWebhook);
-router.post('/tata-tele/hangup',        rawBodyParser, handleTataWebhook);
-router.post('/tata-tele/missed',        rawBodyParser, handleTataWebhook);
+router.post('/tata',                           rawBodyParser, makeTataHandler('catch-all'));
+router.post('/tata-tele/recording',            rawBodyParser, makeTataHandler('recording'));
+router.post('/tata-tele/answered-by-agent',    rawBodyParser, makeTataHandler('agent-answered'));
+router.post('/tata-tele/answered-by-customer', rawBodyParser, makeTataHandler('customer-answered'));
+router.post('/tata-tele/customer-missed',      rawBodyParser, makeTataHandler('customer-missed'));
+router.post('/tata-tele/hangup',               rawBodyParser, makeTataHandler('hangup'));
+router.post('/tata-tele/missed',               rawBodyParser, makeTataHandler('hangup'));
 
 /* ── /tata/dialplan ──
    Inbound-call "screen pop" webhook. Tata POSTs here when someone dials your

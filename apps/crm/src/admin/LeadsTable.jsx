@@ -466,6 +466,30 @@ export default function LeadsTable({ token, source = 'meta' }) {
           <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: 'rgba(91,33,182,0.45)', fontWeight: 600 }}>to</span>
           <DatePicker value={dateTo} onChange={setDateTo} placeholder="To date" />
         </div>
+        {(() => {
+          const istToday = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+          const isTodayActive = dateFrom === istToday && dateTo === istToday;
+          return (
+            <button
+              onClick={() => {
+                if (isTodayActive) { setDateFrom(''); setDateTo(''); }
+                else { setDateFrom(istToday); setDateTo(istToday); }
+              }}
+              style={{
+                height: '2.1rem', padding: '0 14px', borderRadius: 10,
+                border: isTodayActive ? '1.5px solid rgba(91,33,182,0.55)' : '1px solid rgba(139,92,246,0.30)',
+                background: isTodayActive ? 'rgba(91,33,182,0.12)' : 'rgba(255,255,255,0.80)',
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 700,
+                color: '#5B21B6', cursor: 'pointer', whiteSpace: 'nowrap',
+                boxShadow: isTodayActive ? '0 0 0 3px rgba(91,33,182,0.10)' : 'none',
+                transition: 'all 150ms',
+              }}
+              title="Show only leads registered today (IST)"
+            >
+              Today
+            </button>
+          );
+        })()}
         {(dateFrom || dateTo) && (
           <button onClick={() => { setDateFrom(''); setDateTo(''); }}
             style={{ height: '2.1rem', padding: '0 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.30)', background: 'rgba(254,242,242,0.80)', fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: '#DC2626', cursor: 'pointer', whiteSpace: 'nowrap' }}>

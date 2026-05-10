@@ -3,10 +3,9 @@ import DateTimePicker from '../admin/DateTimePicker';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Lead Call Note Modal — opens when caller clicks the pencil icon on a lead.
-   Captures the post-call form, then either:
-     • Complete Call → marks lead completed, moves to Completed Leads
-     • Follow Up + Date/Time → moves to Completed Leads with a follow-up tag,
-       reappears in Assigned at the scheduled time
+   Drives a 13-state auto-call workflow that distinguishes caller-leg
+   (agent's SmartFlow phone) events from customer-leg events. State is fed
+   by typed SSE events the backend emits per Tata webhook trigger.
    ────────────────────────────────────────────────────────────────────────── */
 
 const RANGES = [
@@ -41,8 +40,6 @@ const WORKING_PROFESSIONAL = [
   'IT', 'Retired', 'Student', 'Working Professional', 'Government', 'Not Working',
 ].map(label => ({ value: label.toLowerCase().replace(/\s+/g, '_'), label }));
 
-// Raw location list — duplicates and case-variants stripped at module load.
-// Add or remove entries here; the dropdown rebuilds on next reload.
 const LOCATIONS_RAW = [
   'chennai','madurai','bangalore','theni','thiruvallur','salem','thirupur','coimbatore','trichy','vellore',
   'selam','villupuram','kerala','erode','kancheepuram','kanyakumari','viruthunagar','kadaloor','karur',
@@ -70,15 +67,26 @@ const LOCATIONS = Array.from(new Set(LOCATIONS_RAW.map(s => s.trim().toLowerCase
   .sort()
   .map(v => ({ value: v, label: v.replace(/\b\w/g, c => c.toUpperCase()) }));
 
-/* Append the caller's "delay reasons" (one per timer expiry) to the note so
-   they're preserved in the saved record. */
-function buildNoteWithDelays(noteText, delayReasons) {
+/* Append the caller's "delay reasons" (one per timer expiry) and "agent miss
+   reasons" (one per SmartFlow miss) to the note so they're preserved in the
+   saved record. */
+function buildNoteWithDelays(noteText, delayReasons, agentReasons) {
   const note = (noteText || '').trim();
   const delays = (delayReasons || []).filter(Boolean);
-  if (delays.length === 0) return note || null;
-  const block = `[Delay reasons]\n` + delays.map((r, i) => `  ${i + 1}. ${r}`).join('\n');
-  return note ? `${note}\n\n${block}` : block;
+  const agents = (agentReasons || []).filter(Boolean);
+  const blocks = [];
+  if (agents.length) {
+    blocks.push(`[Agent miss reasons]\n` + agents.map((r, i) => `  ${i + 1}. ${r}`).join('\n'));
+  }
+  if (delays.length) {
+    blocks.push(`[Form delay reasons]\n` + delays.map((r, i) => `  ${i + 1}. ${r}`).join('\n'));
+  }
+  if (blocks.length === 0) return note || null;
+  return note ? [note, ...blocks].join('\n\n') : blocks.join('\n\n');
 }
+
+const FORM_WINDOW_SECS = 30;
+const AGENT_RETRY_CAP  = 5;   // 5 SmartFlow miss-reason loops before auto-pause
 
 export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [fullName, setFullName]                   = useState(lead.full_name || '');
@@ -96,94 +104,124 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [webinarAttended, setWebinarAttended]         = useState('');
   const [availableForWebinar, setAvailableForWebinar] = useState('');
   const [nextBatchJoining, setNextBatchJoining]       = useState('');
-  const [interested, setInterested]               = useState('');   // '' | 'yes' | 'no'
+  const [interested, setInterested]               = useState('');
   const [wantsFollowUp, setWantsFollowUp]         = useState(false);
-  const [followUpAtLocal, setFollowUpAtLocal]     = useState(''); // 'YYYY-MM-DDTHH:mm:ss' (local time, from DateTimePicker)
+  const [followUpAtLocal, setFollowUpAtLocal]     = useState('');
   const [error, setError]                         = useState('');
   const [saving, setSaving]                       = useState(false);
   const [recalling, setRecalling]                 = useState(false);
   const [recallToast, setRecallToast]             = useState('');
 
-  /* ── Call lifecycle state machine ──────────────────────────────────────
-     callPhase drives the yellow status card at the top of the modal:
-       'idle'         — modal opened, no call started yet (Start Auto Call shown)
-       'calling_1'    — first call dialed, ringing
-       'rejected_1'   — first call ended without answer (about to retry)
-       'calling_2'    — second call dialed, ringing
-       'rejected_2'   — second call also failed → auto-DNP fires
-       'in_progress'  — customer answered, still on the line
-       'form_window'  — call ended after answer, 30 s to fill form
-       'delay_reason' — 30 s expired, asking for delay reason; submit restarts timer
-     The cycle repeats from 'delay_reason' → 'form_window' until the caller
-     completes the form.                                                      */
+  /* ── Auto-call state machine ──────────────────────────────────────────
+     States:
+       idle              — initial; only seen if no call has been placed yet
+       ext_check         — centered overlay asking "Is SmartFlow extension on?"
+       agent_ringing_1   — banner "First call triggered. Pick the call."
+       agent_ringing_2   — banner "Triggering again. Manager notified." (auto-redial)
+       agent_reason_card — centered overlay asking why they missed both rings
+       customer_ringing  — banner "Calling customer…"
+       customer_on_call  — banner "Customer is on the call."
+       form_window       — banner with 30-s countdown to fill form
+       form_reason_card  — centered overlay asking why form wasn't filled in time
+       recall_ringing    — banner "Recall triggered. Pick the call."
+       dnp_alert         — centered overlay "Lead moved to DNP", auto-saves
+       auto_paused       — centered overlay "5 attempts hit, moving on", auto-saves
+  */
   const [callPhase, setCallPhase] = useState('idle');
-  const [wasAnsweredRef]   = useState(() => ({ current: false }));   // ref-style flag
-  const [attempt, setAttempt]         = useState(1);                       // 1 or 2
-  const [autoRedialing, setAutoRedialing] = useState(false);
-  const [autoDnpFiring, setAutoDnpFiring] = useState(false);
+  const [agentAttempts, setAgentAttempts]     = useState(0);   // SmartFlow misses this session (0..5)
+  const [customerAttempt, setCustomerAttempt] = useState(1);   // 1 or 2 (whole-call retry)
+  const [agentReasons, setAgentReasons]       = useState([]);  // appended every reason submit
+  const [agentReason, setAgentReason]         = useState('');
+  const [delayReasons, setDelayReasons]       = useState([]);
+  const [delayReason, setDelayReason]         = useState('');
+  const [formTimerSecs, setFormTimerSecs]     = useState(0);
+  const [activeCallId, setActiveCallId]       = useState(lead?.last_call_id || null);
 
-  // Live mirrors of the above so the SSE callback (set up once at mount) always
-  // reads the freshest values instead of stale closure snapshots. Without these
-  // a 'missed' SSE event for call 1 wouldn't reliably trigger call 2.
-  const attemptRef       = useRef(1);
-  const autoRedialingRef = useRef(false);
-  const autoDnpFiringRef = useRef(false);
-  const callPhaseRef     = useRef('idle');
-  const lastSeenCallIdRef = useRef(null);
-  useEffect(() => { attemptRef.current = attempt; }, [attempt]);
-  useEffect(() => { autoRedialingRef.current = autoRedialing; }, [autoRedialing]);
-  useEffect(() => { autoDnpFiringRef.current = autoDnpFiring; }, [autoDnpFiring]);
-  useEffect(() => { callPhaseRef.current = callPhase; }, [callPhase]);
+  // Refs mirror state for closures inside SSE/poll callbacks
+  const callPhaseRef       = useRef(callPhase);
+  const agentAttemptsRef   = useRef(0);
+  const customerAttemptRef = useRef(1);
+  const wasAgentAnsweredRef = useRef(false);
+  const wasCustomerAnsweredRef = useRef(false);
+  const lastSeenSigRef     = useRef(null);
+  const activeCallIdRef    = useRef(lead?.last_call_id || null);
+  useEffect(() => { callPhaseRef.current = callPhase; },             [callPhase]);
+  useEffect(() => { agentAttemptsRef.current = agentAttempts; },     [agentAttempts]);
+  useEffect(() => { customerAttemptRef.current = customerAttempt; }, [customerAttempt]);
+  useEffect(() => { activeCallIdRef.current = activeCallId; },       [activeCallId]);
 
-  const [formTimerSecs, setFormTimerSecs] = useState(0);   // 30 → 0 (form-fill window)
-  const [delayCardOpen, setDelayCardOpen] = useState(false);
-  const [delayReason, setDelayReason]     = useState('');
-  const [delayReasons, setDelayReasons]   = useState([]); // accumulated, appended on submit
-  const FORM_WINDOW_SECS = 30;
-
-  /* If the modal was opened mid-call (auto-dial flow from parent), reflect that
-     in the yellow card — the SSE handler will then move us through the phases. */
+  /* If the modal opened mid-call (parent already kicked off the dial), skip
+     the extension prompt and reflect ringing immediately. */
   useEffect(() => {
-    if (lead?.last_call_id && callPhase === 'idle') setCallPhase('calling_1');
+    if (lead?.last_call_id && callPhase === 'idle') setCallPhase('agent_ringing_1');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.last_call_id]);
 
-  /* Drive the phase machine from a single call object — used by SSE pushes
-     and the polling fallback. Reads ref values so it always sees the latest
-     attempt + guard flags regardless of when the closure was created. */
-  function dispatchCallUpdate(call) {
-    if (!call || call.lead_id !== lead.id) return;
-    const st = call.status;
-    // De-dupe identical pushes (SSE + poll both fire)
-    const sig = `${call.id}:${st}`;
-    if (lastSeenCallIdRef.current === sig) return;
-    lastSeenCallIdRef.current = sig;
+  /* Reduce a typed call event into a phase transition. Read from refs so the
+     callback (registered once at mount) sees fresh values. */
+  function handleCallEvent(eventType, call) {
+    if (call && call.lead_id && call.lead_id !== lead.id) return;
 
-    if (st === 'answered') {
-      wasAnsweredRef.current = true;
-      setCallPhase('in_progress');
+    const sig = `${call?.id || ''}:${eventType}`;
+    if (lastSeenSigRef.current === sig) return;
+    lastSeenSigRef.current = sig;
+
+    if (call?.id) {
+      setActiveCallId(call.id);
+      activeCallIdRef.current = call.id;
+    }
+
+    const phase = callPhaseRef.current;
+
+    if (eventType === 'agent.answered') {
+      wasAgentAnsweredRef.current = true;
+      // Caller picked SmartFlow → Tata is now bridging customer
+      if (phase === 'recall_ringing' || phase === 'form_window' || phase === 'form_reason_card') {
+        setCallPhase('customer_on_call');
+      } else {
+        setCallPhase('customer_ringing');
+      }
       return;
     }
-    if (['initiated','ringing'].includes(st)) {
-      wasAnsweredRef.current = false;
-      setCallPhase(attemptRef.current === 2 ? 'calling_2' : 'calling_1');
+
+    if (eventType === 'customer.answered') {
+      wasCustomerAnsweredRef.current = true;
+      setCallPhase('customer_on_call');
       return;
     }
-    if (['ended','missed','failed'].includes(st)) {
-      if (wasAnsweredRef.current || call.answered_at) {
-        wasAnsweredRef.current = true;
-        if (callPhaseRef.current !== 'form_window' && callPhaseRef.current !== 'delay_reason') {
+
+    if (eventType === 'customer.missed') {
+      // Customer didn't pick after caller did. First miss → silent retry; second → DNP.
+      if (customerAttemptRef.current < 2) {
+        retryCallToCustomer();
+      } else {
+        triggerDnp();
+      }
+      return;
+    }
+
+    if (eventType === 'agent.missed') {
+      // Caller didn't pick the SmartFlow ring. attempt 1 → auto-redial silently,
+      // attempt 2 → centered reason card.
+      handleAgentMissed();
+      return;
+    }
+
+    if (eventType === 'call.hangup') {
+      if (wasCustomerAnsweredRef.current || call?.customer_answered_at) {
+        // Real conversation ended → form window
+        if (phase !== 'form_window' && phase !== 'form_reason_card') {
           setCallPhase('form_window');
           setFormTimerSecs(prev => (prev > 0 ? prev : FORM_WINDOW_SECS));
         }
-      } else {
-        setCallPhase(attemptRef.current < 2 ? 'rejected_1' : 'rejected_2');
-        handleNoAnswer();
       }
+      // If customer never answered, the agent.missed / customer.missed events
+      // will arrive separately and drive the right transition.
+      return;
     }
   }
 
-  // Listen for call lifecycle on the open modal
+  /* Listen to caller-scoped SSE for typed call events. */
   useEffect(() => {
     if (!jwt || !lead?.id) return;
     const url = `/api/caller/leads/events?token=${encodeURIComponent(jwt)}`;
@@ -191,7 +229,19 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     es.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg?.type === 'call.update') dispatchCallUpdate(msg.call);
+        if (!msg?.type) return;
+        if (msg.type === 'agent.answered'    || msg.type === 'agent.missed' ||
+            msg.type === 'customer.answered' || msg.type === 'customer.missed' ||
+            msg.type === 'call.hangup') {
+          handleCallEvent(msg.type, msg.call || {});
+          return;
+        }
+        // Backward-compat: legacy generic 'call.update' — derive from status
+        if (msg.type === 'call.update' && msg.call) {
+          const c = msg.call;
+          if (c.agent_answered_at && !wasAgentAnsweredRef.current) handleCallEvent('agent.answered', c);
+          if (c.customer_answered_at && !wasCustomerAnsweredRef.current) handleCallEvent('customer.answered', c);
+        }
       } catch (_) {}
     };
     es.onerror = () => { /* auto-reconnect */ };
@@ -199,12 +249,13 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jwt, lead?.id]);
 
-  /* Polling fallback — SSE can drop messages or land before the EventSource
-     finishes connecting. While we're actively in a calling/in_progress phase,
-     re-check the latest call row every 4 s so we never get stranded. */
+  /* Polling fallback — derive typed events from the latest call row. */
   useEffect(() => {
     if (!jwt || !lead?.id) return;
-    const ACTIVE = new Set(['calling_1', 'calling_2', 'in_progress', 'rejected_1']);
+    const ACTIVE = new Set([
+      'agent_ringing_1', 'agent_ringing_2', 'customer_ringing',
+      'customer_on_call', 'recall_ringing',
+    ]);
     if (!ACTIVE.has(callPhase)) return;
     let cancelled = false;
     const tick = async () => {
@@ -214,25 +265,37 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         });
         if (!res.ok) return;
         const data = await res.json();
-        const latest = data.calls?.[0];
-        if (cancelled || !latest) return;
-        dispatchCallUpdate({ ...latest, lead_id: lead.id });
-      } catch (_) { /* network blip — try again next tick */ }
+        const c = data.calls?.[0];
+        if (cancelled || !c) return;
+        // Derive missing events from timestamp columns
+        if (c.agent_answered_at && !wasAgentAnsweredRef.current) {
+          handleCallEvent('agent.answered', { ...c, lead_id: lead.id });
+        }
+        if (c.customer_answered_at && !wasCustomerAnsweredRef.current) {
+          handleCallEvent('customer.answered', { ...c, lead_id: lead.id });
+        }
+        if (c.customer_missed_at) {
+          handleCallEvent('customer.missed', { ...c, lead_id: lead.id });
+        }
+        if (c.ended_at) {
+          if (!c.agent_answered_at) handleCallEvent('agent.missed', { ...c, lead_id: lead.id });
+          handleCallEvent('call.hangup', { ...c, lead_id: lead.id });
+        }
+      } catch (_) {}
     };
     const id = setInterval(tick, 4000);
     return () => { cancelled = true; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jwt, lead?.id, callPhase]);
 
-  // Tick the 30 s form-fill timer; open the "reason for delay" card when it hits 0
+  /* 30-s form-fill countdown. */
   useEffect(() => {
     if (formTimerSecs <= 0) return;
     const id = setInterval(() => {
       setFormTimerSecs(s => {
         if (s <= 1) {
           clearInterval(id);
-          setDelayCardOpen(true);
-          setCallPhase('delay_reason');
+          setCallPhase('form_reason_card');
           return 0;
         }
         return s - 1;
@@ -241,86 +304,44 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     return () => clearInterval(id);
   }, [formTimerSecs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleNoAnswer() {
-    // Read live state from refs — stale closure values would block legitimate retries.
-    if (autoDnpFiringRef.current || autoRedialingRef.current) return;
-    if (attemptRef.current < 2) {
-      // Immediate retry
-      autoRedialingRef.current = true;
-      setAutoRedialing(true);
-      attemptRef.current = attemptRef.current + 1;
-      setAttempt(attemptRef.current);
-      // Allow the next terminal status to be processed even if it carries the
-      // same call.id signature in some edge case
-      lastSeenCallIdRef.current = null;
-      setCallPhase('calling_2');
-      try {
-        await fetch('/api/caller/calls/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
-          body: JSON.stringify({ lead_id: lead.id }),
-        });
-      } catch (_) {}
-      autoRedialingRef.current = false;
-      setAutoRedialing(false);
-    } else {
-      // 2 attempts failed → auto-DNP and tell parent to advance
-      autoDnpFiringRef.current = true;
-      setAutoDnpFiring(true);
-      try {
-        await fetch(`/api/caller/leads/${lead.id}/note`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
-          body: JSON.stringify({
-            full_name: (fullName || lead.full_name || '').trim() || null,
-            outcome:   'not_picked',
-            note:      'Auto-marked: customer did not pick after 2 attempts.',
-          }),
-        });
-      } catch (_) {}
-      onSaved?.('not_picked', { autoAdvance: true });
+  function resetCallSignalForNewAttempt() {
+    wasAgentAnsweredRef.current = false;
+    wasCustomerAnsweredRef.current = false;
+    lastSeenSigRef.current = null;
+  }
+
+  async function postStartCall() {
+    const res = await fetch('/api/caller/calls/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ lead_id: lead.id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.message || data?.error || 'Failed to start call');
+    if (data?.call?.id) {
+      setActiveCallId(data.call.id);
+      activeCallIdRef.current = data.call.id;
     }
+    return data;
   }
 
-  function handleDelayReasonSubmit() {
-    const reason = delayReason.trim();
-    if (!reason) return;
-    setDelayReasons(prev => [...prev, reason]);
-    setDelayCardOpen(false);
-    setDelayReason('');
-    setFormTimerSecs(FORM_WINDOW_SECS);
-    setCallPhase('form_window');
-  }
-
-  /* Start Auto Call — caller hits the button on the yellow status card.
-     Same backend endpoint as Recall but updates the phase machine. */
-  async function startAutoCall() {
+  /* Caller clicked "Yes & Proceed" on the SmartFlow extension prompt. */
+  async function confirmExtensionAndStart() {
     if (recalling) return;
-    wasAnsweredRef.current = false;
-    attemptRef.current = 1;
-    autoRedialingRef.current = false;
-    autoDnpFiringRef.current = false;
-    lastSeenCallIdRef.current = null;
-    setAttempt(1);
-    setAutoRedialing(false);
-    setAutoDnpFiring(false);
-    setFormTimerSecs(0);
-    setDelayCardOpen(false);
-    setDelayReason('');
+    resetCallSignalForNewAttempt();
+    setAgentAttempts(0);
+    agentAttemptsRef.current = 0;
+    setCustomerAttempt(1);
+    customerAttemptRef.current = 1;
+    setAgentReasons([]);
+    setDelayReasons([]);
     setRecalling(true);
     setRecallToast('');
-    setCallPhase('calling_1');
+    setCallPhase('agent_ringing_1');
     try {
-      const res = await fetch('/api/caller/calls/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-        body: JSON.stringify({ lead_id: lead.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.message || data?.error || 'Failed to start call');
-      // SSE will drive the rest of the phase transitions
+      await postStartCall();
     } catch (e) {
-      setCallPhase('idle');
+      setCallPhase('ext_check');
       setRecallToast(e.message || 'Call failed — Smartflo extension off?');
       setTimeout(() => setRecallToast(''), 3500);
     } finally {
@@ -328,32 +349,78 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     }
   }
 
+  /* "Start Auto Call" button on the idle banner. */
+  function startAutoCall() {
+    setCallPhase('ext_check');
+  }
+
+  /* Agent missed the SmartFlow ring. attempt 1 → silent auto-redial,
+     attempt ≥ 2 → reason card (after 5 reason loops, auto-pause and advance). */
+  async function handleAgentMissed() {
+    const attempts = agentAttemptsRef.current + 1;
+    agentAttemptsRef.current = attempts;
+    setAgentAttempts(attempts);
+
+    if (attempts >= AGENT_RETRY_CAP) {
+      setCallPhase('auto_paused');
+      saveAutoPaused();
+      return;
+    }
+
+    if (attempts === 1) {
+      // First miss: silent auto-redial, banner switches to "Triggering again."
+      resetCallSignalForNewAttempt();
+      setCallPhase('agent_ringing_2');
+      try { await postStartCall(); } catch (_) {}
+      return;
+    }
+
+    // Second+ miss: ask for reason
+    setAgentReason('');
+    setCallPhase('agent_reason_card');
+  }
+
+  async function submitAgentReason() {
+    const reason = agentReason.trim();
+    if (!reason) return;
+    setAgentReasons(prev => [...prev, reason]);
+    setAgentReason('');
+    resetCallSignalForNewAttempt();
+    setCallPhase('agent_ringing_1');
+    try { await postStartCall(); } catch (_) {}
+  }
+
+  async function retryCallToCustomer() {
+    setCustomerAttempt(2);
+    customerAttemptRef.current = 2;
+    resetCallSignalForNewAttempt();
+    setCallPhase('agent_ringing_1');
+    try { await postStartCall(); } catch (_) {}
+  }
+
+  function submitDelayReason() {
+    const reason = delayReason.trim();
+    if (!reason) return;
+    setDelayReasons(prev => [...prev, reason]);
+    setDelayReason('');
+    setFormTimerSecs(FORM_WINDOW_SECS);
+    setCallPhase('form_window');
+  }
+
+  /* Manual Recall — caller chose to redial from inside the form window. */
   async function handleRecall() {
     if (recalling) return;
-    // Manual recall = caller is trying again deliberately; cancel any pending
-    // auto-flow and reset the state machine so the new call's events drive UI.
-    wasAnsweredRef.current = false;
-    attemptRef.current = 1;
-    autoRedialingRef.current = false;
-    autoDnpFiringRef.current = false;
-    lastSeenCallIdRef.current = null;
-    setAttempt(1);
-    setAutoRedialing(false);
-    setAutoDnpFiring(false);
+    resetCallSignalForNewAttempt();
+    agentAttemptsRef.current = 0;
+    setAgentAttempts(0);
+    customerAttemptRef.current = 1;
+    setCustomerAttempt(1);
     setFormTimerSecs(0);
-    setDelayCardOpen(false);
-    setDelayReason('');
     setRecalling(true);
     setRecallToast('');
-    setCallPhase('calling_1');
+    setCallPhase('recall_ringing');
     try {
-      const res = await fetch('/api/caller/calls/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-        body: JSON.stringify({ lead_id: lead.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.message || data?.error || 'Failed to start call');
+      await postStartCall();
       setRecallToast('Calling…');
       setTimeout(() => setRecallToast(''), 2500);
     } catch (e) {
@@ -364,8 +431,52 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     }
   }
 
-  /* Derived submission outcome:
-     follow-up wins if checked; otherwise interested choice maps to completed/not_interested. */
+  /* ── DNP / auto-paused auto-saves ─────────────────────────────────── */
+  async function triggerDnp() {
+    setCallPhase('dnp_alert');
+    try {
+      await fetch(`/api/caller/leads/${lead.id}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({
+          full_name: (fullName || lead.full_name || '').trim() || null,
+          outcome:   'not_picked',
+          note:      'Auto-marked: customer did not pick after 2 attempts.',
+          call_id:   activeCallIdRef.current || lead.last_call_id || null,
+        }),
+      });
+    } catch (_) {}
+    fetch(`/api/caller/leads/${lead.id}/hangup`, {
+      method: 'POST', headers: { Authorization: `Bearer ${jwt}` },
+    }).catch(() => {});
+    // Brief moment to let the user see the alert before advancing
+    setTimeout(() => onSaved?.('not_picked', { autoAdvance: true }), 1500);
+  }
+
+  async function saveAutoPaused() {
+    try {
+      await fetch(`/api/caller/leads/${lead.id}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({
+          full_name: (fullName || lead.full_name || '').trim() || null,
+          outcome:   'auto_paused',
+          note:      buildNoteWithDelays(
+            'Auto-paused after 5 SmartFlow misses by caller.',
+            delayReasons,
+            agentReasons,
+          ),
+          call_id:   activeCallIdRef.current || lead.last_call_id || null,
+        }),
+      });
+    } catch (_) {}
+    fetch(`/api/caller/leads/${lead.id}/hangup`, {
+      method: 'POST', headers: { Authorization: `Bearer ${jwt}` },
+    }).catch(() => {});
+    setTimeout(() => onSaved?.('auto_paused', { autoAdvance: true }), 1800);
+  }
+
+  /* ── Form derived state ───────────────────────────────────────────── */
   const derivedOutcome = wantsFollowUp
     ? 'follow_up'
     : interested === 'yes'
@@ -374,34 +485,24 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         ? 'not_interested'
         : '';
 
-  /* Validation mode is determined by selections:
-       1. Interested = NO        → nothing is mandatory (caller may submit minimal info)
-       2. Follow Up   = ON       → Note + Date + Time mandatory; others optional
-       3. Default                → Confirm Range, "value for", Age, Diet, Medicine mandatory; Note optional
-     Submit always requires at least one of Interested or Follow Up to be selected. */
   const noOverride        = interested === 'no';
   const followUpOnly      = !noOverride && wantsFollowUp;
-  const detailsMandatory  = !noOverride && !wantsFollowUp;   // default mode
+  const detailsMandatory  = !noOverride && !wantsFollowUp;
 
   function validate() {
     if (!fullName.trim()) return 'Name cannot be empty.';
-    // Interested choice is ALWAYS required — no other selection can override this.
     if (interested !== 'yes' && interested !== 'no') {
       return 'Pick Interested — Yes or No.';
     }
-
     if (noOverride) {
-      // NO mode: only Name (already validated above) and Note are mandatory
       if (!note.trim())  return 'Add a brief note about the not-interested reason.';
       return null;
     }
-
     if (followUpOnly) {
       if (!note.trim())                   return 'Please add a note about the follow-up.';
       if (!followUpAtLocal)               return 'Pick a follow-up date and time.';
       return null;
     }
-    // detailsMandatory — full default form
     if (!confirmedRange) return 'Pick the patient’s confirmed sugar range.';
     if (!rangeFor)       return 'Pick whether the value is for personal or family use.';
     if (!patientAge)     return 'Pick the patient age range.';
@@ -421,13 +522,11 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         body: JSON.stringify({
           full_name: fullName.trim() || null,
           outcome:   'not_picked',
-          call_id:   lead.last_call_id || null,
+          call_id:   activeCallIdRef.current || lead.last_call_id || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to save.');
-      // Hang up whatever call is currently active for this lead (handles the
-      // Recall case where lead.last_call_id is the old, already-ended call).
       fetch(`/api/caller/leads/${lead.id}/hangup`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${jwt}` },
@@ -446,8 +545,6 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
 
     let followUpAt = null;
     if (wantsFollowUp && followUpAtLocal) {
-      // DateTimePicker emits a local datetime string ('YYYY-MM-DDTHH:mm:ss').
-      // Parse it as local time → ISO UTC for storage.
       const [date, time] = followUpAtLocal.split('T');
       const [y, m, d] = date.split('-').map(Number);
       const [hh, mm, ss = 0] = (time || '').split(':').map(Number);
@@ -458,7 +555,6 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     setSaving(true);
     setError('');
     try {
-      // Derive sugar_confirmation from the comparison so legacy display logic still works
       const sugarConfirmation = confirmedRange === lead.sugar_level ? 'same' : 'different';
       const res = await fetch(`/api/caller/leads/${lead.id}/note`, {
         method: 'POST',
@@ -479,23 +575,20 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           webinar_attended:      webinarAttended || null,
           available_for_webinar: availableForWebinar || null,
           next_batch_joining:    nextBatchJoining || null,
-          note:                  buildNoteWithDelays(note, delayReasons),
+          note:                  buildNoteWithDelays(note, delayReasons, agentReasons),
           outcome:               derivedOutcome,
           follow_up_at:          followUpAt,
-          call_id:               lead.last_call_id || null,
+          call_id:               activeCallIdRef.current || lead.last_call_id || null,
           interested:            interested || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to save.');
 
-      // Best-effort hang up whatever call is currently active for this lead.
-      // Targeting the lead (not a stale call_id) means a Recall-then-Complete
-      // sequence still terminates the new call, not the old one.
       fetch(`/api/caller/leads/${lead.id}/hangup`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${jwt}` },
-      }).catch(() => { /* ignore — user already moved on */ });
+      }).catch(() => {});
 
       onSaved?.(derivedOutcome, { autoAdvance: true });
     } catch (e) {
@@ -504,6 +597,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
       setSaving(false);
     }
   }
+
+  /* ── Render ────────────────────────────────────────────────────────── */
+  const overlayPhase = ['ext_check', 'agent_reason_card', 'form_reason_card', 'dnp_alert', 'auto_paused']
+    .includes(callPhase) ? callPhase : null;
 
   return (
     <div
@@ -520,12 +617,12 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
       <style>{`
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes scaleIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+        @keyframes pulseDot { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
         .lcn-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; row-gap: 0; }
         .lcn-form-grid > .lcn-wide { grid-column: 1 / -1; }
         @media (max-width: 720px) {
           .lcn-form-grid { grid-template-columns: 1fr; }
         }
-        /* Hide scrollbar chrome but keep scroll functionality */
         .lcn-modal { scrollbar-width: none; -ms-overflow-style: none; }
         .lcn-modal::-webkit-scrollbar { width: 0; height: 0; display: none; }
       `}</style>
@@ -540,7 +637,6 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         padding: '24px 22px 18px',
         fontFamily: 'Outfit, sans-serif',
         animation: 'scaleIn 200ms ease',
-        // Whole modal scrolls as one unit — header + form + Complete Call button
         overflowY: 'auto',
       }}>
         {/* Header */}
@@ -581,32 +677,21 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           }}>{recallToast}</div>
         )}
 
-        <CallStatusCard
+        <BannerStatus
           phase={callPhase}
-          attempt={attempt}
           formTimerSecs={formTimerSecs}
+          totalWindow={FORM_WINDOW_SECS}
           starting={recalling}
           onStart={startAutoCall}
-          delayReason={delayReason}
-          onDelayReasonChange={setDelayReason}
-          onDelayReasonSubmit={handleDelayReasonSubmit}
-          totalWindow={FORM_WINDOW_SECS}
+          customerAttempt={customerAttempt}
         />
 
         <div className="lcn-form-grid">
-          {/* Lead name — pre-filled, editable */}
           <FieldRow label="1. Name" mandatory wide>
-            <input
-              type="text"
-              value={fullName}
-              onChange={e => setFullName(e.target.value)}
-              placeholder="Patient name"
-              style={inputStyle}
-              maxLength={120}
-            />
+            <input type="text" value={fullName} onChange={e => setFullName(e.target.value)}
+              placeholder="Patient name" style={inputStyle} maxLength={120} />
           </FieldRow>
 
-          {/* Mandatory confirmed range — registered value shown inline as a hint */}
           <FieldRow
             label={
               <>
@@ -621,101 +706,71 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
             <RadioRow options={RANGES} value={confirmedRange} onChange={setConfirmedRange} wrap />
           </FieldRow>
 
-          {/* Range purpose */}
           <FieldRow label="3. This value is for" mandatory={detailsMandatory}>
             <RadioRow options={RANGE_FOR} value={rangeFor} onChange={setRangeFor} />
           </FieldRow>
 
-          {/* Patient age */}
           <FieldRow label="4. Patient Age" mandatory={detailsMandatory}>
             <RadioRow options={AGE_BUCKETS} value={patientAge} onChange={setPatientAge} wrap />
           </FieldRow>
 
-          {/* Diet */}
           <FieldRow label="5. Diet" mandatory={detailsMandatory}>
             <RadioRow options={DIET} value={dietStatus} onChange={setDietStatus} />
           </FieldRow>
 
-          {/* Medicine */}
           <FieldRow label="6. Medicine" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
             <RadioRow options={MEDICINE} value={takesMedicine} onChange={setTakesMedicine} />
           </FieldRow>
 
-          {/* HbA1c */}
           <FieldRow label="7. HbA1c" hint="(optional)">
             <RadioRow options={HBA1C} value={hba1c} onChange={setHba1c} wrap />
           </FieldRow>
 
-          {/* Other languages */}
           <FieldRow label="8. Other Languages" hint="(optional)">
             <RadioRow options={YES_NO} value={otherLanguages} onChange={setOtherLanguages} />
           </FieldRow>
 
-          {/* Working professional */}
           <FieldRow label="9. Working Professional" hint="(optional)">
-            <SelectField
-              value={workingProfessional}
-              onChange={setWorkingProfessional}
-              options={WORKING_PROFESSIONAL}
-              placeholder="Select occupation…"
-            />
+            <SelectField value={workingProfessional} onChange={setWorkingProfessional}
+              options={WORKING_PROFESSIONAL} placeholder="Select occupation…" />
           </FieldRow>
 
-          {/* Location */}
           <FieldRow label="10. Location" hint="(optional)">
-            <SelectField
-              value={location}
-              onChange={setLocation}
-              options={LOCATIONS}
-              placeholder="Select location…"
-            />
+            <SelectField value={location} onChange={setLocation} options={LOCATIONS} placeholder="Select location…" />
           </FieldRow>
 
-          {/* Already paid */}
           <FieldRow label="11. Already Paid" hint="(optional)">
             <RadioRow options={YES_NO} value={alreadyPaid} onChange={setAlreadyPaid} />
           </FieldRow>
 
-          {/* Webinar attended */}
           <FieldRow label="12. Webinar Attended" hint="(optional)">
             <RadioRow options={YES_NO} value={webinarAttended} onChange={setWebinarAttended} />
           </FieldRow>
 
-          {/* Available for webinar */}
           <FieldRow label="13. Available for Webinar" hint="(optional)">
             <RadioRow options={YES_NO} value={availableForWebinar} onChange={setAvailableForWebinar} />
           </FieldRow>
 
-          {/* Next batch joining */}
           <FieldRow label="14. Next Batch Joining" hint="(optional)">
             <RadioRow options={YES_NO} value={nextBatchJoining} onChange={setNextBatchJoining} />
           </FieldRow>
 
-          {/* Note */}
           <FieldRow label="15. Note" mandatory={followUpOnly || noOverride} hint={(followUpOnly || noOverride) ? null : '(optional)'} wide>
-            <textarea
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder="Anything noteworthy from the conversation…"
-              rows={3}
+            <textarea value={note} onChange={e => setNote(e.target.value)}
+              placeholder="Anything noteworthy from the conversation…" rows={3}
               style={{
                 width: '100%', padding: '10px 12px',
                 borderRadius: 10, border: '1px solid rgba(209,196,240,0.7)',
                 background: 'rgba(237,234,248,0.30)',
                 fontFamily: 'Outfit,sans-serif', fontSize: '0.86rem', color: '#3B0764',
                 outline: 'none', resize: 'vertical', boxSizing: 'border-box',
-              }}
-            />
+              }} />
           </FieldRow>
 
-          {/* Follow-up schedule — appears only after the caller toggles "Follow Up" on */}
           {wantsFollowUp && (
             <FieldRow label="16. Follow-up schedule" mandatory wide>
-              <DateTimePicker
-                value={followUpAtLocal}
-                onChange={setFollowUpAtLocal}
-                placeholder="Pick the callback date & time"
-              />
+              <DateTimePicker value={followUpAtLocal} onChange={setFollowUpAtLocal}
+                placeholder="Pick the callback date & time" />
             </FieldRow>
           )}
 
@@ -725,26 +780,13 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
             </div>
           )}
 
-          {/* Two independent dimensions:
-                - INTERESTED — yes / no / unset (one-of)
-                - FOLLOW UP  — toggle (can combine with either YES or NO)        */}
           <div className="lcn-wide" style={{ marginTop: 18, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'stretch' }}>
-            {/* Interested YES / NO segmented toggle */}
             <div style={{ flex: '1 1 240px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{
-                fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.74rem',
-                color: '#3B0764', letterSpacing: '0.06em', textTransform: 'uppercase',
-              }}>
+              <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.74rem', color: '#3B0764', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 Interested <span style={{ color: '#DC2626', marginLeft: 2 }}>*</span>
               </span>
-              <div style={{
-                display: 'flex',
-                background: 'rgba(237,234,248,0.50)',
-                border: '1px solid rgba(209,196,240,0.7)',
-                borderRadius: 14, padding: 4, gap: 4,
-              }}>
-                <button
-                  type="button"
+              <div style={{ display: 'flex', background: 'rgba(237,234,248,0.50)', border: '1px solid rgba(209,196,240,0.7)', borderRadius: 14, padding: 4, gap: 4 }}>
+                <button type="button"
                   onClick={() => setInterested(interested === 'yes' ? '' : 'yes')}
                   style={{
                     flex: 1, padding: '10px 14px', borderRadius: 10, border: 'none',
@@ -754,16 +796,11 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
                     cursor: 'pointer',
                     boxShadow: interested === 'yes' ? '0 4px 12px rgba(16,185,129,0.30)' : 'none',
                     transition: 'all 150ms',
-                  }}
-                >
-                  YES
-                </button>
-                <button
-                  type="button"
+                  }}>YES</button>
+                <button type="button"
                   onClick={() => {
                     const turningOn = interested !== 'no';
                     setInterested(turningOn ? 'no' : '');
-                    // NO and Follow Up are mutually exclusive
                     if (turningOn) setWantsFollowUp(false);
                   }}
                   style={{
@@ -774,31 +811,20 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
                     cursor: 'pointer',
                     boxShadow: interested === 'no' ? '0 4px 12px rgba(220,38,38,0.30)' : 'none',
                     transition: 'all 150ms',
-                  }}
-                >
-                  NO
-                </button>
+                  }}>NO</button>
               </div>
             </div>
 
-            {/* Follow Up — independent toggle; auto-sets Interested = YES when turned on */}
-            <button
-              type="button"
+            <button type="button"
               onClick={() => {
                 setWantsFollowUp(v => {
                   const next = !v;
-                  if (next) {
-                    // Turning Follow Up on → default Interested to YES if it isn't already
-                    // (NO is mutually exclusive with Follow Up, so override that case too)
-                    if (interested !== 'yes') setInterested('yes');
-                  }
+                  if (next && interested !== 'yes') setInterested('yes');
                   return next;
                 });
               }}
               style={{
-                flex: '1 1 200px',
-                alignSelf: 'flex-end',
-                height: '2.85rem',
+                flex: '1 1 200px', alignSelf: 'flex-end', height: '2.85rem',
                 padding: '0 18px', borderRadius: 14, border: 'none',
                 background: wantsFollowUp ? '#F59E0B' : 'rgba(245,158,11,0.10)',
                 color: wantsFollowUp ? '#fff' : '#B45309',
@@ -807,8 +833,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
                 boxShadow: wantsFollowUp ? '0 4px 16px rgba(245,158,11,0.35)' : 'none',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 transition: 'all 150ms',
-              }}
-            >
+              }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10"/>
                 <polyline points="12 6 12 12 16 14"/>
@@ -816,40 +841,51 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
               Follow Up
             </button>
           </div>
-
         </div>
 
         {/* Submit */}
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(209,196,240,0.40)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <button
-            type="button"
-            onClick={submitDnp}
-            disabled={saving}
+          <button type="button" onClick={submitDnp} disabled={saving}
             title="Lead didn't pick up — move to Not Picked"
             style={{ width: '100%', height: '2.5rem', borderRadius: 50,
                      border: '1.5px solid #B45309',
                      background: saving ? 'rgba(245,158,11,0.20)' : 'rgba(245,158,11,0.10)',
                      color: '#B45309', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.86rem',
                      cursor: saving ? 'not-allowed' : 'pointer',
-                     letterSpacing: '0.04em' }}
-          >
+                     letterSpacing: '0.04em' }}>
             DNP — Did Not Pick
           </button>
-          <button
-            type="button"
-            onClick={submit}
+          <button type="button" onClick={submit}
             disabled={saving || !(interested === 'yes' || interested === 'no')}
             style={{ width: '100%', height: '2.8rem', borderRadius: 50, border: 'none',
                      background: saving ? 'rgba(5,150,105,0.55)' : '#059669',
                      color: '#fff', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.92rem',
                      cursor: saving ? 'not-allowed' : 'pointer',
                      boxShadow: '0 4px 16px rgba(5,150,105,0.35)',
-                     opacity: (interested === 'yes' || interested === 'no') ? 1 : 0.6 }}
-          >
+                     opacity: (interested === 'yes' || interested === 'no') ? 1 : 0.6 }}>
             {saving ? 'Saving…' : 'Complete Call'}
           </button>
         </div>
       </div>
+
+      {/* Centered overlay above the form for action prompts */}
+      {overlayPhase && (
+        <CenteredOverlay
+          phase={overlayPhase}
+          onCancelExt={onClose}
+          onConfirmExt={confirmExtensionAndStart}
+          starting={recalling}
+          agentReason={agentReason}
+          onAgentReasonChange={setAgentReason}
+          onAgentReasonSubmit={submitAgentReason}
+          delayReason={delayReason}
+          onDelayReasonChange={setDelayReason}
+          onDelayReasonSubmit={submitDelayReason}
+          totalWindow={FORM_WINDOW_SECS}
+          agentAttempts={agentAttempts}
+          retryCap={AGENT_RETRY_CAP}
+        />
+      )}
     </div>
   );
 }
@@ -875,10 +911,7 @@ function RadioRow({ options, value, onChange, wrap }) {
       {options.map(opt => {
         const selected = value === opt.value;
         return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => onChange(opt.value)}
+          <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
             style={{
               padding: '7px 14px', borderRadius: 10,
               border: selected ? 'none' : '1px solid rgba(91,33,182,0.20)',
@@ -887,37 +920,27 @@ function RadioRow({ options, value, onChange, wrap }) {
               fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.78rem',
               cursor: 'pointer', whiteSpace: 'nowrap',
               boxShadow: selected ? '0 2px 8px rgba(91,33,182,0.25)' : 'none',
-            }}
-          >
-            {opt.label}
-          </button>
+            }}>{opt.label}</button>
         );
       })}
     </div>
   );
 }
 
-/* Yellow status card — Tata Tele call lifecycle.
-   Drives caller through Start → Call 1/2 → optional retry → form-fill window. */
-function CallStatusCard({
-  phase, attempt, formTimerSecs, starting, onStart,
-  delayReason, onDelayReasonChange, onDelayReasonSubmit, totalWindow,
-}) {
+/* Yellow status banner — the in-flight call message at the top of the modal.
+   Action prompts (extension check, reason cards, DNP alert) live in the
+   centered overlay rendered separately. */
+function BannerStatus({ phase, formTimerSecs, totalWindow, starting, onStart, customerAttempt }) {
   const cardBase = {
-    marginBottom: 16,
-    padding: '14px 18px',
-    borderRadius: 12,
-    border: '1.5px dashed #F59E0B',
-    background: 'rgba(254,243,199,0.55)',
-    color: '#92400E',
-    fontFamily: 'Outfit, sans-serif',
-    fontSize: '0.86rem',
-    fontWeight: 600,
+    marginBottom: 16, padding: '14px 18px',
+    borderRadius: 12, border: '1.5px dashed #F59E0B',
+    background: 'rgba(254,243,199,0.55)', color: '#92400E',
+    fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', fontWeight: 600,
   };
   const dot = (
     <span style={{
       width: 8, height: 8, borderRadius: '50%', background: '#F59E0B',
-      animation: 'fadeIn 1s ease-in-out infinite alternate', flexShrink: 0,
+      animation: 'pulseDot 1s ease-in-out infinite', flexShrink: 0,
     }} />
   );
   const Row = ({ children }) => (
@@ -928,40 +951,48 @@ function CallStatusCard({
     return (
       <div style={cardBase}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <span>Ready to start auto call. Make sure the Smartflo extension is online.</span>
-          <button
-            type="button"
-            onClick={onStart}
-            disabled={starting}
+          <span>Ready to start auto call.</span>
+          <button type="button" onClick={onStart} disabled={starting}
             style={{
               padding: '8px 18px', borderRadius: 50, border: 'none',
               background: starting ? 'rgba(245,158,11,0.55)' : '#F59E0B',
               color: '#fff', fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '0.84rem',
               cursor: starting ? 'wait' : 'pointer', whiteSpace: 'nowrap',
               boxShadow: starting ? 'none' : '0 4px 12px rgba(245,158,11,0.35)',
-            }}
-          >
+            }}>
             {starting ? 'Calling…' : '▶ Start Auto Call'}
           </button>
         </div>
       </div>
     );
   }
-
-  if (phase === 'calling_1') {
-    return <div style={cardBase}><Row>{dot}<span>First call triggered — ringing the customer…</span></Row></div>;
+  if (phase === 'agent_ringing_1') {
+    return <div style={cardBase}><Row>{dot}<span>Your first call is triggered. Please pick the call.</span></Row></div>;
   }
-  if (phase === 'rejected_1') {
-    return <div style={cardBase}><Row>{dot}<span>Customer rejected the call. Making a second try…</span></Row></div>;
+  if (phase === 'agent_ringing_2') {
+    return (
+      <div style={{ ...cardBase, border: '1.5px dashed #DC2626', background: 'rgba(254,226,226,0.55)', color: '#991B1B' }}>
+        <Row>{dot}<span>Triggering the first call again. If you do not pick this call, your manager will be notified.</span></Row>
+      </div>
+    );
   }
-  if (phase === 'calling_2') {
-    return <div style={cardBase}><Row>{dot}<span>Second call triggered — ringing the customer…</span></Row></div>;
+  if (phase === 'customer_ringing') {
+    const second = customerAttempt === 2;
+    return (
+      <div style={cardBase}>
+        <Row>{dot}<span>{second ? 'Second call is triggered. Calling customer…' : 'Calling customer…'}</span></Row>
+      </div>
+    );
   }
-  if (phase === 'rejected_2') {
-    return <div style={cardBase}><Row>{dot}<span>Customer didn't pick after 2 attempts — moving to Not Picked.</span></Row></div>;
+  if (phase === 'customer_on_call') {
+    return (
+      <div style={{ ...cardBase, border: '1.5px dashed #059669', background: 'rgba(220,252,231,0.55)', color: '#065F46' }}>
+        <Row><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', animation: 'pulseDot 1s ease-in-out infinite', flexShrink: 0 }} /><span>Customer is on the call.</span></Row>
+      </div>
+    );
   }
-  if (phase === 'in_progress') {
-    return <div style={cardBase}><Row>{dot}<span>Customer on the line — speak with them, then hang up to fill the form.</span></Row></div>;
+  if (phase === 'recall_ringing') {
+    return <div style={cardBase}><Row>{dot}<span>Recall is triggered. Please pick the call.</span></Row></div>;
   }
   if (phase === 'form_window') {
     const urgent = formTimerSecs <= 10;
@@ -973,7 +1004,7 @@ function CallStatusCard({
         color: urgent ? '#991B1B' : cardBase.color,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          <Row>{dot}<span>Call ended — please fill the form within {totalWindow} s.</span></Row>
+          <Row>{dot}<span>Customer disconnected the call. Please fill the form within {totalWindow} seconds.</span></Row>
           <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1.05rem', fontWeight: 800, letterSpacing: '0.04em' }}>
             00:{String(formTimerSecs).padStart(2, '0')}
           </span>
@@ -981,53 +1012,187 @@ function CallStatusCard({
       </div>
     );
   }
-  if (phase === 'delay_reason') {
-    return (
-      <div style={{ ...cardBase, border: '1.5px dashed #DC2626', background: 'rgba(254,226,226,0.55)', color: '#991B1B', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ fontWeight: 800, fontSize: '0.92rem' }}>
-          Time's up — what's holding you up?
+  return null;
+}
+
+/* Centered overlay for prompts that block the form: extension check, reason
+   cards, DNP / auto-pause confirmations. */
+function CenteredOverlay({
+  phase, onCancelExt, onConfirmExt, starting,
+  agentReason, onAgentReasonChange, onAgentReasonSubmit,
+  delayReason, onDelayReasonChange, onDelayReasonSubmit, totalWindow,
+  agentAttempts, retryCap,
+}) {
+  const cardStyle = {
+    width: '100%', maxWidth: 440,
+    background: '#fff', borderRadius: 18,
+    boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
+    padding: '26px 24px',
+    fontFamily: 'Outfit, sans-serif',
+    border: '1px solid rgba(147,51,234,0.18)',
+  };
+
+  const wrap = (children) => (
+    <div
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9500,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(15,0,40,0.55)',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        padding: '0 16px',
+        animation: 'fadeIn 200ms ease',
+      }}
+    >
+      {children}
+    </div>
+  );
+
+  if (phase === 'ext_check') {
+    return wrap(
+      <div style={cardStyle}>
+        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#3B0764', textAlign: 'center' }}>
+          Is your SmartFlow extension turned on?
+        </h3>
+        <p style={{ margin: '10px 0 22px', fontSize: '0.86rem', color: 'rgba(91,33,182,0.65)', textAlign: 'center' }}>
+          We'll dial the SmartFlow extension first. If it's off, the call won't connect.
+        </p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" onClick={onCancelExt}
+            style={{
+              flex: 1, height: '2.6rem', borderRadius: 50,
+              border: '1px solid rgba(91,33,182,0.25)', background: 'rgba(237,234,248,0.50)',
+              color: '#5B21B6', fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
+            }}>
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirmExt} disabled={starting}
+            style={{
+              flex: 1.2, height: '2.6rem', borderRadius: 50, border: 'none',
+              background: starting ? 'rgba(5,150,105,0.55)' : '#059669',
+              color: '#fff', fontWeight: 800, fontSize: '0.88rem',
+              cursor: starting ? 'wait' : 'pointer',
+              boxShadow: '0 4px 16px rgba(5,150,105,0.35)',
+            }}>
+            {starting ? 'Calling…' : 'Yes & Proceed'}
+          </button>
         </div>
-        <div style={{ fontSize: '0.78rem', color: 'rgba(153,27,27,0.85)', fontWeight: 600 }}>
-          Type the reason; submitting restarts the {totalWindow}-second timer.
-        </div>
-        <input
-          type="text"
-          value={delayReason}
-          onChange={e => onDelayReasonChange(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') onDelayReasonSubmit(); }}
-          placeholder="e.g. Looking up patient history, asking supervisor…"
-          autoFocus
+      </div>
+    );
+  }
+
+  if (phase === 'agent_reason_card') {
+    return wrap(
+      <div style={cardStyle}>
+        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#991B1B', textAlign: 'center' }}>
+          Why didn't you pick the call?
+        </h3>
+        <p style={{ margin: '10px 0 14px', fontSize: '0.82rem', color: 'rgba(91,33,182,0.65)', textAlign: 'center' }}>
+          Submitting will retrigger the call. Attempt {agentAttempts + 1} of {retryCap}.
+        </p>
+        <textarea
+          value={agentReason}
+          onChange={e => onAgentReasonChange(e.target.value)}
+          placeholder="e.g. SmartFlow not ready, away from desk…"
+          autoFocus rows={3}
           style={{
-            height: '2.4rem', padding: '0 12px', borderRadius: 8,
+            width: '100%', padding: '10px 12px', borderRadius: 10,
             border: '1px solid rgba(220,38,38,0.30)', background: '#fff',
             fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', color: '#3B0764',
+            outline: 'none', resize: 'vertical', boxSizing: 'border-box',
           }}
         />
-        <button
-          type="button"
-          onClick={onDelayReasonSubmit}
-          disabled={!delayReason.trim()}
+        <button type="button" onClick={onAgentReasonSubmit} disabled={!agentReason.trim()}
           style={{
-            alignSelf: 'flex-end',
-            padding: '8px 16px', borderRadius: 8, border: 'none',
-            background: delayReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
-            color: '#fff', fontWeight: 700, fontSize: '0.84rem',
-            cursor: delayReason.trim() ? 'pointer' : 'not-allowed',
-          }}
-        >
-          Go to form → restart {totalWindow}s timer
+            width: '100%', marginTop: 14,
+            height: '2.6rem', borderRadius: 50, border: 'none',
+            background: agentReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
+            color: '#fff', fontWeight: 800, fontSize: '0.88rem',
+            cursor: agentReason.trim() ? 'pointer' : 'not-allowed',
+          }}>
+          Submit Reason & Retry
         </button>
       </div>
     );
   }
+
+  if (phase === 'form_reason_card') {
+    return wrap(
+      <div style={cardStyle}>
+        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#991B1B', textAlign: 'center' }}>
+          Please enter the reason for not completing the form.
+        </h3>
+        <p style={{ margin: '10px 0 14px', fontSize: '0.82rem', color: 'rgba(91,33,182,0.65)', textAlign: 'center' }}>
+          Submitting restarts the {totalWindow}-second timer.
+        </p>
+        <textarea
+          value={delayReason}
+          onChange={e => onDelayReasonChange(e.target.value)}
+          placeholder="e.g. Looking up patient history, asking supervisor…"
+          autoFocus rows={3}
+          style={{
+            width: '100%', padding: '10px 12px', borderRadius: 10,
+            border: '1px solid rgba(220,38,38,0.30)', background: '#fff',
+            fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', color: '#3B0764',
+            outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+          }}
+        />
+        <button type="button" onClick={onDelayReasonSubmit} disabled={!delayReason.trim()}
+          style={{
+            width: '100%', marginTop: 14,
+            height: '2.6rem', borderRadius: 50, border: 'none',
+            background: delayReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
+            color: '#fff', fontWeight: 800, fontSize: '0.88rem',
+            cursor: delayReason.trim() ? 'pointer' : 'not-allowed',
+          }}>
+          Submit Reason
+        </button>
+      </div>
+    );
+  }
+
+  if (phase === 'dnp_alert') {
+    return wrap(
+      <div style={{ ...cardStyle, textAlign: 'center' }}>
+        <div style={{ width: 56, height: 56, margin: '0 auto 14px', borderRadius: '50%', background: 'rgba(245,158,11,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12" y2="16"/>
+          </svg>
+        </div>
+        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#3B0764' }}>
+          The lead has been moved to the 'Did Not Pick' list.
+        </h3>
+        <p style={{ margin: '10px 0 0', fontSize: '0.86rem', color: 'rgba(91,33,182,0.65)' }}>
+          Loading the next lead…
+        </p>
+      </div>
+    );
+  }
+
+  if (phase === 'auto_paused') {
+    return wrap(
+      <div style={{ ...cardStyle, textAlign: 'center' }}>
+        <div style={{ width: 56, height: 56, margin: '0 auto 14px', borderRadius: '50%', background: 'rgba(91,33,182,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+          </svg>
+        </div>
+        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#3B0764' }}>
+          Caller couldn't be reached after {retryCap} attempts.
+        </h3>
+        <p style={{ margin: '10px 0 0', fontSize: '0.86rem', color: 'rgba(91,33,182,0.65)' }}>
+          Lead parked. Loading the next lead…
+        </p>
+      </div>
+    );
+  }
+
   return null;
 }
 
 function SelectField({ value, onChange, options, placeholder }) {
   return (
-    <select
-      value={value}
-      onChange={e => onChange(e.target.value)}
+    <select value={value} onChange={e => onChange(e.target.value)}
       style={{
         width: '100%', height: '2.6rem', padding: '0 12px',
         borderRadius: 10,
@@ -1036,32 +1201,12 @@ function SelectField({ value, onChange, options, placeholder }) {
         fontFamily: 'Outfit,sans-serif', fontSize: '0.88rem',
         color: value ? '#3B0764' : 'rgba(91,33,182,0.50)',
         outline: 'none', boxSizing: 'border-box', cursor: 'pointer',
-      }}
-    >
+      }}>
       <option value="">{placeholder || 'Select…'}</option>
       {options.map(opt => (
         <option key={opt.value} value={opt.value}>{opt.label}</option>
       ))}
     </select>
-  );
-}
-
-function ReadonlyChip({ value, captured }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '6px 12px', borderRadius: 50,
-      background: 'rgba(5,150,105,0.10)', color: '#047857',
-      fontSize: '0.84rem', fontWeight: 600,
-      alignSelf: 'flex-start',
-    }}>
-      {value}
-      {captured && (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="20 6 9 17 4 12"/>
-        </svg>
-      )}
-    </span>
   );
 }
 

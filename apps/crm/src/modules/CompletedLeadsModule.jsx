@@ -87,10 +87,20 @@ export default function CompletedLeadsModule({ jwt }) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/caller/leads/completed', { headers: { Authorization: `Bearer ${jwt}` } });
-      if (!res.ok) throw new Error('Failed to load completed leads.');
-      const data = await res.json();
-      setLeads(data.leads || []);
+      const [completedRes, dnpRes] = await Promise.all([
+        fetch('/api/caller/leads/completed', { headers: { Authorization: `Bearer ${jwt}` } }),
+        fetch('/api/caller/leads/not-picked', { headers: { Authorization: `Bearer ${jwt}` } }),
+      ]);
+      if (!completedRes.ok) throw new Error('Failed to load completed leads.');
+      const completed = (await completedRes.json()).leads || [];
+      const dnp = dnpRes.ok ? ((await dnpRes.json()).leads || []) : [];
+      const seen = new Set();
+      const merged = [...completed, ...dnp].filter(l => {
+        if (seen.has(l.id)) return false;
+        seen.add(l.id);
+        return true;
+      });
+      setLeads(merged);
     } catch (e) {
       setError(e.message || 'Failed to load.');
     } finally {
@@ -134,6 +144,7 @@ export default function CompletedLeadsModule({ jwt }) {
     }
     if (filter === 'second_call' && !isSecondCall(l)) return false;
     if (filter === 'follow_up' && l.last_note_outcome !== 'follow_up') return false;
+    if (filter === 'dnp' && l.last_note_outcome !== 'not_picked') return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       const blob = `${l.full_name || ''} ${l.email || ''} ${l.whatsapp_number || ''}`.toLowerCase();
@@ -149,6 +160,7 @@ export default function CompletedLeadsModule({ jwt }) {
     junk:       leads.filter(l => classifyLead(l) === 'junk').length,
     secondCall: leads.filter(isSecondCall).length,
     followUp:   leads.filter(l => l.last_note_outcome === 'follow_up').length,
+    dnp:        leads.filter(l => l.last_note_outcome === 'not_picked').length,
   };
 
   return (
@@ -179,7 +191,7 @@ export default function CompletedLeadsModule({ jwt }) {
       </div>
 
       {/* Filter cards: click to filter, click again to clear */}
-      <div className="compl-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
+      <div className="compl-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 12 }}>
         {[
           { value: 'hot',         label: 'Hot',       count: stats.hot,        accent: '#B91C1C', tint: 'rgba(220,38,38,0.10)' },
           { value: 'warm',        label: 'Warm',      count: stats.warm,       accent: '#B45309', tint: 'rgba(245,158,11,0.12)' },
@@ -187,6 +199,7 @@ export default function CompletedLeadsModule({ jwt }) {
           { value: 'junk',        label: 'Junk',      count: stats.junk,       accent: '#374151', tint: 'rgba(107,114,128,0.14)' },
           { value: 'follow_up',   label: 'Follow Up', count: stats.followUp,   accent: '#047857', tint: 'rgba(5,150,105,0.12)' },
           { value: 'second_call', label: '2nd Call',  count: stats.secondCall, accent: '#5B21B6', tint: 'rgba(91,33,182,0.10)' },
+          { value: 'dnp',         label: 'DNP',       count: stats.dnp,        accent: '#9333EA', tint: 'rgba(147,51,234,0.12)' },
         ].map(f => {
           const active = filter === f.value;
           return (
@@ -263,11 +276,14 @@ export default function CompletedLeadsModule({ jwt }) {
 function LeadRow({ lead, jwt, expanded, onToggle }) {
   const isFollowUp     = lead.last_note_outcome === 'follow_up';
   const isNotInterested = lead.last_note_outcome === 'not_interested';
+  const isNotPicked    = lead.last_note_outcome === 'not_picked';
   const tag = isFollowUp
     ? { bg: 'rgba(245,158,11,0.15)', fg: '#B45309', label: `Follow-up · ${fmtDate(lead.follow_up_at)}` }
     : isNotInterested
       ? { bg: 'rgba(220,38,38,0.12)',  fg: '#B91C1C', label: `Not Interested · ${fmtDate(lead.last_note_at)}` }
-      : { bg: 'rgba(5,150,105,0.12)',  fg: '#047857', label: `Completed · ${fmtDate(lead.last_note_at)}` };
+      : isNotPicked
+        ? { bg: 'rgba(147,51,234,0.12)', fg: '#7E22CE', label: `DNP · ${fmtDate(lead.last_note_at)}` }
+        : { bg: 'rgba(5,150,105,0.12)',  fg: '#047857', label: `Completed · ${fmtDate(lead.last_note_at)}` };
 
   const quality  = classifyLead(lead);
   const qBadge   = quality ? QUALITY_BADGE[quality] : null;

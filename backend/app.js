@@ -196,6 +196,14 @@ const _callsMigration = pool.query(`
   CREATE INDEX IF NOT EXISTS idx_calls_lead       ON calls (lead_id, started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_calls_caller     ON calls (caller_id, started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_calls_provider_id ON calls (provider, provider_call_id);
+
+  -- Per-leg timestamps so the auto-call state machine can distinguish
+  -- "agent (caller) picked up" from "customer picked up". The legacy
+  -- single 'answered_at' column collapsed both legs.
+  ALTER TABLE calls ADD COLUMN IF NOT EXISTS agent_answered_at    TIMESTAMPTZ;
+  ALTER TABLE calls ADD COLUMN IF NOT EXISTS customer_answered_at TIMESTAMPTZ;
+  ALTER TABLE calls ADD COLUMN IF NOT EXISTS customer_missed_at   TIMESTAMPTZ;
+  ALTER TABLE calls ADD COLUMN IF NOT EXISTS hangup_by            TEXT;
 `);
 if (_callsMigration && typeof _callsMigration.catch === 'function') {
   _callsMigration.catch(err => console.error('[Migration] calls table error:', err.message));
@@ -231,11 +239,14 @@ const _callNotesMigration = pool.query(`
     follow_up_at        TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
-  -- Migrate existing CHECK constraint to allow 'not_interested' + 'not_picked'
-  -- (no-op if already correct). 'not_picked' = caller dialed but lead didn't answer.
+  -- Migrate existing CHECK constraint to allow 'not_interested' + 'not_picked' +
+  -- 'auto_paused' (no-op if already correct).
+  --   not_picked  = caller dialed but lead didn't answer.
+  --   auto_paused = auto-call workflow exhausted the 5-attempt cap on the agent leg
+  --                 (caller's SmartFlow phone never picked); lead parked for retry later.
   ALTER TABLE lead_call_notes DROP CONSTRAINT IF EXISTS lead_call_notes_outcome_check;
   ALTER TABLE lead_call_notes ADD CONSTRAINT lead_call_notes_outcome_check
-    CHECK (outcome IN ('completed','follow_up','not_interested','not_picked'));
+    CHECK (outcome IN ('completed','follow_up','not_interested','not_picked','auto_paused'));
   CREATE INDEX IF NOT EXISTS idx_lead_call_notes_lead   ON lead_call_notes (lead_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_lead_call_notes_caller ON lead_call_notes (caller_id, created_at DESC);
   -- Independent "interested" flag captured alongside the outcome

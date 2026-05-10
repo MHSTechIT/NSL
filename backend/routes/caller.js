@@ -28,11 +28,16 @@ const LEAD_SELECT = `
          l.last_note_outcome, l.last_note_at, l.follow_up_at, l.completed_at,
          l.last_note_interested,
          w.name AS webinar_name,
-         latest_call.id            AS last_call_id,
-         latest_call.status        AS last_call_status,
-         latest_call.duration_sec  AS last_call_duration,
-         latest_call.recording_url AS last_call_recording_url,
-         latest_call.started_at    AS last_call_started_at,
+         latest_call.id                   AS last_call_id,
+         latest_call.status               AS last_call_status,
+         latest_call.duration_sec         AS last_call_duration,
+         latest_call.recording_url        AS last_call_recording_url,
+         latest_call.started_at           AS last_call_started_at,
+         latest_call.agent_answered_at    AS last_call_agent_answered_at,
+         latest_call.customer_answered_at AS last_call_customer_answered_at,
+         latest_call.customer_missed_at   AS last_call_customer_missed_at,
+         latest_call.ended_at             AS last_call_ended_at,
+         latest_call.hangup_by            AS last_call_hangup_by,
          latest_note.id                  AS last_note_id,
          latest_note.sugar_confirmation  AS last_note_sugar_confirmation,
          latest_note.confirmed_range     AS last_note_confirmed_range,
@@ -44,7 +49,9 @@ const LEAD_SELECT = `
     FROM leads l
     LEFT JOIN webinars w ON w.id = l.webinar_id
     LEFT JOIN LATERAL (
-      SELECT id, status, duration_sec, recording_url, started_at
+      SELECT id, status, duration_sec, recording_url, started_at,
+             agent_answered_at, customer_answered_at, customer_missed_at,
+             ended_at, hangup_by
         FROM calls c
        WHERE c.lead_id = l.id
        ORDER BY c.started_at DESC

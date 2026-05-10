@@ -274,6 +274,21 @@ function normalizeWebhookEvent(payload) {
   const caller_number =
     payload.from || payload.caller_id || payload.FromNumber || payload.from_number || null;
 
+  // Tata's hangup payload may indicate which side disconnected the call.
+  // Field names vary across versions / event types — try every plausible key,
+  // then normalize the value to either 'agent' | 'customer' | null. Both raw
+  // and normalized values are returned so the caller can pick.
+  const hangup_by_raw =
+    payload.hangup_by || payload.hangup_cause || payload.disconnected_by ||
+    payload.terminated_by || payload.who_hung_up || payload.end_reason ||
+    payload.hangup_side || payload.hangupBy || null;
+  let hangup_by = null;
+  if (hangup_by_raw) {
+    const v = String(hangup_by_raw).toLowerCase();
+    if (v.includes('customer') || v.includes('callee') || v.includes('client')) hangup_by = 'customer';
+    else if (v.includes('agent') || v.includes('caller')) hangup_by = 'agent';
+  }
+
   return {
     provider_call_id,
     status,
@@ -283,6 +298,8 @@ function normalizeWebhookEvent(payload) {
     custom_lead_id,
     customer_number,
     caller_number,
+    hangup_by,
+    hangup_by_raw,
   };
 }
 
