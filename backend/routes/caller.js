@@ -38,14 +38,24 @@ const LEAD_SELECT = `
          latest_call.customer_missed_at   AS last_call_customer_missed_at,
          latest_call.ended_at             AS last_call_ended_at,
          latest_call.hangup_by            AS last_call_hangup_by,
-         latest_note.id                  AS last_note_id,
-         latest_note.sugar_confirmation  AS last_note_sugar_confirmation,
-         latest_note.confirmed_range     AS last_note_confirmed_range,
-         latest_note.range_for           AS last_note_range_for,
-         latest_note.patient_age         AS last_note_patient_age,
-         latest_note.diet_status         AS last_note_diet_status,
-         latest_note.takes_medicine     AS last_note_takes_medicine,
-         latest_note.note               AS last_note_text
+         latest_note.id                       AS last_note_id,
+         latest_note.sugar_confirmation       AS last_note_sugar_confirmation,
+         latest_note.confirmed_range          AS last_note_confirmed_range,
+         latest_note.range_for                AS last_note_range_for,
+         latest_note.patient_age              AS last_note_patient_age,
+         latest_note.diet_status              AS last_note_diet_status,
+         latest_note.takes_medicine           AS last_note_takes_medicine,
+         latest_note.note                     AS last_note_text,
+         latest_note.hba1c                    AS last_note_hba1c,
+         latest_note.other_languages          AS last_note_other_languages,
+         latest_note.working_professional     AS last_note_working_professional,
+         latest_note.location                 AS last_note_location,
+         latest_note.already_paid             AS last_note_already_paid,
+         latest_note.webinar_attended         AS last_note_webinar_attended,
+         latest_note.available_for_webinar    AS last_note_available_for_webinar,
+         latest_note.next_batch_joining       AS last_note_next_batch_joining,
+         latest_note.interested               AS last_note_interested_in_note,
+         latest_note.follow_up_at             AS last_note_follow_up_at
     FROM leads l
     LEFT JOIN webinars w ON w.id = l.webinar_id
     LEFT JOIN LATERAL (
@@ -59,7 +69,10 @@ const LEAD_SELECT = `
     ) latest_call ON TRUE
     LEFT JOIN LATERAL (
       SELECT id, sugar_confirmation, confirmed_range, range_for,
-             patient_age, diet_status, takes_medicine, note
+             patient_age, diet_status, takes_medicine, note,
+             hba1c, other_languages, working_professional, location,
+             already_paid, webinar_attended, available_for_webinar,
+             next_batch_joining, interested, follow_up_at
         FROM lead_call_notes n
        WHERE n.lead_id = l.id
        ORDER BY n.created_at DESC

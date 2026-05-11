@@ -25,7 +25,6 @@ const AGE_BUCKETS = [
 ];
 
 const RANGE_FOR  = [{ value: 'personal', label: 'Personal' }, { value: 'family', label: 'For Family' }];
-const DIET       = [{ value: 'yes', label: 'Yes' }, { value: 'not_interested', label: 'Not Interested' }];
 const MEDICINE   = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }];
 const YES_NO     = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }];
 
@@ -90,10 +89,10 @@ const AGENT_RETRY_CAP  = 5;   // 5 SmartFlow miss-reason loops before auto-pause
 
 export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [fullName, setFullName]                   = useState(lead.full_name || '');
+  const [phoneNumber]                             = useState(lead.whatsapp_number || '');
   const [confirmedRange, setConfirmedRange]       = useState('');
   const [rangeFor, setRangeFor]                   = useState('personal');
   const [patientAge, setPatientAge]               = useState('');
-  const [dietStatus, setDietStatus]               = useState('');
   const [takesMedicine, setTakesMedicine]         = useState('');
   const [note, setNote]                           = useState('');
   const [hba1c, setHba1c]                             = useState('');
@@ -777,7 +776,6 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     if (!confirmedRange) return 'Pick the patient’s confirmed sugar range.';
     if (!rangeFor)       return 'Pick whether the value is for personal or family use.';
     if (!patientAge)     return 'Pick the patient age range.';
-    if (!dietStatus)     return 'Select diet preference.';
     if (!takesMedicine)  return 'Pick whether the patient takes medicine.';
     return null;
   }
@@ -843,7 +841,6 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           confirmed_range:       confirmedRange || null,
           range_for:             rangeFor,
           patient_age:           patientAge,
-          diet_status:           dietStatus,
           takes_medicine:        takesMedicine || null,
           hba1c:                 hba1c || null,
           other_languages:       otherLanguages || null,
@@ -909,7 +906,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         width: '100%', maxWidth: 920, maxHeight: '92vh',
         background: 'rgba(255,255,255,0.97)',
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        borderRadius: 22,
+        borderRadius: 12,
         border: '1px solid rgba(147,51,234,0.18)',
         boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
         padding: '24px 22px 18px',
@@ -926,7 +923,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
             <button onClick={handleRecall} disabled={recalling} aria-label="Recall lead"
               title={recalling ? 'Calling…' : 'Call this lead again'}
               style={{
-                height: 30, padding: '0 12px', borderRadius: 8, border: 'none',
+                height: 30, padding: '0 12px', borderRadius: 6, border: 'none',
                 background: recalling ? 'rgba(22,163,74,0.50)' : 'linear-gradient(135deg,#16A34A,#15803D)',
                 color: '#fff', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.78rem',
                 cursor: recalling ? 'wait' : 'pointer',
@@ -940,7 +937,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
               {recalling ? 'Calling…' : 'Recall'}
             </button>
             <button onClick={onClose} aria-label="Close"
-              style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'rgba(91,33,182,0.08)', color: '#5B21B6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'rgba(91,33,182,0.08)', color: '#5B21B6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
               </svg>
@@ -949,7 +946,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
         </div>
         {recallToast && (
           <div style={{
-            margin: '-6px 0 12px', padding: '8px 12px', borderRadius: 8,
+            margin: '-6px 0 12px', padding: '8px 12px', borderRadius: 6,
             background: 'rgba(22,163,74,0.10)', border: '1px solid rgba(22,163,74,0.30)',
             color: '#15803D', fontSize: '0.80rem', fontWeight: 600,
           }}>{recallToast}</div>
@@ -968,10 +965,15 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
               placeholder="Patient name" style={inputStyle} maxLength={120} />
           </FieldRow>
 
+          <FieldRow label="2. Phone Number" wide>
+            <input type="text" value={phoneNumber ? '+91 ' + phoneNumber : '—'} readOnly
+              style={{ ...inputStyle, background: 'rgba(237,234,248,0.50)', cursor: 'default' }} />
+          </FieldRow>
+
           <FieldRow
             label={
               <>
-                2. Confirm Range{' '}
+                3. Confirm Range{' '}
                 <span style={{ fontWeight: 500, color: 'rgba(91,33,182,0.65)', fontStyle: 'italic' }}>
                   (registered as <span style={{ fontWeight: 700, color: '#3B0764' }}>{lead.sugar_level || '—'}</span>)
                 </span>
@@ -982,24 +984,20 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
             <RadioRow options={RANGES} value={confirmedRange} onChange={setConfirmedRange} wrap />
           </FieldRow>
 
-          <FieldRow label="3. This value is for" mandatory={detailsMandatory}>
+          <FieldRow label="4. This value is for" mandatory={detailsMandatory}>
             <RadioRow options={RANGE_FOR} value={rangeFor} onChange={setRangeFor} />
           </FieldRow>
 
-          <FieldRow label="4. Patient Age" mandatory={detailsMandatory}>
+          <FieldRow label="5. Patient Age" mandatory={detailsMandatory}>
             <RadioRow options={AGE_BUCKETS} value={patientAge} onChange={setPatientAge} wrap />
           </FieldRow>
 
-          <FieldRow label="5. Diet" mandatory={detailsMandatory}>
-            <RadioRow options={DIET} value={dietStatus} onChange={setDietStatus} />
-          </FieldRow>
-
-          <FieldRow label="6. Medicine" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
-            <RadioRow options={MEDICINE} value={takesMedicine} onChange={setTakesMedicine} />
-          </FieldRow>
-
-          <FieldRow label="7. HbA1c" hint="(optional)">
+          <FieldRow label="6. HbA1c" hint="(optional)">
             <RadioRow options={HBA1C} value={hba1c} onChange={setHba1c} wrap />
+          </FieldRow>
+
+          <FieldRow label="7. Medicine" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
+            <RadioRow options={MEDICINE} value={takesMedicine} onChange={setTakesMedicine} />
           </FieldRow>
 
           <FieldRow label="8. Other Languages" hint="(optional)">
@@ -1036,7 +1034,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
               placeholder="Anything noteworthy from the conversation…" rows={3}
               style={{
                 width: '100%', padding: '10px 12px',
-                borderRadius: 10, border: '1px solid rgba(209,196,240,0.7)',
+                borderRadius: 6, border: '1px solid rgba(209,196,240,0.7)',
                 background: 'rgba(237,234,248,0.30)',
                 fontFamily: 'Outfit,sans-serif', fontSize: '0.86rem', color: '#3B0764',
                 outline: 'none', resize: 'vertical', boxSizing: 'border-box',
@@ -1051,7 +1049,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           )}
 
           {error && (
-            <div className="lcn-wide" style={{ background: 'rgba(254,242,242,0.95)', border: '1px solid rgba(248,113,113,0.4)', borderRadius: 10, padding: '8px 12px', marginTop: 6 }}>
+            <div className="lcn-wide" style={{ background: 'rgba(254,242,242,0.95)', border: '1px solid rgba(248,113,113,0.4)', borderRadius: 6, padding: '8px 12px', marginTop: 6 }}>
               <p style={{ fontSize: '0.80rem', color: '#DC2626', margin: 0 }}>⚠ {error}</p>
             </div>
           )}
@@ -1061,11 +1059,11 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
               <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.74rem', color: '#3B0764', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 Interested <span style={{ color: '#DC2626', marginLeft: 2 }}>*</span>
               </span>
-              <div style={{ display: 'flex', background: 'rgba(237,234,248,0.50)', border: '1px solid rgba(209,196,240,0.7)', borderRadius: 14, padding: 4, gap: 4 }}>
+              <div style={{ display: 'flex', background: 'rgba(237,234,248,0.50)', border: '1px solid rgba(209,196,240,0.7)', borderRadius: 8, padding: 4, gap: 4 }}>
                 <button type="button"
                   onClick={() => setInterested(interested === 'yes' ? '' : 'yes')}
                   style={{
-                    flex: 1, padding: '10px 14px', borderRadius: 10, border: 'none',
+                    flex: 1, padding: '10px 14px', borderRadius: 6, border: 'none',
                     background: interested === 'yes' ? '#10B981' : 'transparent',
                     color: interested === 'yes' ? '#fff' : 'rgba(91,33,182,0.65)',
                     fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.86rem',
@@ -1080,7 +1078,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
                     if (turningOn) setWantsFollowUp(false);
                   }}
                   style={{
-                    flex: 1, padding: '10px 14px', borderRadius: 10, border: 'none',
+                    flex: 1, padding: '10px 14px', borderRadius: 6, border: 'none',
                     background: interested === 'no' ? '#DC2626' : 'transparent',
                     color: interested === 'no' ? '#fff' : 'rgba(91,33,182,0.65)',
                     fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.86rem',
@@ -1101,7 +1099,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
               }}
               style={{
                 flex: '1 1 200px', alignSelf: 'flex-end', height: '2.85rem',
-                padding: '0 18px', borderRadius: 14, border: 'none',
+                padding: '0 18px', borderRadius: 8, border: 'none',
                 background: wantsFollowUp ? '#F59E0B' : 'rgba(245,158,11,0.10)',
                 color: wantsFollowUp ? '#fff' : '#B45309',
                 fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.92rem',
@@ -1121,20 +1119,9 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
 
         {/* Submit */}
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(209,196,240,0.40)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <button type="button" onClick={submitDnp} disabled={saving}
-            title="Lead didn't pick up — move to Not Picked"
-            style={{ width: '100%', height: '2.5rem', borderRadius: 50,
-                     border: '1.5px solid #B45309',
-                     background: saving ? 'rgba(245,158,11,0.20)' : 'rgba(245,158,11,0.10)',
-                     color: '#B45309', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.86rem',
-                     cursor: saving ? 'not-allowed' : 'pointer',
-                     letterSpacing: '0.04em' }}>
-            DNP — Did Not Pick
-          </button>
-          {/* Complete Call is gated on customer having actually answered.
-              Until the customer attends the call, this button stays
-              disabled even if every form field is filled. DNP above is the
-              correct path when the customer never picks up. */}
+          {/* DNP button removed from the form per design — manual DNP can still
+              be triggered via submitDnp() from the auto-call state machine.
+              Complete Call is gated on customer having actually answered. */}
           {(() => {
             const interestedSet = interested === 'yes' || interested === 'no';
             const canComplete   = !saving && interestedSet && customerAnsweredOnce;
@@ -1143,7 +1130,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
                 <button type="button" onClick={submit}
                   disabled={!canComplete}
                   title={!customerAnsweredOnce ? 'Waiting for the customer to attend the call…' : undefined}
-                  style={{ width: '100%', height: '2.8rem', borderRadius: 50, border: 'none',
+                  style={{ width: '100%', height: '2.8rem', borderRadius: 8, border: 'none',
                            background: !canComplete ? 'rgba(5,150,105,0.55)' : '#059669',
                            color: '#fff', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.92rem',
                            cursor: canComplete ? 'pointer' : 'not-allowed',
@@ -1204,19 +1191,19 @@ function FieldRow({ label, mandatory, hint, wide, children }) {
 
 function RadioRow({ options, value, onChange, wrap }) {
   return (
-    <div style={{ display: 'flex', flexWrap: wrap ? 'wrap' : 'nowrap', gap: 6 }}>
+    <div style={{ display: 'flex', flexWrap: wrap ? 'wrap' : 'nowrap', gap: 5 }}>
       {options.map(opt => {
         const selected = value === opt.value;
         return (
           <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
             style={{
-              padding: '7px 14px', borderRadius: 10,
+              padding: '5px 10px', borderRadius: 5,
               border: selected ? 'none' : '1px solid rgba(91,33,182,0.20)',
               background: selected ? '#5B21B6' : '#fff',
               color: selected ? '#fff' : 'rgba(91,33,182,0.75)',
-              fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.78rem',
+              fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.72rem',
               cursor: 'pointer', whiteSpace: 'nowrap',
-              boxShadow: selected ? '0 2px 8px rgba(91,33,182,0.25)' : 'none',
+              boxShadow: selected ? '0 2px 6px rgba(91,33,182,0.22)' : 'none',
             }}>{opt.label}</button>
         );
       })}
@@ -1230,7 +1217,7 @@ function RadioRow({ options, value, onChange, wrap }) {
 function BannerStatus({ phase, formTimerSecs, totalWindow, customerAttempt }) {
   const cardBase = {
     marginBottom: 16, padding: '14px 18px',
-    borderRadius: 12, border: '1.5px dashed #F59E0B',
+    borderRadius: 6, border: '1.5px dashed #F59E0B',
     background: 'rgba(254,243,199,0.55)', color: '#92400E',
     fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', fontWeight: 600,
   };
@@ -1316,7 +1303,7 @@ function CenteredOverlay({
 }) {
   const cardStyle = {
     width: '100%', maxWidth: 440,
-    background: '#fff', borderRadius: 18,
+    background: '#fff', borderRadius: 10,
     boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
     padding: '26px 24px',
     fontFamily: 'Outfit, sans-serif',
@@ -1351,7 +1338,7 @@ function CenteredOverlay({
         <div style={{ display: 'flex', gap: 10 }}>
           <button type="button" onClick={onCancelExt}
             style={{
-              flex: 1, height: '2.6rem', borderRadius: 50,
+              flex: 1, height: '2.6rem', borderRadius: 6,
               border: '1px solid rgba(91,33,182,0.25)', background: 'rgba(237,234,248,0.50)',
               color: '#5B21B6', fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
             }}>
@@ -1359,7 +1346,7 @@ function CenteredOverlay({
           </button>
           <button type="button" onClick={onConfirmExt} disabled={starting}
             style={{
-              flex: 1.2, height: '2.6rem', borderRadius: 50, border: 'none',
+              flex: 1.2, height: '2.6rem', borderRadius: 6, border: 'none',
               background: starting ? 'rgba(5,150,105,0.55)' : '#059669',
               color: '#fff', fontWeight: 800, fontSize: '0.88rem',
               cursor: starting ? 'wait' : 'pointer',
@@ -1387,7 +1374,7 @@ function CenteredOverlay({
           placeholder="e.g. SmartFlow not ready, away from desk…"
           autoFocus rows={3}
           style={{
-            width: '100%', padding: '10px 12px', borderRadius: 10,
+            width: '100%', padding: '10px 12px', borderRadius: 6,
             border: '1px solid rgba(220,38,38,0.30)', background: '#fff',
             fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', color: '#3B0764',
             outline: 'none', resize: 'vertical', boxSizing: 'border-box',
@@ -1396,7 +1383,7 @@ function CenteredOverlay({
         <button type="button" onClick={onAgentReasonSubmit} disabled={!agentReason.trim()}
           style={{
             width: '100%', marginTop: 14,
-            height: '2.6rem', borderRadius: 50, border: 'none',
+            height: '2.6rem', borderRadius: 8, border: 'none',
             background: agentReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
             color: '#fff', fontWeight: 800, fontSize: '0.88rem',
             cursor: agentReason.trim() ? 'pointer' : 'not-allowed',
@@ -1422,7 +1409,7 @@ function CenteredOverlay({
           placeholder="e.g. Looking up patient history, asking supervisor…"
           autoFocus rows={3}
           style={{
-            width: '100%', padding: '10px 12px', borderRadius: 10,
+            width: '100%', padding: '10px 12px', borderRadius: 6,
             border: '1px solid rgba(220,38,38,0.30)', background: '#fff',
             fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', color: '#3B0764',
             outline: 'none', resize: 'vertical', boxSizing: 'border-box',
@@ -1431,7 +1418,7 @@ function CenteredOverlay({
         <button type="button" onClick={onDelayReasonSubmit} disabled={!delayReason.trim()}
           style={{
             width: '100%', marginTop: 14,
-            height: '2.6rem', borderRadius: 50, border: 'none',
+            height: '2.6rem', borderRadius: 8, border: 'none',
             background: delayReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
             color: '#fff', fontWeight: 800, fontSize: '0.88rem',
             cursor: delayReason.trim() ? 'pointer' : 'not-allowed',
@@ -1486,7 +1473,7 @@ function SelectField({ value, onChange, options, placeholder }) {
     <select value={value} onChange={e => onChange(e.target.value)}
       style={{
         width: '100%', height: '2.6rem', padding: '0 12px',
-        borderRadius: 10,
+        borderRadius: 6,
         border: '1px solid rgba(209,196,240,0.8)',
         background: 'rgba(237,234,248,0.30)',
         fontFamily: 'Outfit,sans-serif', fontSize: '0.88rem',
@@ -1509,7 +1496,7 @@ const fieldLabelStyle = {
 
 const inputStyle = {
   width: '100%', height: '2.6rem', padding: '0 12px',
-  borderRadius: 10,
+  borderRadius: 6,
   border: '1px solid rgba(209,196,240,0.8)',
   background: 'rgba(237,234,248,0.30)',
   fontFamily: 'Outfit,sans-serif', fontSize: '0.88rem',

@@ -51,6 +51,20 @@ const AGE_LABEL = {
 
 const DIET_LABEL    = { yes: 'Yes', not_interested: 'Not Interested' };
 const MEDICINE_LABEL = { yes: 'Yes', no: 'No' };
+const YES_NO_LABEL  = { yes: 'Yes', no: 'No' };
+const HBA1C_LABEL   = {
+  'gt_7_5':     'HbA1c > 7.5',
+  '6_5_to_7_5': 'HbA1c 6.5 – 7.5',
+  '5_7_to_6_5': 'HbA1c 5.7 – 6.5',
+};
+
+// Resolve a stored value through an optional label map, falling back to '—' for
+// missing / empty values so the expanded card has a consistent shape.
+function valOrDash(v, map) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (map && map[v]) return map[v];
+  return v;
+}
 
 function fmtDate(iso) {
   if (!iso) return '—';
@@ -348,27 +362,72 @@ function LeadRow({ lead, jwt, expanded, onToggle }) {
       </div>
 
       {expanded && (
-        <div style={{ padding: '6px 18px 18px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, fontFamily: 'Outfit, sans-serif', background: 'rgba(237,234,248,0.30)' }}>
-          <DetailGroup title="Call notes">
-            <Detail label="Range confirmed" value={
+        <div style={{ padding: '6px 18px 18px', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, fontFamily: 'Outfit, sans-serif', background: 'rgba(237,234,248,0.30)' }}>
+          {/* LEFT — every form field, in the same order as the call-note form */}
+          <DetailGroup title="Call details">
+            <Detail label="3. Confirm Range" value={
               lead.last_note_sugar_confirmation === 'same'
                 ? `Same as registered (${lead.sugar_level || '—'})`
-                : (RANGE_LABEL[lead.last_note_confirmed_range] || '—')
+                : valOrDash(lead.last_note_confirmed_range, RANGE_LABEL)
             } />
-            <Detail label="For"           value={lead.last_note_range_for === 'family' ? 'Family' : (lead.last_note_range_for ? 'Personal' : '—')} />
-            <Detail label="Patient age"   value={AGE_LABEL[lead.last_note_patient_age] || '—'} />
-            <Detail label="Diet"          value={DIET_LABEL[lead.last_note_diet_status] || '—'} />
-            <Detail label="On medicine"   value={MEDICINE_LABEL[lead.last_note_takes_medicine] || '—'} />
-            {lead.last_note_text && (
-              <div style={{ marginTop: 6, padding: '8px 10px', background: '#fff', borderRadius: 8, fontSize: '0.82rem', color: '#3B0764', whiteSpace: 'pre-wrap' }}>
-                {lead.last_note_text}
-              </div>
+            <Detail label="4. This value is for" value={
+              lead.last_note_range_for === 'family' ? 'Family'
+              : lead.last_note_range_for === 'personal' ? 'Personal'
+              : '—'
+            } />
+            <Detail label="5. Patient age"           value={valOrDash(lead.last_note_patient_age, AGE_LABEL)} />
+            <Detail label="6. HbA1c"                 value={valOrDash(lead.last_note_hba1c, HBA1C_LABEL)} />
+            <Detail label="7. Medicine"              value={valOrDash(lead.last_note_takes_medicine, MEDICINE_LABEL)} />
+            <Detail label="8. Other Languages"       value={valOrDash(lead.last_note_other_languages, YES_NO_LABEL)} />
+            <Detail label="9. Working Professional"  value={valOrDash(lead.last_note_working_professional)} />
+            <Detail label="10. Location"             value={valOrDash(lead.last_note_location)} />
+            <Detail label="11. Already Paid"         value={valOrDash(lead.last_note_already_paid, YES_NO_LABEL)} />
+            <Detail label="12. Webinar Attended"     value={valOrDash(lead.last_note_webinar_attended, YES_NO_LABEL)} />
+            <Detail label="13. Available for Webinar" value={valOrDash(lead.last_note_available_for_webinar, YES_NO_LABEL)} />
+            <Detail label="14. Next Batch Joining"   value={valOrDash(lead.last_note_next_batch_joining, YES_NO_LABEL)} />
+            {/* Diet — kept for old data only (the field was removed from the form). */}
+            {lead.last_note_diet_status && (
+              <Detail label="Diet (legacy)" value={DIET_LABEL[lead.last_note_diet_status] || lead.last_note_diet_status} />
             )}
+
+            {/* 15. Note */}
+            <div style={{ marginTop: 8 }}>
+              <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.70rem', fontWeight: 600, color: 'rgba(91,33,182,0.55)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                15. Note
+              </span>
+              <div style={{ marginTop: 4, padding: '8px 10px', background: '#fff', borderRadius: 6, fontSize: '0.82rem', color: '#3B0764', whiteSpace: 'pre-wrap', minHeight: 32 }}>
+                {lead.last_note_text || <span style={{ color: 'rgba(91,33,182,0.40)', fontStyle: 'italic' }}>No note added.</span>}
+              </div>
+            </div>
+
+            {/* Interested verdict — colored badge */}
+            {(() => {
+              const v = lead.last_note_interested_in_note || lead.last_note_interested;
+              const badge = v === 'yes'
+                ? { bg: 'rgba(16,185,129,0.15)', fg: '#047857', label: 'Interested · YES' }
+                : v === 'no'
+                  ? { bg: 'rgba(220,38,38,0.12)', fg: '#B91C1C', label: 'Interested · NO' }
+                  : { bg: 'rgba(91,33,182,0.08)', fg: 'rgba(91,33,182,0.55)', label: 'Interested · —' };
+              return (
+                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: 6, fontSize: '0.74rem', fontWeight: 700, background: badge.bg, color: badge.fg }}>
+                    {badge.label}
+                  </span>
+                  {lead.last_note_follow_up_at && (
+                    <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: 6, fontSize: '0.74rem', fontWeight: 600, background: 'rgba(245,158,11,0.15)', color: '#B45309' }}>
+                      Follow-up · {fmtDate(lead.last_note_follow_up_at)}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </DetailGroup>
-          <DetailGroup title="Last call">
-            <Detail label="Status"    value={lead.last_call_status || '—'} />
-            <Detail label="Duration"  value={dur || '—'} />
-            <Detail label="Started"   value={fmtDate(lead.last_call_started_at)} />
+
+          {/* RIGHT — last-call summary */}
+          <DetailGroup title="Call info">
+            <Detail label="Status"   value={lead.last_call_status || '—'} />
+            <Detail label="Duration" value={dur || '—'} />
+            <Detail label="Started"  value={fmtDate(lead.last_call_started_at)} />
           </DetailGroup>
         </div>
       )}
