@@ -33,7 +33,6 @@ export default function MissedCallsModule({ jwt }) {
   const [calls, setCalls]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
-  const [search, setSearch]   = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
   const sseRef = useRef(null);
@@ -116,29 +115,15 @@ export default function MissedCallsModule({ jwt }) {
     return () => { es.close(); sseRef.current = null; };
   }, [jwt, fetchCalls]);
 
-  const filtered = calls.filter(c => {
-    if (!search.trim()) return true;
-    const q = search.trim().toLowerCase();
-    const blob = `${c.full_name || ''} ${c.phone || ''} ${c.email || ''}`.toLowerCase();
-    return blob.includes(q);
-  });
+  const filtered = calls;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {/* Search + Sync */}
+      {/* Sync now bar */}
       <div className="bg-white rounded-card shadow-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <div style={{ flex: 1, position: 'relative' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }}>
-              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search missed calls by name or phone…"
-              style={{ width: '100%', height: '2.4rem', padding: '0 12px 0 34px', borderRadius: 6, border: '1px solid rgba(209,196,240,0.7)', background: 'rgba(237,234,248,0.30)', fontFamily: 'Outfit,sans-serif', fontSize: '0.86rem', color: '#3B0764', outline: 'none', boxSizing: 'border-box' }}
-            />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: '0.82rem', color: 'rgba(91,33,182,0.65)', fontFamily: 'Outfit, sans-serif' }}>
+            Pulls fresh missed calls from Tata Smartflo on demand. Auto-refreshes every 2 minutes in the background.
           </div>
           <button
             type="button"
@@ -191,12 +176,10 @@ export default function MissedCallsModule({ jwt }) {
               </svg>
             </div>
             <div style={{ fontWeight: 700, color: '#3B0764', fontSize: '1rem', marginBottom: 6 }}>
-              {calls.length === 0 ? 'No missed calls yet' : 'No matches'}
+              No missed calls yet
             </div>
             <div style={{ color: 'rgba(91,33,182,0.55)', fontSize: '0.85rem', maxWidth: 360, margin: '0 auto' }}>
-              {calls.length === 0
-                ? <>When a customer calls in and isn't picked up, the call will appear here.</>
-                : 'Try clearing the search.'}
+              When a customer calls in and isn't picked up, the call will appear here.
             </div>
           </div>
         ) : (
