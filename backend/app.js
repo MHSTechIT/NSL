@@ -204,6 +204,45 @@ const _callsMigration = pool.query(`
   ALTER TABLE calls ADD COLUMN IF NOT EXISTS customer_answered_at TIMESTAMPTZ;
   ALTER TABLE calls ADD COLUMN IF NOT EXISTS customer_missed_at   TIMESTAMPTZ;
   ALTER TABLE calls ADD COLUMN IF NOT EXISTS hangup_by            TEXT;
+  -- Dedicated caller-phone column — last-10 digits of the inbound number.
+  -- Stored explicitly so the Missed Calls page doesn't need to grep through
+  -- raw_payload's varying field names every render.
+  ALTER TABLE calls ADD COLUMN IF NOT EXISTS caller_phone TEXT;
+  CREATE INDEX IF NOT EXISTS idx_calls_caller_phone ON calls (caller_phone);
+  -- One-time backfill from raw_payload (idempotent — only fills NULL rows).
+  UPDATE calls
+     SET caller_phone = RIGHT(REGEXP_REPLACE(
+           COALESCE(
+             raw_payload->>'caller_id_number',
+             raw_payload->>'client_number',
+             raw_payload->>'from',
+             raw_payload->>'callerIdNumber',
+             raw_payload->>'from_number',
+             raw_payload->>'source',
+             ''
+           ), '\D', '', 'g'), 10)
+   WHERE caller_phone IS NULL
+     AND raw_payload IS NOT NULL;
+
+  -- DID number — last-10 digits of the line the customer dialed IN to.
+  -- Lets the Missed Calls page filter to only the calls that hit THIS
+  -- caller's Tata caller-id / agent number, instead of every account-wide
+  -- unassigned miss.
+  ALTER TABLE calls ADD COLUMN IF NOT EXISTS did_number TEXT;
+  CREATE INDEX IF NOT EXISTS idx_calls_did_number ON calls (did_number);
+  UPDATE calls
+     SET did_number = RIGHT(REGEXP_REPLACE(
+           COALESCE(
+             raw_payload->>'called_number',
+             raw_payload->>'did_number',
+             raw_payload->>'destination_number',
+             raw_payload->>'to',
+             raw_payload->>'to_number',
+             raw_payload->>'destination',
+             ''
+           ), '\D', '', 'g'), 10)
+   WHERE did_number IS NULL
+     AND raw_payload IS NOT NULL;
 `);
 if (_callsMigration && typeof _callsMigration.catch === 'function') {
   _callsMigration.catch(err => console.error('[Migration] calls table error:', err.message));

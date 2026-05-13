@@ -344,7 +344,7 @@ export default function Screen1A() {
           position: 'relative', zIndex: 1,
           width: '100%', minHeight: '3.5rem',
           padding: workshopDateLabel ? '10px 16px' : 0,
-          background: 'linear-gradient(135deg, #16A34A 0%, #15803D 100%)',
+          background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
           border: 'none', borderRadius: 50,
           color: '#fff', fontFamily: 'Outfit, sans-serif',
           fontWeight: 700, fontSize: '1.1rem',

@@ -110,6 +110,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [saving, setSaving]                       = useState(false);
   const [recalling, setRecalling]                 = useState(false);
   const [recallToast, setRecallToast]             = useState('');
+  // DNP button — first press = hang up + redial same lead one more time;
+  // second press = save as not_picked and let the parent advance.
+  const [cutCount, setCutCount]                   = useState(0);
+  const [cuttingCall, setCuttingCall]             = useState(false);
 
   /* ── Auto-call state machine ──────────────────────────────────────────
      States:
@@ -657,6 +661,49 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     setCallPhase('form_window');
   }
 
+  /* DNP — fast-forward when the customer isn't picking up.
+       First press : hang up the current Tata call → immediately redial the
+                     SAME lead (skip the natural ring-timeout wait).
+       Second press: save the lead as "not_picked" and let the parent
+                     advance to the next lead in the auto-queue. */
+  async function handleCutCall() {
+    if (cuttingCall) return;
+    setCuttingCall(true);
+    try {
+      if (cutCount === 0) {
+        // Step 1 — hang up the live call (best-effort; ignore failure
+        // since Tata may already have ended the leg) then redial.
+        try {
+          await fetch(`/api/caller/leads/${lead.id}/hangup`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${jwt}` },
+          });
+        } catch (_) { /* non-fatal */ }
+        resetCallSignalForNewAttempt();
+        agentAttemptsRef.current = 0;
+        setAgentAttempts(0);
+        customerAttemptRef.current = 1;
+        setCustomerAttempt(1);
+        setFormTimerSecs(0);
+        setRecallToast('');
+        setCallPhase('recall_ringing');
+        await postStartCall();
+        setCutCount(1);
+        setRecallToast('Re-dialled. Press DNP again to mark as Did Not Pick.');
+        setTimeout(() => setRecallToast(''), 3500);
+      } else {
+        // Step 2 — caller has decided this lead isn't picking up. Save as
+        // not_picked; the parent's onSaved auto-advances to the next lead.
+        await triggerDnp();
+      }
+    } catch (e) {
+      setRecallToast(e?.message || 'DNP failed');
+      setTimeout(() => setRecallToast(''), 3500);
+    } finally {
+      setCuttingCall(false);
+    }
+  }
+
   /* Manual Recall — caller chose to redial from inside the form window. */
   async function handleRecall() {
     if (recalling) return;
@@ -927,6 +974,31 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
             <h2 style={{ fontWeight: 700, fontSize: '1.05rem', color: '#3B0764', margin: 0 }}>Fill up call details</h2>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={handleCutCall}
+              disabled={cuttingCall}
+              aria-label={cutCount === 0 ? 'DNP — redial' : 'DNP — mark and move on'}
+              title={cutCount === 0
+                ? 'DNP — hang up and try this lead one more time'
+                : 'DNP — mark as Did Not Pick and move to the next lead'}
+              style={{
+                height: 30, padding: '0 12px', borderRadius: 6, border: 'none',
+                background: cuttingCall
+                  ? 'rgba(220,38,38,0.55)'
+                  : 'linear-gradient(135deg,#DC2626,#B91C1C)',
+                color: '#fff', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.78rem',
+                cursor: cuttingCall ? 'wait' : 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                boxShadow: cuttingCall ? 'none' : '0 2px 8px rgba(220,38,38,0.35)',
+                whiteSpace: 'nowrap',
+              }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                {/* Phone hang-up icon (rotated phone) */}
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" transform="rotate(135 12 12)"/>
+                <line x1="2" y1="22" x2="22" y2="2"/>
+              </svg>
+              {cuttingCall ? 'DNP…' : 'DNP'}
+            </button>
             <button onClick={handleRecall} disabled={recalling} aria-label="Recall lead"
               title={recalling ? 'Calling…' : 'Call this lead again'}
               style={{

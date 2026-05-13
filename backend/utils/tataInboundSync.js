@@ -58,6 +58,8 @@ async function syncOnce({ lookbackMinutes = 30 } = {}) {
           'SELECT id FROM calls WHERE provider_call_id = $1 LIMIT 1',
           [n.provider_call_id]
         );
+        const callerPhone10 = n.phone10 && n.phone10.length === 10 ? n.phone10 : null;
+        const didNumber10   = n.to_did   && n.to_did.length   === 10 ? n.to_did   : null;
         if (existing.rows.length > 0) {
           await pool.query(
             `UPDATE calls
@@ -68,6 +70,8 @@ async function syncOnce({ lookbackMinutes = 30 } = {}) {
                     lead_id       = COALESCE(lead_id, $6),
                     caller_id     = COALESCE(caller_id, $7),
                     raw_payload   = $8,
+                    caller_phone  = COALESCE(caller_phone, $9),
+                    did_number    = COALESCE(did_number, $10),
                     direction     = 'inbound',
                     updated_at    = NOW()
               WHERE id = $1`,
@@ -80,15 +84,17 @@ async function syncOnce({ lookbackMinutes = 30 } = {}) {
               leadId,
               callerUserId,
               n.raw_payload,
+              callerPhone10,
+              didNumber10,
             ]
           );
         } else {
           await pool.query(
             `INSERT INTO calls
                (lead_id, caller_id, provider_call_id, direction, status,
-                duration_sec, recording_url, started_at, raw_payload)
+                duration_sec, recording_url, started_at, raw_payload, caller_phone, did_number)
              VALUES ($1, $2, $3, 'inbound', 'missed', $4, $5,
-                     COALESCE($6::timestamptz, NOW()), $7)`,
+                     COALESCE($6::timestamptz, NOW()), $7, $8, $9)`,
             [
               leadId,
               callerUserId,
@@ -97,6 +103,8 @@ async function syncOnce({ lookbackMinutes = 30 } = {}) {
               n.recording_url,
               n.started_at ? new Date(n.started_at).toISOString() : null,
               n.raw_payload,
+              callerPhone10,
+              didNumber10,
             ]
           );
           upserted++;

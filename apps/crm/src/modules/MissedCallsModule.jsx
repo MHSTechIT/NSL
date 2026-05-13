@@ -30,9 +30,10 @@ const STATUS_BADGE = {
 };
 
 export default function MissedCallsModule({ jwt }) {
-  const [calls, setCalls]     = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
+  const [calls, setCalls]         = useState([]);
+  const [filteredDids, setDids]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
   const sseRef = useRef(null);
@@ -81,6 +82,7 @@ export default function MissedCallsModule({ jwt }) {
       if (!res.ok) throw new Error('Failed to load missed calls.');
       const data = await res.json();
       setCalls(data.calls || []);
+      setDids(Array.isArray(data.filtered_dids) ? data.filtered_dids : []);
     } catch (e) {
       setError(e.message || 'Failed to load.');
     } finally {
@@ -154,6 +156,42 @@ export default function MissedCallsModule({ jwt }) {
         )}
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
+
+      {/* Filter scope hint */}
+      {filteredDids.length > 0 ? (
+        <div style={{
+          background: 'rgba(237,234,248,0.50)',
+          border: '1px solid rgba(139,92,246,0.20)',
+          borderRadius: 10, padding: '10px 14px',
+          fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem',
+          color: 'rgba(91,33,182,0.85)',
+        }}>
+          Showing calls to your number{filteredDids.length > 1 ? 's' : ''}:{' '}
+          {filteredDids.map(d => (
+            <span key={d} style={{
+              display: 'inline-block', marginLeft: 6,
+              padding: '2px 8px', borderRadius: 50,
+              background: 'rgba(91,33,182,0.10)',
+              fontWeight: 700, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem',
+            }}>
+              +91 {d}
+            </span>
+          ))}
+          {' '}<span style={{ color: 'rgba(91,33,182,0.55)' }}>
+            (set in Admin → Users → your Caller ID)
+          </span>
+        </div>
+      ) : (
+        <div style={{
+          background: 'rgba(254,243,199,0.50)',
+          border: '1px solid rgba(217,119,6,0.25)',
+          borderRadius: 10, padding: '10px 14px',
+          fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem',
+          color: '#92400E',
+        }}>
+          ⚠ No Caller ID configured for your account. Ask an admin to set your <b>Caller ID</b> in Users → Edit, otherwise only calls already linked to your leads appear here.
+        </div>
+      )}
 
       {error && (
         <div style={{ background: 'rgba(254,242,242,0.9)', border: '1px solid rgba(248,113,113,0.4)', borderRadius: 6, padding: '12px 16px' }}>

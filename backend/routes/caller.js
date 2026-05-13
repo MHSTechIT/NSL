@@ -301,10 +301,22 @@ router.get('/leads/events', (req, res) => {
    Sorted newest-first so fresh missed calls always appear at the top. */
 router.get('/calls/missed-inbound', async (req, res) => {
   try {
+    // Look up this caller's own Tata numbers (last-10) — we filter the
+    // unassigned-missed bucket to only those that hit one of these DIDs.
+    // Without this, every caller saw every missed call across the org.
+    const { rows: meRows } = await pool.query(
+      `SELECT
+         RIGHT(REGEXP_REPLACE(COALESCE(tata_caller_id, ''),    '\\D', '', 'g'), 10) AS caller_did,
+         RIGHT(REGEXP_REPLACE(COALESCE(tata_agent_number, ''), '\\D', '', 'g'), 10) AS agent_did
+         FROM crm_users WHERE id = $1`,
+      [req.caller.id]
+    );
+    const myDids = [meRows[0]?.caller_did, meRows[0]?.agent_did].filter(d => d && d.length === 10);
+
     const { rows } = await pool.query(
       `SELECT c.id, c.lead_id, c.caller_id, c.provider_call_id, c.status,
               c.direction, c.started_at, c.ended_at, c.duration_sec, c.recording_url,
-              c.hangup_by, c.raw_payload,
+              c.hangup_by, c.raw_payload, c.caller_phone, c.did_number,
               l.full_name AS lead_full_name,
               l.whatsapp_number AS lead_phone,
               l.email AS lead_email,
@@ -312,7 +324,10 @@ router.get('/calls/missed-inbound', async (req, res) => {
          FROM calls c
          LEFT JOIN leads l ON l.id = c.lead_id
         WHERE c.direction = 'inbound'
-          AND (c.caller_id = $1 OR c.caller_id IS NULL)
+          AND (
+            c.caller_id = $1
+            OR (c.caller_id IS NULL AND c.did_number = ANY($2::text[]))
+          )
           AND (
             c.status IN ('missed','failed')
             OR (c.status = 'ringing' AND c.started_at < NOW() - INTERVAL '2 minutes')
@@ -320,14 +335,18 @@ router.get('/calls/missed-inbound', async (req, res) => {
           )
         ORDER BY c.started_at DESC NULLS LAST
         LIMIT 200`,
-      [req.caller.id]
+      [req.caller.id, myDids]
     );
 
-    // Best-effort "caller phone" from raw_payload for unknown rows
+    // Caller phone — prefer the dedicated calls.caller_phone column; if NULL
+    // (very old rows that pre-date the column), fall back to the lead's phone,
+    // then to a best-effort scrape of raw_payload aliases.
     const out = rows.map(r => {
       const raw = r.raw_payload || {};
-      const phoneRaw = r.lead_phone
-        || raw.caller_id_number || raw.callerIdNumber || raw.from || raw.From || null;
+      const phoneRaw = r.caller_phone
+        || r.lead_phone
+        || raw.caller_id_number || raw.client_number || raw.callerIdNumber
+        || raw.from || raw.From || raw.from_number || raw.source || null;
       const phone10 = phoneRaw ? String(phoneRaw).replace(/\D/g, '').slice(-10) : null;
       return {
         id:              r.id,
@@ -344,7 +363,13 @@ router.get('/calls/missed-inbound', async (req, res) => {
         hangup_by:       r.hangup_by,
       };
     });
-    res.json({ calls: out, total: out.length });
+    res.json({
+      calls: out,
+      total: out.length,
+      // Surface which DIDs are being filtered on so the UI can show the
+      // caller what numbers their missed-calls list is scoped to.
+      filtered_dids: myDids,
+    });
   } catch (err) {
     console.error('caller/calls/missed-inbound error:', err.message);
     res.status(500).json({ error: 'Failed to fetch missed inbound calls' });

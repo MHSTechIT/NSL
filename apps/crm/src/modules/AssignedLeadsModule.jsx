@@ -307,37 +307,11 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {/* Auto-dial control bar */}
-      <div className="bg-white rounded-card shadow-card" style={{
-        padding: '12px 16px', display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
-        fontFamily: 'Outfit, sans-serif',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: autoActive ? 'rgba(16,185,129,0.12)' : 'rgba(91,33,182,0.08)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={autoActive ? '#059669' : '#5B21B6'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="5 3 19 12 5 21 5 3"/>
-            </svg>
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#3B0764' }}>
-              {autoActive ? 'Auto-call running' : 'Auto-call mode'}
-            </div>
-            <div style={{ fontSize: '0.74rem', color: 'rgba(91,33,182,0.55)' }}>
-              {autoActive
-                ? `Lead ${Math.min(autoIndex + 1, autoTotal)} of ${autoTotal}${currentAutoLead ? ` · ${currentAutoLead.full_name || '—'}` : ''}`
-                : `Calls every lead in this list back-to-back, with a 5-second pause between calls`}
-            </div>
-            {autoError && (
-              <div style={{ fontSize: '0.72rem', color: '#DC2626', marginTop: 2 }}>⚠ {autoError}</div>
-            )}
-          </div>
-        </div>
-
+      {/* Auto-dial button — standalone, no card chrome */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, fontFamily: 'Outfit, sans-serif', flexWrap: 'wrap' }}>
+        {autoError && (
+          <div style={{ fontSize: '0.74rem', color: '#DC2626' }}>⚠ {autoError}</div>
+        )}
         {!autoActive ? (
           <button
             onClick={startAutoMode}
