@@ -1066,15 +1066,29 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
               </svg>
               {cuttingCall ? 'DNP…' : 'DNP'}
             </button>
-            <button onClick={handleRecall} disabled={recalling} aria-label="Recall lead"
-              title={recalling ? 'Calling…' : 'Call this lead again'}
+            {/* Recall is only actionable during the 30-s form_window — i.e.,
+                customer disconnected and the caller has the timer running.
+                During ringing / on-call phases, recalling would interrupt a
+                live or in-progress call, so the button is greyed out. */}
+            <button
+              onClick={handleRecall}
+              disabled={recalling || callPhase !== 'form_window' || formTimerSecs <= 0}
+              aria-label="Recall lead"
+              title={recalling
+                ? 'Calling…'
+                : (callPhase === 'form_window' && formTimerSecs > 0
+                    ? 'Call this lead again'
+                    : 'Available only after the customer disconnects and the form timer is running')}
               style={{
                 height: 30, padding: '0 12px', borderRadius: 6, border: 'none',
-                background: recalling ? 'rgba(22,163,74,0.50)' : 'linear-gradient(135deg,#16A34A,#15803D)',
+                background: (recalling || callPhase !== 'form_window' || formTimerSecs <= 0)
+                  ? 'rgba(22,163,74,0.35)'
+                  : 'linear-gradient(135deg,#16A34A,#15803D)',
                 color: '#fff', fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '0.78rem',
-                cursor: recalling ? 'wait' : 'pointer',
+                cursor: (recalling || callPhase !== 'form_window' || formTimerSecs <= 0) ? 'not-allowed' : 'pointer',
+                opacity: (callPhase !== 'form_window' || formTimerSecs <= 0) && !recalling ? 0.6 : 1,
                 display: 'inline-flex', alignItems: 'center', gap: 5,
-                boxShadow: recalling ? 'none' : '0 2px 8px rgba(22,163,74,0.35)',
+                boxShadow: (recalling || callPhase !== 'form_window' || formTimerSecs <= 0) ? 'none' : '0 2px 8px rgba(22,163,74,0.35)',
                 whiteSpace: 'nowrap',
               }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
