@@ -337,15 +337,6 @@ export default function Screen1A() {
   /* ── Shared: CTA button (used in both layouts) ── */
   const ctaButton = (
     <div style={{ position: 'relative' }}>
-      {/* Back glow — pure CSS keyframes so it can't be disabled by JS engine quirks */}
-      <div
-        className="cta-pulse-glow"
-        style={{ position: 'absolute', inset: -8, borderRadius: 50, background: 'rgba(34,197,94,0.70)', filter: 'blur(24px)', zIndex: 0, pointerEvents: 'none' }}
-      />
-      <div
-        className="cta-pulse-glow"
-        style={{ position: 'absolute', inset: 0, borderRadius: 50, background: 'rgba(134,239,172,0.65)', filter: 'blur(12px)', zIndex: 0, pointerEvents: 'none' }}
-      />
       <button
         onClick={() => { stopTick(); trackEvent('cta_clicked', state.webinarConfig?.next_webinar_at); setExpanded(true); }}
         className="cta-pulse"

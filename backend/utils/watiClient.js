@@ -52,6 +52,15 @@ async function sendTemplate({ phone, templateName, parameters = [], broadcastNam
   if (!isConfigured()) return { ok: false, status: 0, body: null, error: 'WATI_API_KEY not set' };
   if (!phone || !templateName) return { ok: false, status: 0, body: null, error: 'phone and templateName required' };
 
+  // WATI expects parameters as [{ name: "1", value: "..." }, ...] where
+  // `name` is the variable index ("1" maps to {{1}} in the template body).
+  // Accept simple values (strings/numbers) and auto-wrap, OR pre-formatted
+  // objects — pass through.
+  const watiParams = (parameters || []).map((p, i) => {
+    if (p && typeof p === 'object' && 'name' in p) return p; // already shaped
+    return { name: String(i + 1), value: String(p) };
+  });
+
   // WATI wants the destination as digits with country code, no plus.
   const num = String(phone).replace(/\D/g, '');
   const whatsappNumber = num.length === 10 ? `91${num}` : num;
@@ -94,7 +103,7 @@ async function sendTemplate({ phone, templateName, parameters = [], broadcastNam
         body: JSON.stringify({
           template_name:  templateName,
           broadcast_name: broadcastName || templateName,
-          parameters,
+          parameters:     watiParams,
         }),
       });
       const text = await res.text();

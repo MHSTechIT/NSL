@@ -322,13 +322,20 @@ router.put('/settings', async (req, res) => {
 
 /* ── POST /api/admin/settings/test-alert ──
    Triggers an immediate dry-run of the alert scheduler so admin can verify
-   the WATI key + phone are wired up. Body: { source } */
+   the WATI key + phone are wired up. Body: { source }
+   Returns BOTH the leads-alert and wa-link-alert decisions for that source. */
 router.post('/settings/test-alert', async (req, res) => {
   const source = getSource(req);
   try {
     const { runOnce } = require('../utils/leadsAlertScheduler');
     const result = await runOnce();
-    res.json({ ok: true, result: result.find(r => r.source === source) || null });
+    const forSource = result.filter(r => r.source === source);
+    res.json({
+      ok: true,
+      results: forSource,
+      // Back-compat: first result keyed under `result` for older callers.
+      result: forSource[0] || null,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -337,12 +344,18 @@ router.post('/settings/test-alert', async (req, res) => {
 /* ── POST /api/admin/settings/send-test-template ──
    Bypasses all scheduler conditions and fires ONE WATI template to the
    saved phone right now. Used to verify the WATI integration end-to-end.
-   Body: { source, template_name? }. Default template = 'leads_alert'.
+   Body: { source, template_name?, parameters? }
+   - template_name defaults to 'leads_alert'
+   - parameters is an optional array of strings passed as the template
+     body variables (e.g. ['500'] for the {{1}} variable on wa_link_alert).
    Returns the full WATI response so the admin can see whether WATI
    accepted or rejected the call. */
 router.post('/settings/send-test-template', async (req, res) => {
   const source = getSource(req);
   const templateName = (req.body?.template_name || 'leads_alert').trim();
+  const parameters = Array.isArray(req.body?.parameters)
+    ? req.body.parameters.map(v => String(v))
+    : [];
   try {
     const { rows } = await pool.query(
       'SELECT alert_phone_number FROM webinar_config WHERE source = $1',
@@ -356,11 +369,12 @@ router.post('/settings/send-test-template', async (req, res) => {
     if (!wati.isConfigured()) {
       return res.status(503).json({ error: 'WATI_API_KEY is not set in backend env vars.' });
     }
-    const result = await wati.sendTemplate({ phone, templateName });
+    const result = await wati.sendTemplate({ phone, templateName, parameters });
     res.json({
       ok:        result.ok,
       phone,
       template:  templateName,
+      parameters,
       status:    result.status,
       urlUsed:   result.urlUsed,
       body:      result.body,

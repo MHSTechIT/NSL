@@ -126,6 +126,96 @@ async function checkSource(source) {
   return { source, sent: win.name, ok: result.ok, hoursRemaining: hours };
 }
 
+/**
+ * `wa_link_alert` — fires every time the current webinar's lead count
+ * crosses a 50-member bucket (500, 550, 600, … 950) AND no 2nd pending
+ * WhatsApp link is configured yet. Catches admins who forget to schedule
+ * the next link before the active group fills.
+ *
+ * Dedup: each bucket uses a distinct `template_name` in alert_log
+ * (`wa_link_alert_500`, `wa_link_alert_550`, …), so the existing
+ * UNIQUE (webinar_id, template_name) constraint guarantees each bucket
+ * fires exactly once per webinar. The real WATI template sent is always
+ * `wa_link_alert`; the bucket value is passed as parameter {{1}}.
+ */
+const WA_LINK_BUCKET_START = 500;
+const WA_LINK_BUCKET_STEP  = 50;
+const WA_LINK_BUCKET_END   = 950;
+
+async function checkWaLinkAlert(source) {
+  // 1. Read config
+  const { rows: cfgRows } = await pool.query(
+    `SELECT alert_phone_number, pending_whatsapp_link_2, whatsapp_link_swap_at_2
+       FROM webinar_config
+      WHERE source = $1`,
+    [source]
+  );
+  const cfg = cfgRows[0];
+  if (!cfg) return { source, kind: 'wa_link', skipped: 'no_config_row' };
+  if (!cfg.alert_phone_number) return { source, kind: 'wa_link', skipped: 'no_alert_phone' };
+
+  // 2. Gate: skip entirely if the admin already configured a 2nd link.
+  const pending2 = (cfg.pending_whatsapp_link_2 || '').trim();
+  if (pending2) return { source, kind: 'wa_link', skipped: 'pending_link_set' };
+
+  // 3. Find the currently active webinar for this source.
+  const { rows: actRows } = await pool.query(
+    `SELECT id FROM webinars
+      WHERE source = $1 AND is_active = TRUE
+      ORDER BY date_time DESC LIMIT 1`,
+    [source]
+  );
+  const currentWebinarId = actRows[0]?.id || null;
+  if (!currentWebinarId) return { source, kind: 'wa_link', skipped: 'no_active_webinar' };
+
+  // 4. Count leads for that webinar (same source of truth used by link rotation).
+  const { rows: cntRows } = await pool.query(
+    `SELECT COUNT(*)::int AS cnt FROM leads WHERE webinar_id = $1`,
+    [currentWebinarId]
+  );
+  const leadCount = cntRows[0]?.cnt || 0;
+  if (leadCount < WA_LINK_BUCKET_START) {
+    return { source, kind: 'wa_link', skipped: 'below_threshold', count: leadCount };
+  }
+
+  // 5. Highest bucket crossed (capped at 950).
+  const highestBucket = Math.min(
+    WA_LINK_BUCKET_END,
+    Math.floor(leadCount / WA_LINK_BUCKET_STEP) * WA_LINK_BUCKET_STEP
+  );
+
+  // 6. Fire every un-fired bucket from 500 up to highestBucket (in order).
+  const sent = [];
+  for (let b = WA_LINK_BUCKET_START; b <= highestBucket; b += WA_LINK_BUCKET_STEP) {
+    const logName = `wa_link_alert_${b}`;
+    const claim = await pool.query(
+      `INSERT INTO alert_log (webinar_id, source, template_name, sent_to)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (webinar_id, template_name) DO NOTHING
+       RETURNING id`,
+      [currentWebinarId, source, logName, cfg.alert_phone_number]
+    );
+    if (claim.rows.length === 0) continue; // already fired this bucket
+    const result = await wati.sendTemplate({
+      phone:        cfg.alert_phone_number,
+      templateName: 'wa_link_alert',
+      parameters:   [String(b)],
+      broadcastName: 'wa_link_alert',
+    });
+    await pool.query(
+      `UPDATE alert_log SET success = $1, response = $2 WHERE id = $3`,
+      [result.ok, result.body || { error: result.error }, claim.rows[0].id]
+    );
+    sent.push({ bucket: b, ok: result.ok });
+    console.log(`[wa_link_alert:${source}] sent bucket=${b} to ${cfg.alert_phone_number} (count=${leadCount}) ok=${result.ok}`);
+  }
+
+  if (sent.length === 0) {
+    return { source, kind: 'wa_link', skipped: 'all_buckets_already_sent', count: leadCount, highestBucket };
+  }
+  return { source, kind: 'wa_link', sent, count: leadCount };
+}
+
 async function runOnce() {
   const results = [];
   for (const src of SOURCES) {
@@ -142,6 +232,18 @@ async function runOnce() {
       console.error(`[leadsAlert:${src}] error:`, e.message);
       results.push({ source: src, error: e.message });
     }
+
+    // wa_link_alert runs alongside the deadline-based cascade.
+    try {
+      const r = await checkWaLinkAlert(src);
+      results.push(r);
+      if (r.skipped) {
+        console.log(`[wa_link_alert:${src}] skipped — ${r.skipped}${r.count != null ? ` (count=${r.count})` : ''}`);
+      }
+    } catch (e) {
+      console.error(`[wa_link_alert:${src}] error:`, e.message);
+      results.push({ source: src, kind: 'wa_link', error: e.message });
+    }
   }
   return results;
 }
@@ -157,4 +259,4 @@ function startScheduler({ intervalMs = 5 * 60 * 1000 } = {}) {
   console.log(`[leadsAlert] scheduler started — every ${intervalMs / 1000}s`);
 }
 
-module.exports = { startScheduler, runOnce, checkSource };
+module.exports = { startScheduler, runOnce, checkSource, checkWaLinkAlert };
