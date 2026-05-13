@@ -340,11 +340,11 @@ export default function Screen1A() {
       {/* Back glow — pure CSS keyframes so it can't be disabled by JS engine quirks */}
       <div
         className="cta-pulse-glow"
-        style={{ position: 'absolute', inset: -8, borderRadius: 50, background: 'rgba(139,92,246,0.70)', filter: 'blur(24px)', zIndex: 0, pointerEvents: 'none' }}
+        style={{ position: 'absolute', inset: -8, borderRadius: 50, background: 'rgba(34,197,94,0.70)', filter: 'blur(24px)', zIndex: 0, pointerEvents: 'none' }}
       />
       <div
         className="cta-pulse-glow"
-        style={{ position: 'absolute', inset: 0, borderRadius: 50, background: 'rgba(167,139,250,0.65)', filter: 'blur(12px)', zIndex: 0, pointerEvents: 'none' }}
+        style={{ position: 'absolute', inset: 0, borderRadius: 50, background: 'rgba(134,239,172,0.65)', filter: 'blur(12px)', zIndex: 0, pointerEvents: 'none' }}
       />
       <button
         onClick={() => { stopTick(); trackEvent('cta_clicked', state.webinarConfig?.next_webinar_at); setExpanded(true); }}
@@ -353,7 +353,7 @@ export default function Screen1A() {
           position: 'relative', zIndex: 1,
           width: '100%', minHeight: '3.5rem',
           padding: workshopDateLabel ? '10px 16px' : 0,
-          background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
+          background: 'linear-gradient(135deg, #16A34A 0%, #15803D 100%)',
           border: 'none', borderRadius: 50,
           color: '#fff', fontFamily: 'Outfit, sans-serif',
           fontWeight: 700, fontSize: '1.1rem',
