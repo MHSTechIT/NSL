@@ -55,6 +55,17 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
   const [autoError, setAutoError]       = useState('');
   const cooldownTimerRef = useRef(null);
 
+  /* Break picker — opened when caller hits Stop in the cooldown card.
+       breakStep    : null | 'choose' | 'other'   (modal flow)
+       breakInfo    : null | { reason, minutes, message?, endsAt }  (active break)
+       otherMessage / otherMinutes — fields inside the "other" step       */
+  const [breakStep, setBreakStep]       = useState(null);
+  const [breakInfo, setBreakInfo]       = useState(null);
+  const [breakTimeLeft, setBreakTimeLeft] = useState(0);
+  const [otherMessage, setOtherMessage]   = useState('');
+  const [otherMinutes, setOtherMinutes]   = useState(10);
+  const breakTimerRef = useRef(null);
+
   async function triggerCall(lead) {
     const res = await fetch('/api/caller/calls/start', {
       method: 'POST',
@@ -100,6 +111,49 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
     setCooldownLeft(0);
     setAutoError('');
   }
+
+  /* Stop the auto-call AND start a break with a countdown banner. The
+     existing stopAutoMode() guarantees no further calls will trigger
+     until the caller manually presses Start Auto-Call again. */
+  function startBreak(reason, minutes, message = '') {
+    stopAutoMode();
+    const totalSec = Math.max(1, Math.round(minutes * 60));
+    setBreakInfo({
+      reason,
+      minutes,
+      message,
+      endsAt: Date.now() + totalSec * 1000,
+    });
+    setBreakTimeLeft(totalSec);
+    setBreakStep(null);
+    setOtherMessage('');
+    setOtherMinutes(10);
+  }
+  function endBreak() {
+    setBreakInfo(null);
+    setBreakTimeLeft(0);
+    if (breakTimerRef.current) {
+      clearInterval(breakTimerRef.current);
+      breakTimerRef.current = null;
+    }
+  }
+
+  /* Tick down the break countdown every second. */
+  useEffect(() => {
+    if (!breakInfo) return undefined;
+    breakTimerRef.current = setInterval(() => {
+      const remaining = Math.max(0, Math.round((breakInfo.endsAt - Date.now()) / 1000));
+      setBreakTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(breakTimerRef.current);
+        breakTimerRef.current = null;
+      }
+    }, 1000);
+    return () => {
+      if (breakTimerRef.current) clearInterval(breakTimerRef.current);
+      breakTimerRef.current = null;
+    };
+  }, [breakInfo]);
 
   function startAutoMode() {
     if (!leads.length) return;
@@ -556,7 +610,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
                 Skip wait
               </button>
               <button
-                onClick={stopAutoMode}
+                onClick={() => { clearCooldownTimer(); setCooldownLeft(0); setBreakStep('choose'); }}
                 style={{
                   flex: 1, height: '2.5rem', borderRadius: 50,
                   border: '1px solid rgba(220,38,38,0.30)',
@@ -569,6 +623,216 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Break reason picker ── */}
+      {breakStep === 'choose' && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9600,
+            background: 'rgba(15,0,40,0.55)',
+            backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0 16px', fontFamily: 'Outfit, sans-serif',
+          }}
+          onClick={() => setBreakStep(null)}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            width: '100%', maxWidth: 380, background: '#fff', borderRadius: 22,
+            padding: '26px 22px', boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
+          }}>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#3B0764' }}>
+              Stopping the auto-call?
+            </h3>
+            <p style={{ margin: '4px 0 18px', fontSize: '0.80rem', color: 'rgba(91,33,182,0.65)' }}>
+              Pick a reason — your break time will be set automatically.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={() => startBreak('Tea Break', 15)}
+                style={{
+                  height: '3rem', borderRadius: 12, border: '1px solid rgba(180,83,9,0.20)',
+                  background: 'rgba(254,243,199,0.50)', color: '#92400E',
+                  fontWeight: 700, fontSize: '0.92rem', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '0 14px',
+                }}
+              >
+                <span>☕ Tea Break</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(146,64,14,0.75)' }}>15 min</span>
+              </button>
+              <button
+                onClick={() => startBreak('Lunch Break', 45)}
+                style={{
+                  height: '3rem', borderRadius: 12, border: '1px solid rgba(5,150,105,0.25)',
+                  background: 'rgba(209,250,229,0.50)', color: '#065F46',
+                  fontWeight: 700, fontSize: '0.92rem', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '0 14px',
+                }}
+              >
+                <span>🍱 Lunch Break</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(6,95,70,0.75)' }}>45 min</span>
+              </button>
+              <button
+                onClick={() => setBreakStep('other')}
+                style={{
+                  height: '3rem', borderRadius: 12, border: '1px solid rgba(91,33,182,0.25)',
+                  background: 'rgba(237,234,248,0.50)', color: '#5B21B6',
+                  fontWeight: 700, fontSize: '0.92rem', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '0 14px',
+                }}
+              >
+                <span>📝 Other</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(91,33,182,0.75)' }}>Custom</span>
+              </button>
+            </div>
+            <button
+              onClick={() => setBreakStep(null)}
+              style={{
+                width: '100%', marginTop: 14, height: '2.4rem', borderRadius: 8,
+                border: 'none', background: 'transparent', color: 'rgba(91,33,182,0.65)',
+                fontWeight: 600, fontSize: '0.84rem', cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── "Other" reason — custom message + minutes ── */}
+      {breakStep === 'other' && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9600,
+            background: 'rgba(15,0,40,0.55)',
+            backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0 16px', fontFamily: 'Outfit, sans-serif',
+          }}
+          onClick={() => setBreakStep('choose')}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            width: '100%', maxWidth: 380, background: '#fff', borderRadius: 22,
+            padding: '26px 22px', boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
+          }}>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#3B0764' }}>
+              Custom break
+            </h3>
+            <p style={{ margin: '4px 0 14px', fontSize: '0.80rem', color: 'rgba(91,33,182,0.65)' }}>
+              Tell us what you're doing and set how long.
+            </p>
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#3B0764', marginBottom: 4 }}>
+              Reason
+            </label>
+            <textarea
+              value={otherMessage}
+              onChange={e => setOtherMessage(e.target.value)}
+              placeholder="e.g. Quick personal call"
+              rows={2}
+              maxLength={120}
+              style={{
+                width: '100%', padding: '10px 12px', borderRadius: 10,
+                border: '1px solid rgba(91,33,182,0.20)',
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem',
+                color: '#3B0764', outline: 'none', resize: 'vertical',
+                marginBottom: 14, boxSizing: 'border-box',
+              }}
+            />
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#3B0764', marginBottom: 4 }}>
+              Duration (minutes)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={240}
+              value={otherMinutes}
+              onChange={e => setOtherMinutes(Math.max(1, Math.min(240, parseInt(e.target.value, 10) || 1)))}
+              style={{
+                width: '100%', height: '2.6rem', padding: '0 12px', borderRadius: 10,
+                border: '1px solid rgba(91,33,182,0.20)',
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.92rem',
+                color: '#3B0764', outline: 'none', marginBottom: 18, boxSizing: 'border-box',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => setBreakStep('choose')}
+                style={{
+                  flex: 1, height: '2.6rem', borderRadius: 10,
+                  border: '1px solid rgba(91,33,182,0.20)',
+                  background: '#fff', color: '#5B21B6',
+                  fontWeight: 700, fontSize: '0.86rem', cursor: 'pointer',
+                }}
+              >
+                Back
+              </button>
+              <button
+                onClick={() => startBreak(otherMessage.trim() || 'Other', otherMinutes, otherMessage.trim())}
+                disabled={!otherMinutes || otherMinutes < 1}
+                style={{
+                  flex: 1, height: '2.6rem', borderRadius: 10, border: 'none',
+                  background: '#5B21B6', color: '#fff',
+                  fontWeight: 700, fontSize: '0.86rem',
+                  cursor: (otherMinutes >= 1) ? 'pointer' : 'not-allowed',
+                  opacity: (otherMinutes >= 1) ? 1 : 0.5,
+                }}
+              >
+                Start Break
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Active break banner ── */}
+      {breakInfo && (
+        <div style={{
+          position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 9400, background: '#fff', borderRadius: 14,
+          padding: '12px 16px', boxShadow: '0 12px 36px rgba(91,33,182,0.25)',
+          border: '1px solid rgba(91,33,182,0.15)',
+          fontFamily: 'Outfit, sans-serif',
+          display: 'flex', alignItems: 'center', gap: 14, minWidth: 280,
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#3B0764', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                On {breakInfo.reason}
+              </span>
+              <span style={{
+                fontSize: '0.68rem', fontWeight: 700,
+                color: breakTimeLeft > 0 ? '#5B21B6' : '#16A34A',
+                background: breakTimeLeft > 0 ? 'rgba(91,33,182,0.10)' : 'rgba(22,163,74,0.10)',
+                padding: '2px 8px', borderRadius: 50,
+              }}>
+                {breakTimeLeft > 0 ? `${Math.floor(breakTimeLeft / 60)}m ${String(breakTimeLeft % 60).padStart(2, '0')}s` : 'time up'}
+              </span>
+            </div>
+            {breakInfo.message && (
+              <div style={{ fontSize: '0.72rem', color: 'rgba(91,33,182,0.60)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {breakInfo.message}
+              </div>
+            )}
+            <div style={{ fontSize: '0.68rem', color: 'rgba(91,33,182,0.55)', marginTop: 2 }}>
+              Auto-call paused — press <b>Start Auto-Call</b> to resume
+            </div>
+          </div>
+          <button
+            onClick={endBreak}
+            style={{
+              padding: '6px 12px', height: '2.1rem', borderRadius: 8,
+              border: '1px solid rgba(91,33,182,0.20)',
+              background: '#fff', color: '#5B21B6',
+              fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.78rem',
+              cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            End break
+          </button>
         </div>
       )}
     </div>
