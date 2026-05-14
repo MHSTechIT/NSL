@@ -239,22 +239,28 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
     });
   }
 
-  /* Kick off the 5-second card after Complete Call. */
+  /* Kick off the 5-second card after Complete Call.
+
+     Deadline-anchored: each tick computes remaining seconds from Date.now()
+     against a fixed deadline. This survives React StrictMode's double-invoke
+     of state updaters (which would otherwise fire the "prev <= 1" side-effect
+     branch twice — clearing the timer + advancing the call before the full
+     5 s have elapsed). Wall-clock duration is now guaranteed. */
   function startCooldown() {
-    setCooldownLeft(5);
-    setAutoMode('cooldown');
     clearCooldownTimer();
-    cooldownTimerRef.current = setInterval(() => {
-      setCooldownLeft(prev => {
-        if (prev <= 1) {
-          clearCooldownTimer();
-          // Defer to next tick so React commits state first
-          setTimeout(advanceAutoCall, 0);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    const deadline = Date.now() + 5000;
+    setAutoMode('cooldown');
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setCooldownLeft(remaining);
+      if (remaining <= 0) {
+        clearCooldownTimer();
+        // Defer to next tick so React commits state first
+        setTimeout(advanceAutoCall, 0);
+      }
+    };
+    tick();  // paint "5" immediately
+    cooldownTimerRef.current = setInterval(tick, 250);
   }
 
   // Clean up timer if module unmounts mid-cooldown
@@ -495,7 +501,9 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
               startCooldown();
               return;
             }
-            // Always-on auto-advance after any save
+            // Always-on auto-advance after any save.
+            // Deadline-anchored (same reason as startCooldown) so the badge
+            // visibly runs the full 5 s before the next call is dialed.
             if (meta?.autoAdvance) {
               if (remaining.length === 0) {
                 setAdvanceToast('Queue is empty');
@@ -503,18 +511,18 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
                 return;
               }
               const nextLead = remaining[0];
-              setAdvanceLeft(5);
               clearAdvanceTimer();
-              advanceTimerRef.current = setInterval(() => {
-                setAdvanceLeft(prev => {
-                  if (prev <= 1) {
-                    clearAdvanceTimer();
-                    setTimeout(() => triggerCallAndOpen(nextLead), 0);
-                    return 0;
-                  }
-                  return prev - 1;
-                });
-              }, 1000);
+              const deadline = Date.now() + 5000;
+              const tick = () => {
+                const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+                setAdvanceLeft(left);
+                if (left <= 0) {
+                  clearAdvanceTimer();
+                  setTimeout(() => triggerCallAndOpen(nextLead), 0);
+                }
+              };
+              tick();  // paint "5" immediately
+              advanceTimerRef.current = setInterval(tick, 250);
             }
           }}
         />

@@ -557,10 +557,20 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callPhase]);
 
-  /* 30-s form-fill countdown. */
+  /* 30-s form-fill countdown. Strictly gated on form_window — pressing Recall
+     (or DNP, or any other phase-shift) flips callPhase away from form_window,
+     which tears down this effect immediately. Without the phase gate, a tick
+     queued by the browser milliseconds before clearInterval can still fire,
+     read the just-zeroed state via the functional updater, and bump phase to
+     form_reason_card — leaving the caller staring at a reason card instead of
+     the recall banner. */
   useEffect(() => {
-    if (formTimerSecs <= 0) return;
+    if (callPhase !== 'form_window' || formTimerSecs <= 0) return;
     const id = setInterval(() => {
+      if (callPhaseRef.current !== 'form_window') {
+        clearInterval(id);
+        return;
+      }
       setFormTimerSecs(s => {
         if (s <= 1) {
           clearInterval(id);
@@ -571,7 +581,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [formTimerSecs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [callPhase, formTimerSecs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function resetCallSignalForNewAttempt() {
     wasAgentAnsweredRef.current = false;
@@ -1409,6 +1419,18 @@ function BannerStatus({ phase, formTimerSecs, totalWindow, customerAttempt, dnpR
     return <div style={cardBase}><Row>{dot}<span>Your first call is triggered. Please pick the call.</span></Row></div>;
   }
   if (phase === 'agent_ringing_2') {
+    // DNP first-press flow lands here when Tata fires agent.missed during
+    // the auto-retry ring. The caller pressed DNP to compensate for Tata's
+    // slow customer-missed signal — so the wording must NOT imply the caller
+    // failed to pick. Real agent-miss path (no DNP) keeps the original
+    // manager-notification wording.
+    if (dnpRetry) {
+      return (
+        <div style={cardBase}>
+          <Row>{dot}<span>Second call is triggered. Please pick the call.</span></Row>
+        </div>
+      );
+    }
     return (
       <div style={{ ...cardBase, border: '1.5px dashed #DC2626', background: 'rgba(254,226,226,0.55)', color: '#991B1B' }}>
         <Row>{dot}<span>Triggering the first call again. If you do not pick this call, your manager will be notified.</span></Row>
