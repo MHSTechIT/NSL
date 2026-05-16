@@ -8,12 +8,14 @@ import { useEffect, useState, useCallback } from 'react';
    ────────────────────────────────────────────────────────────────────── */
 
 export default function SettingsConfig({ token, source = 'meta' }) {
-  const [phone, setPhone]       = useState('');
+  // Multi-recipient: state is an array of phone strings. Empty list shows
+  // a single blank row so the admin always has something to type into.
+  const [phones, setPhones]     = useState(['']);
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState('');
   const [savedMsg, setSavedMsg] = useState('');
-  const [testing, setTesting]   = useState(false);
+  const [testingIdx, setTestingIdx] = useState(-1);   // index of the row currently being tested
   const [testMsg, setTestMsg]   = useState('');
 
   // Meta campaign multi-select
@@ -35,7 +37,13 @@ export default function SettingsConfig({ token, source = 'meta' }) {
       });
       if (!res.ok) throw new Error('Failed to load settings');
       const d = await res.json();
-      setPhone(d.alert_phone_number || '');
+      // Multi-recipient: prefer the new array; fall back to wrapping the
+      // legacy single field if the array is empty. Always keep at least
+      // one (possibly empty) row so the UI never collapses to nothing.
+      const arr = Array.isArray(d.alert_phone_numbers) ? d.alert_phone_numbers : [];
+      const legacy = d.alert_phone_number || '';
+      const list = arr.length ? arr : (legacy ? [legacy] : []);
+      setPhones(list.length ? list : ['']);
       setSelected(Array.isArray(d.meta_campaign_ids) ? d.meta_campaign_ids : []);
     } catch (e) {
       setError(e.message || 'Failed to load.');
@@ -101,15 +109,18 @@ export default function SettingsConfig({ token, source = 'meta' }) {
     setSavedMsg('');
     setError('');
     try {
+      // Strip blanks; backend validates digits + de-duplicates.
+      const list = phones.map(p => (p || '').replace(/\D/g, '')).filter(Boolean);
       const res = await fetch('/api/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ source, alert_phone_number: phone }),
+        body: JSON.stringify({ source, alert_phone_numbers: list }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Save failed');
-      setPhone(d.alert_phone_number || '');
-      setSavedMsg('✓ Saved.');
+      const arr = Array.isArray(d.alert_phone_numbers) ? d.alert_phone_numbers : [];
+      setPhones(arr.length ? arr : ['']);
+      setSavedMsg(`✓ Saved — ${arr.length} recipient${arr.length === 1 ? '' : 's'}.`);
       setTimeout(() => setSavedMsg(''), 3000);
     } catch (e) {
       setError(e.message || 'Save failed');
@@ -118,21 +129,45 @@ export default function SettingsConfig({ token, source = 'meta' }) {
     }
   }
 
-  async function testNow() {
-    if (!phone) {
-      setTestMsg('⚠ Save a phone number first.');
+  /* Per-row helpers — update / remove / add a recipient phone. */
+  function updatePhone(idx, value) {
+    const digits = (value || '').replace(/\D/g, '').slice(0, 15);
+    setPhones(prev => prev.map((p, i) => (i === idx ? digits : p)));
+  }
+  function removePhone(idx) {
+    setPhones(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      return next.length ? next : [''];   // never drop below one row
+    });
+  }
+  function addPhone() {
+    setPhones(prev => [...prev, '']);
+  }
+
+  /* Test one specific row — sends the typed value as override_phone so the
+     test reaches what's currently in the input box, NOT whatever was last
+     saved to the DB. Fixes the "test always uses the previous number" bug. */
+  async function testNow(idx) {
+    const raw = (phones[idx] || '').replace(/\D/g, '');
+    if (!raw) {
+      setTestMsg('⚠ Enter a number in that row first.');
       return;
     }
-    setTesting(true);
+    if (raw.length < 10 || raw.length > 15) {
+      setTestMsg('⚠ Number must be 10–15 digits.');
+      return;
+    }
+    setTestingIdx(idx);
     setTestMsg('');
     try {
-      // Bypasses scheduler gating — fires a real WATI template right now to
-      // verify the integration. Returns the actual WATI response so we can
-      // see whether the call succeeded or what error came back.
       const res = await fetch('/api/admin/settings/send-test-template', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ source, template_name: 'leads_alert' }),
+        body: JSON.stringify({
+          source,
+          template_name: 'leads_alert',
+          override_phone: raw,        // <-- send the just-typed number
+        }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || `Test failed (${res.status})`);
@@ -140,7 +175,6 @@ export default function SettingsConfig({ token, source = 'meta' }) {
       if (d.ok) {
         setTestMsg(`✓ WATI accepted "${d.template}" → +91 ${d.phone}. Check your WhatsApp.`);
       } else {
-        // Build a useful error string from the WATI response so user sees the cause
         const body = d.body || {};
         const watiMsg = body?.info || body?.message || body?.error || body?.raw || JSON.stringify(body).slice(0, 200);
         setTestMsg(`⚠ WATI rejected the request (HTTP ${d.status || '?'}): ${watiMsg}`);
@@ -149,7 +183,7 @@ export default function SettingsConfig({ token, source = 'meta' }) {
     } catch (e) {
       setTestMsg('⚠ ' + (e.message || 'Test failed'));
     } finally {
-      setTesting(false);
+      setTestingIdx(-1);
     }
   }
 
@@ -162,29 +196,87 @@ export default function SettingsConfig({ token, source = 'meta' }) {
         boxShadow: '0 4px 16px rgba(91,33,182,0.05)',
         maxWidth: 560,
       }}>
-        <h3 style={{ margin: '0 0 18px', fontWeight: 700, fontSize: '1.05rem', color: '#3B0764' }}>
-          Leads Alert — WhatsApp Recipient
+        <h3 style={{ margin: '0 0 6px', fontWeight: 700, fontSize: '1.05rem', color: '#3B0764' }}>
+          Leads Alert — WhatsApp Recipients
         </h3>
+        <p style={{ margin: '0 0 14px', fontSize: '0.78rem', color: 'rgba(91,33,182,0.65)' }}>
+          Every saved number receives the alert. Use <b>Test</b> next to a
+          row to send a one-off WATI message to that exact number — no save
+          required.
+        </p>
 
         <label style={{ display: 'block', fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.80rem', color: '#3B0764', marginBottom: 6 }}>
-          Phone Number <span style={{ color: 'rgba(91,33,182,0.55)', fontWeight: 500 }}>(10-digit, no spaces)</span>
+          Phone Numbers <span style={{ color: 'rgba(91,33,182,0.55)', fontWeight: 500 }}>(10-digit, no spaces)</span>
         </label>
-        <input
-          type="text"
-          value={phone}
-          onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
-          placeholder="e.g. 9876543210"
-          maxLength={15}
+
+        {phones.map((ph, idx) => (
+          <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <input
+              type="text"
+              value={ph}
+              onChange={e => updatePhone(idx, e.target.value)}
+              placeholder="e.g. 9876543210"
+              maxLength={15}
+              style={{
+                flex: 1, minWidth: 0,
+                height: '2.6rem', padding: '0 12px', borderRadius: 6,
+                border: '1px solid rgba(209,196,240,0.8)',
+                background: 'rgba(237,234,248,0.30)',
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.88rem',
+                color: '#3B0764', outline: 'none', boxSizing: 'border-box',
+                letterSpacing: '0.02em',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => testNow(idx)}
+              disabled={testingIdx !== -1 || !ph}
+              title="Send a one-off WATI test to this exact number"
+              style={{
+                padding: '0 12px', height: '2.4rem', borderRadius: 6,
+                border: '1px solid rgba(91,33,182,0.30)',
+                background: 'rgba(237,234,248,0.50)',
+                color: '#5B21B6', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.80rem',
+                cursor: testingIdx === idx ? 'wait' : (!ph || testingIdx !== -1 ? 'not-allowed' : 'pointer'),
+                opacity: !ph ? 0.5 : 1,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {testingIdx === idx ? 'Testing…' : 'Test'}
+            </button>
+            <button
+              type="button"
+              onClick={() => removePhone(idx)}
+              aria-label="Remove this recipient"
+              title="Remove"
+              disabled={phones.length === 1 && !ph}
+              style={{
+                width: '2.4rem', height: '2.4rem', borderRadius: 6,
+                border: '1px solid rgba(220,38,38,0.30)',
+                background: 'rgba(254,242,242,0.70)', color: '#B91C1C',
+                fontWeight: 800, fontSize: '1rem',
+                cursor: (phones.length === 1 && !ph) ? 'not-allowed' : 'pointer',
+                opacity: (phones.length === 1 && !ph) ? 0.4 : 1,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={addPhone}
           style={{
-            width: '100%', height: '2.6rem', padding: '0 12px',
-            borderRadius: 6,
-            border: '1px solid rgba(209,196,240,0.8)',
-            background: 'rgba(237,234,248,0.30)',
-            fontFamily: 'Outfit, sans-serif', fontSize: '0.88rem',
-            color: '#3B0764', outline: 'none', boxSizing: 'border-box',
-            letterSpacing: '0.02em',
+            marginTop: 4, padding: '6px 12px', borderRadius: 6,
+            border: '1px dashed rgba(91,33,182,0.40)',
+            background: 'transparent', color: '#5B21B6',
+            fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.80rem',
+            cursor: 'pointer',
           }}
-        />
+        >
+          + Add another number
+        </button>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <button
@@ -198,23 +290,7 @@ export default function SettingsConfig({ token, source = 'meta' }) {
               cursor: saving ? 'wait' : 'pointer',
             }}
           >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button
-            type="button"
-            onClick={testNow}
-            disabled={testing || !phone}
-            title="Run the alert scheduler once for this source — sends a real WATI message if conditions are met"
-            style={{
-              padding: '0 14px', height: '2.4rem', borderRadius: 6,
-              border: '1px solid rgba(91,33,182,0.30)',
-              background: 'rgba(237,234,248,0.50)',
-              color: '#5B21B6', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.82rem',
-              cursor: testing ? 'wait' : (!phone ? 'not-allowed' : 'pointer'),
-              opacity: !phone ? 0.6 : 1,
-            }}
-          >
-            {testing ? 'Testing…' : 'Test alert now'}
+            {saving ? 'Saving…' : 'Save all'}
           </button>
           {savedMsg && <span style={{ fontSize: '0.80rem', color: '#047857', fontFamily: 'Outfit, sans-serif' }}>{savedMsg}</span>}
         </div>

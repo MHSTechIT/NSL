@@ -255,9 +255,75 @@ const _agentExtMigration = pool.query(`
   ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS tata_agent_number TEXT;
   ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS tata_caller_id TEXT;
   ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS tata_smartflo_api_key TEXT;
+
+  -- Real-time activity heartbeat. Caller's browser POSTs /api/caller/heartbeat
+  -- every ~30s with current state. Sales Performance column renders the
+  -- live green/orange/red status from these columns.
+  --
+  --   activity_status:   'working' | 'on_break' | 'idle'
+  --   activity_break:    { reason, minutes, startedAt, endsAt }  (only when on_break)
+  --   last_heartbeat_at: NOW() on every heartbeat — admin treats >90s old as Offline
+  --   rest_started_at:   set when status transitions from 'working' → anything else.
+  --                      Used to display "Resting Xh Ym" for the red badge across
+  --                      orange-then-overrun transitions. Cleared when caller
+  --                      returns to 'working'.
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ;
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS activity_status   TEXT;
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS activity_break    JSONB;
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS rest_started_at   TIMESTAMPTZ;
+
+  -- SmartFlow auto-pause bookkeeping. Set together with is_active=FALSE
+  -- inside POST /api/caller/leads/:id/note when the caller submits a note
+  -- with outcome='auto_paused' (frontend trips this at AGENT_RETRY_CAP misses).
+  -- Only the super-admin PATCH /api/admin/crm-users/:id flow can clear these
+  -- (the PATCH endpoint requires ADMIN_PASSWORD bearer auth).
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS auto_paused_at    TIMESTAMPTZ;
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS auto_pause_reason TEXT;
 `);
 if (_agentExtMigration && typeof _agentExtMigration.catch === 'function') {
   _agentExtMigration.catch(err => console.error('[Migration] crm_users smartflo fields error:', err.message));
+}
+
+// Auto-migrate: caller_activity_events — append-only audit log of every
+// status transition for a caller. Admin opens this via the Performance
+// status pill to see who was active / on break / on call / paused, with
+// timings and durations. One open row per (caller_id, tag) until ended.
+//
+// caller_id is UUID to match crm_users.id (NOT integer). If an earlier
+// build accidentally created the table with INT, drop it first — this
+// is safe because activity events are not load-bearing.
+const _activityEventsMigration = pool.query(`
+  DO $$
+  BEGIN
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+       WHERE table_name = 'caller_activity_events'
+         AND column_name = 'caller_id'
+         AND data_type IN ('integer','bigint','smallint')
+    ) THEN
+      DROP TABLE caller_activity_events CASCADE;
+    END IF;
+  END $$;
+  CREATE TABLE IF NOT EXISTS caller_activity_events (
+    id            BIGSERIAL PRIMARY KEY,
+    caller_id     UUID NOT NULL REFERENCES crm_users(id) ON DELETE CASCADE,
+    tag           TEXT NOT NULL,           -- LOGGED_IN | LOGGED_OUT | ACTIVE | ON_CALL |
+                                          -- AFTER_CALL_FORM | ON_REASON_FORM | BREAK |
+                                          -- BREAK_OVER | RESUMED | IDLE | PAUSED_BY_ADMIN |
+                                          -- UNPAUSED_BY_ADMIN | OFFLINE
+    started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ended_at      TIMESTAMPTZ,             -- NULL = ongoing
+    duration_sec  INT,                     -- denormalized at end-time
+    context       JSONB,                   -- { lead_id, lead_name, break_minutes, over_by_sec, ... }
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS caller_activity_events_caller_idx
+    ON caller_activity_events(caller_id, started_at DESC);
+  CREATE INDEX IF NOT EXISTS caller_activity_events_open_idx
+    ON caller_activity_events(caller_id, tag) WHERE ended_at IS NULL;
+`);
+if (_activityEventsMigration && typeof _activityEventsMigration.catch === 'function') {
+  _activityEventsMigration.catch(err => console.error('[Migration] caller_activity_events error:', err.message));
 }
 
 // Auto-migrate: lead_call_notes table + denormalized columns on leads
@@ -306,6 +372,7 @@ const _callNotesMigration = pool.query(`
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_note_at      TIMESTAMPTZ;
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_at      TIMESTAMPTZ;
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS completed_at      TIMESTAMPTZ;
+  ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_tag          TEXT;   -- 'HOT' | 'WARM' | 'COLD' | 'JUNK' (set by LeadCallNoteModal classifier)
   CREATE INDEX IF NOT EXISTS idx_leads_followup ON leads (follow_up_at) WHERE last_note_outcome = 'follow_up';
 
   -- "Next Batch" bucket: parked when the caller answers Q14
@@ -315,6 +382,14 @@ const _callNotesMigration = pool.query(`
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_batch_parked     BOOLEAN     NOT NULL DEFAULT FALSE;
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_batch_parked_at  TIMESTAMPTZ;
   CREATE INDEX IF NOT EXISTS idx_leads_next_batch_parked ON leads (assigned_user_id) WHERE next_batch_parked = TRUE;
+
+  -- "Pinned" leads: set by POST /api/caller/leads/reopen when the caller pulls
+  -- leads from DNP / Missed / Untouched into the Assigned queue via the empty-
+  -- state refill modal. The Assigned list sorts pinned_at DESC FIRST so these
+  -- reopened leads bubble to the TOP. Organic SSE-assigned leads keep pinned_at
+  -- NULL and sort by assigned_at ASC (newest at the bottom row).
+  ALTER TABLE leads ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ;
+  CREATE INDEX IF NOT EXISTS idx_leads_pinned_at ON leads (assigned_user_id, pinned_at DESC) WHERE pinned_at IS NOT NULL;
 `);
 if (_callNotesMigration && typeof _callNotesMigration.catch === 'function') {
   _callNotesMigration.catch(err => console.error('[Migration] lead_call_notes error:', err.message));
@@ -442,6 +517,7 @@ const _sourceMigration = Promise.all([_webinarTableMigration, _clickMigration]).
 //     filter = include every campaign in every account).
 const _alertMigration = pool.query(`
   ALTER TABLE webinar_config ADD COLUMN IF NOT EXISTS alert_phone_number TEXT;
+  ALTER TABLE webinar_config ADD COLUMN IF NOT EXISTS alert_phone_numbers JSONB DEFAULT '[]'::jsonb;
   ALTER TABLE webinar_config ADD COLUMN IF NOT EXISTS meta_campaign_ids JSONB;
   CREATE TABLE IF NOT EXISTS alert_log (
     id            BIGSERIAL PRIMARY KEY,

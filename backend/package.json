@@ -5,6 +5,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
+    "start:funnel-meta": "node servers/funnel-meta.js",
+    "start:funnel-yt":   "node servers/funnel-yt.js",
+    "start:crm":         "node servers/crm.js",
     "ngrok": "node scripts/start-ngrok.js",
     "test": "jest --forceExit",
     "test:coverage": "jest --coverage --forceExit"

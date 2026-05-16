@@ -183,6 +183,23 @@ async function hangup({ providerCallId, accountType, perUserKey }) {
   // Some Tata variants want form-urlencoded; we try both content types.
   const contentTypes = ['application/json', 'application/x-www-form-urlencoded'];
 
+  // Tata returns the SAME 422 for two very different conditions:
+  //   1) body schema is wrong (try the next variant)
+  //   2) the call_id we sent references a call that has already ended on
+  //      Tata's side (no body variant will ever succeed — the call object
+  //      itself is gone). The fingerprint for #2 is a 422 where Tata's
+  //      validation complains that BOTH call_id AND ref_id are missing,
+  //      even though we sent one of them. Treat that as "already ended"
+  //      and short-circuit the variant loop — saves 13 wasted HTTP calls
+  //      and stops spamming the log on every cleanup hangup.
+  function looksLikeAlreadyEnded(status, data) {
+    if (status !== 422) return false;
+    const d = data && typeof data === 'object' ? data : {};
+    const msg = JSON.stringify(d).toLowerCase();
+    return msg.includes('call id field is required')
+        && msg.includes('ref id field is required');
+  }
+
   const attempts = [];
   for (const ct of contentTypes) {
     for (const body of bodyVariants) {
@@ -208,6 +225,14 @@ async function hangup({ providerCallId, accountType, perUserKey }) {
         if (!smartfloIsFailure(res.status, data)) {
           console.log('[tata.hangup] SUCCESS', JSON.stringify({ contentType: ct, body, data }));
           return { ok: true, endpoint: url, contentType: ct, body, raw: data, attempts };
+        }
+
+        if (looksLikeAlreadyEnded(res.status, data)) {
+          // Call is no longer active on Tata's side — hangup is a no-op.
+          // Treat as success so the caller doesn't retry, and skip the
+          // remaining 13 variants (they'll all return the same 422).
+          console.log('[tata.hangup] call already ended on provider', providerCallId);
+          return { ok: true, endpoint: url, contentType: ct, body, raw: data, reason: 'already_ended', attempts };
         }
       } catch (e) {
         attempts.push({ contentType: ct, body, err: e.message });

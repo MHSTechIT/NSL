@@ -11,8 +11,107 @@ const pool    = require('../db');
 const callerSse = require('../utils/callerSse');
 const { callerAuth } = require('../middleware/callerAuth');
 const tataInboundSync = require('../utils/tataInboundSync');
+const activityLogger = require('../utils/activityLogger');
 
 router.use(callerAuth);
+
+/* ── POST /api/caller/heartbeat ──
+   Caller's browser fires this every ~30s and on every activity-state change
+   (auto-call start/stop, call start/end, break start/end). Server records the
+   most recent state so the admin's Sales Performance "Status" column can
+   render live green/orange/red badges.
+
+   Body: { status: 'working'|'on_break'|'idle', break?: {...} }
+     - status='working': in a call or auto-call mode
+     - status='on_break': break modal is up
+     - status='idle':    nothing active
+
+   rest_started_at transitions:
+     - any → 'working'      → rest_started_at = NULL
+     - 'working' → other    → rest_started_at = NOW() (only if was previously NULL)
+     - other → other        → rest_started_at unchanged */
+router.post('/heartbeat', async (req, res) => {
+  const { status, break: breakInfo } = req.body || {};
+  const allowed = new Set(['working', 'on_break', 'idle']);
+  if (!allowed.has(status)) {
+    return res.status(422).json({ error: 'status must be one of: working, on_break, idle' });
+  }
+  try {
+    // Fetch previous state so we can update rest_started_at correctly,
+    // and detect transitions for the activity audit log.
+    const { rows: prev } = await pool.query(
+      'SELECT activity_status, rest_started_at, last_heartbeat_at FROM crm_users WHERE id = $1',
+      [req.caller.id]
+    );
+    const prevStatus = prev[0]?.activity_status || null;
+    const prevRest   = prev[0]?.rest_started_at || null;
+    const prevHb     = prev[0]?.last_heartbeat_at || null;
+
+    let nextRest;
+    if (status === 'working') {
+      nextRest = null;
+    } else if (prevStatus === 'working' || !prevRest) {
+      // First time leaving working OR rest_started_at was never set — stamp it.
+      nextRest = new Date();
+    } else {
+      nextRest = prevRest;  // continue ticking
+    }
+
+    await pool.query(
+      `UPDATE crm_users
+          SET activity_status   = $1,
+              activity_break    = $2::jsonb,
+              last_heartbeat_at = NOW(),
+              rest_started_at   = $3
+        WHERE id = $4`,
+      [
+        status,
+        breakInfo ? JSON.stringify(breakInfo) : null,
+        nextRest,
+        req.caller.id,
+      ]
+    );
+
+    // Activity audit log — emit transition events. Best-effort; never
+    // throws. A "logged in" point event fires when this is the first
+    // heartbeat in >90s (re-login or initial open).
+    try {
+      const callerId = req.caller.id;
+      const gapMs = prevHb ? Date.now() - new Date(prevHb).getTime() : Infinity;
+      const justLoggedIn = !prevHb || gapMs > 90_000;
+      if (justLoggedIn) {
+        await activityLogger.endEventsForCaller(callerId, ['OFFLINE']);
+        await activityLogger.logPointEvent(callerId, 'LOGGED_IN');
+      }
+
+      if (status === 'working') {
+        // Working = active between calls. End any BREAK / IDLE,
+        // open ACTIVE if not already open. End BREAK records over_by_sec
+        // when relevant (break minutes exceeded).
+        if (prevStatus === 'on_break') {
+          await activityLogger.endEvent(callerId, 'BREAK');
+          await activityLogger.logPointEvent(callerId, 'RESUMED');
+        }
+        await activityLogger.endEvent(callerId, 'IDLE');
+        await activityLogger.startEvent(callerId, 'ACTIVE');
+      } else if (status === 'on_break') {
+        await activityLogger.endEvent(callerId, 'ACTIVE');
+        await activityLogger.endEvent(callerId, 'IDLE');
+        await activityLogger.startEvent(callerId, 'BREAK', breakInfo || null);
+      } else if (status === 'idle') {
+        await activityLogger.endEvent(callerId, 'ACTIVE');
+        await activityLogger.startEvent(callerId, 'IDLE');
+      }
+    } catch (logErr) {
+      console.error('caller/heartbeat activity log error:', logErr.message);
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('caller/heartbeat error:', err.message);
+    res.status(500).json({ error: 'heartbeat_failed' });
+  }
+});
 
 /* ── GET /api/caller/me ──
    Returns the JWT payload PLUS the live is_active flag. The caller frontend
@@ -172,7 +271,8 @@ router.get('/leads', async (req, res) => {
           )
         ORDER BY
           (l.last_note_outcome = 'follow_up' AND l.follow_up_at <= NOW()) DESC NULLS LAST,
-          l.assigned_at DESC NULLS LAST, l.created_at DESC`,
+          l.pinned_at  DESC NULLS LAST,
+          l.assigned_at ASC NULLS LAST, l.created_at ASC`,
       [req.caller.id]
     );
     res.json({ leads: rows, total: rows.length });
@@ -216,8 +316,16 @@ router.get('/leads/not-picked', async (req, res) => {
    DESC) bubbles them straight to the top. Returns { moved: <count> }. */
 router.post('/leads/reopen', async (req, res) => {
   const source = (req.body?.source || '').trim();
-  if (source !== 'dnp' && source !== 'missed') {
-    return res.status(422).json({ error: 'source must be "dnp" or "missed"' });
+  if (source !== 'dnp' && source !== 'missed' && source !== 'untouched') {
+    return res.status(422).json({ error: 'source must be "dnp", "missed", or "untouched"' });
+  }
+
+  // 'untouched' is a placeholder bucket — the data definition is TBD. For now
+  // we accept the source so the front-end button works, but return zero moves.
+  // Once we know what "untouched" means (no calls? no notes? unassigned?), the
+  // matching UPDATE goes here.
+  if (source === 'untouched') {
+    return res.json({ moved: 0, source, pending_definition: true });
   }
 
   try {
@@ -232,7 +340,8 @@ router.post('/leads/reopen', async (req, res) => {
                 last_note_at      = NULL,
                 follow_up_at      = NULL,
                 completed_at      = NULL,
-                assigned_at       = NOW()
+                assigned_at       = NOW(),
+                pinned_at         = NOW()
           WHERE assigned_user_id  = $1
             AND last_note_outcome IN ('not_picked', 'auto_paused')
           RETURNING id`,
@@ -258,6 +367,7 @@ router.post('/leads/reopen', async (req, res) => {
                 follow_up_at      = NULL,
                 completed_at      = NULL,
                 assigned_at       = NOW(),
+                pinned_at         = NOW(),
                 assigned_user_id  = COALESCE(assigned_user_id, $1)
           WHERE id IN (
             SELECT DISTINCT lead_id FROM calls
@@ -323,9 +433,12 @@ router.get('/leads/next-batch', async (req, res) => {
 /* ── POST /api/caller/leads/:id/note ──
    Save the post-call form. Updates the lead's denormalized state and writes
    an immutable lead_call_notes row. Pushes SSE so both views update live. */
-// 'auto_paused' = the auto-call workflow hit the 5-attempt SmartFlow cap on
-//                  the agent leg; lead is parked for retry later but the row
-//                  must be persisted so it leaves the active queue.
+// 'auto_paused' = the auto-call workflow hit the AGENT_RETRY_CAP SmartFlow
+//                  cap on the agent leg (currently 15, defined in
+//                  apps/crm/src/modules/LeadCallNoteModal.jsx). The lead is
+//                  parked AND the caller's own crm_users.is_active is flipped
+//                  to FALSE — only a super admin can resume them via PATCH
+//                  /api/admin/crm-users/:id { is_active: true }.
 const ALLOWED_OUTCOMES = ['completed', 'follow_up', 'not_interested', 'not_picked', 'auto_paused'];
 const ALLOWED_RANGES   = ['250+', '200-250', '100-200', 'no_diabetes'];
 const ALLOWED_AGES     = ['0-18', '19-24', '25-34', '35-44', '45-54', 'above-54'];
@@ -436,6 +549,33 @@ router.post('/leads/:id/note', async (req, res) => {
       ]
     );
 
+    // SmartFlow auto-pause: when the caller submits a note with
+    // outcome='auto_paused' the front-end has just tripped AGENT_RETRY_CAP
+    // (currently 15) consecutive agent-side misses on this lead. We flip the
+    // caller's own is_active to FALSE inside the same transaction so the
+    // lead-state change and the account-pause are atomic. The caller cannot
+    // un-pause themselves — only a super admin can, via PATCH
+    // /api/admin/crm-users/:id (adminAuth = ADMIN_PASSWORD bearer).
+    //
+    // We only act when is_active is currently TRUE — repeat auto_paused
+    // outcomes on subsequent leads should not overwrite an earlier
+    // auto_paused_at timestamp, and they should not log duplicate audit
+    // events. The RETURNING clause tells us whether we actually paused.
+    let autoPausedThisRequest = false;
+    if (outcome === 'auto_paused') {
+      const { rows: pauseRows } = await client.query(
+        `UPDATE crm_users
+            SET is_active         = FALSE,
+                auto_paused_at    = NOW(),
+                auto_pause_reason = 'smartflow_cap_exceeded'
+          WHERE id        = $1
+            AND is_active = TRUE
+        RETURNING id`,
+        [req.caller.id]
+      );
+      autoPausedThisRequest = pauseRows.length > 0;
+    }
+
     await client.query('COMMIT');
 
     // Structured log — one JSON line per note save. Grep on Render with
@@ -448,6 +588,7 @@ router.post('/leads/:id/note', async (req, res) => {
       call_id:   call_id || null,
       follow_up_at: outcome === 'follow_up' ? follow_up_at : null,
       note_id:   noteRows[0].id,
+      auto_paused_caller: autoPausedThisRequest,
       at:        new Date().toISOString(),
     }));
 
@@ -459,6 +600,26 @@ router.post('/leads/:id/note', async (req, res) => {
       follow_up_at: outcome === 'follow_up' ? follow_up_at : null,
       note_id: noteRows[0].id,
     });
+
+    // Side effects of the SmartFlow auto-pause. Pushed AFTER commit so the
+    // CallerShell receives them only once the DB state actually reflects
+    // is_active=FALSE.
+    if (autoPausedThisRequest) {
+      try {
+        callerSse.pushTo(req.caller.id, {
+          type: 'caller.paused',
+          is_active: false,
+          reason:    'smartflow_cap_exceeded',
+        });
+      } catch (sseErr) {
+        console.error('[caller] smartflow-pause SSE push error:', sseErr.message);
+      }
+      activityLogger.logPointEvent(
+        req.caller.id,
+        'PAUSED_BY_SMARTFLOW',
+        { lead_id }
+      );
+    }
 
     res.json({
       success: true,

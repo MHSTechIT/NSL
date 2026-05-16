@@ -1,5 +1,24 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Lottie from 'lottie-react';
 import LeadCallNoteModal from './LeadCallNoteModal';
+import happyBotRaw     from '../assets/bot/robot-happy.json';
+import confettiData    from '../assets/bot/confetti.json';
+import { patchRobotArm } from '../utils/patchRobotArm';
+// Tag-specific celebration audio. Played alongside the speech-bubble line.
+import hotLeadMp3   from '../assets/audio/hot-lead.mp3';
+import warmLeadMp3  from '../assets/audio/warm-lead.mp3';
+import coldLeadMp3  from '../assets/audio/cold-lead.mp3';
+import junkLeadMp3  from '../assets/audio/junk-lead.mp3';
+import noTagMp3     from '../assets/audio/no-tag.mp3';
+const TAG_AUDIO = {
+  HOT:  hotLeadMp3,
+  WARM: warmLeadMp3,
+  COLD: coldLeadMp3,
+  JUNK: junkLeadMp3,
+};
+// Patch once at module load — fixes the always-raised right arm so the
+// celebratory wave actually animates up and back down.
+const happyBotData = patchRobotArm(happyBotRaw);
 
 const SUGAR_BADGE = {
   '250+':    { bg: '#FEE2E2', fg: '#B91C1C' },
@@ -19,7 +38,7 @@ function fmtPhone(p) {
   return digits.startsWith('91') ? '+' + digits : '+91 ' + digits;
 }
 
-export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
+export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood, pendingAutoStart, clearPendingAutoStart }) {
   const [leads, setLeads]         = useState([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');
@@ -54,6 +73,10 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [autoError, setAutoError]       = useState('');
   const cooldownTimerRef = useRef(null);
+  /* Tag from the just-saved lead — used to pick the right speech-bubble
+     message in the post-call celebration overlay. Cleared between calls
+     so a stale tag never blends into the next celebration. */
+  const [lastCompletedTag, setLastCompletedTag] = useState(null);
 
   /* Break picker — opened when caller hits Stop in the cooldown card.
        breakStep    : null | 'choose' | 'other'   (modal flow)
@@ -86,6 +109,17 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
   const [otherMinutes, setOtherMinutes]   = useState(10);
   const breakTimerRef = useRef(null);
 
+  /* Activity heartbeat — mirror the caller's real-time state to localStorage
+     so CallerShell's heartbeat poller (every 30s) reports it to the server.
+     Each state transition also dispatches `mhs:activity:changed` so CallerShell
+     can fire an immediate heartbeat without waiting for the next 30s tick.
+
+     Status derivation:
+       - breakInfo set                          → 'on_break' (always, even mid-call)
+       - editLead set OR autoMode === 'calling' → 'working'
+       - otherwise                              → 'idle' */
+  const activityStorageKey = breakStorageKey.replace('mhs_break_', 'mhs_activity_');
+
   /* Inactivity guard for the "Stopping the auto-call?" card.
      Each time the modal opens the caller has 10 s to pick a reason. If the
      window expires we show an inline nudge and restart the countdown. After
@@ -96,11 +130,15 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
   const breakChooseTimerRef    = useRef(null);
   const breakChooseStrikesRef  = useRef(0);
 
-  // Queue-end refill modal — pops once the auto-call queue drains so the
-  // caller can refill the Assigned bucket from DNP or Missed Calls in one
+  // Queue-end refill modal — pops in two cases:
+  //   1. 'auto_finished' — the auto-call queue just drained
+  //   2. 'initial_empty' — the Assigned page loaded with zero leads
+  // Either way the caller can refill from DNP / Missed / Untouched in one
   // click instead of navigating between tabs.
   const [queueEndOpen, setQueueEndOpen] = useState(false);
-  const [reopening, setReopening]       = useState(null); // 'dnp' | 'missed' | null
+  const [queueEndReason, setQueueEndReason] = useState('initial_empty'); // 'initial_empty' | 'auto_finished'
+  const [queueEndDismissed, setQueueEndDismissed] = useState(false);
+  const [reopening, setReopening]       = useState(null); // 'dnp' | 'missed' | 'untouched' | null
   const [reopenToast, setReopenToast]   = useState('');
 
   async function triggerCall(lead) {
@@ -226,9 +264,12 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
     // arrive — the caller is back in normal manual mode.
   }
 
-  /* Refill Assigned bucket from DNP or Missed Calls. Hits the new
-     POST /api/caller/leads/reopen endpoint with the chosen source, then
-     refetches so the moved leads show up at the top of the list. */
+  /* Refill Assigned bucket from DNP / Missed Calls / Untouched. Hits
+     POST /api/caller/leads/reopen with the chosen source. Backend stamps
+     pinned_at = NOW() so the moved leads bubble to the TOP of the list
+     (sort: pinned_at DESC NULLS LAST, assigned_at ASC). After the refetch
+     we immediately kick off auto-call mode on the freshly-loaded leads so
+     the caller doesn't have to press Start Auto-Call again. */
   async function reopenFrom(source) {
     if (reopening) return;
     setReopening(source);
@@ -241,14 +282,25 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Reopen failed');
-      const label = source === 'dnp' ? 'DNP' : 'Missed Calls';
-      if (data.moved > 0) {
-        setReopenToast(`✓ ${data.moved} ${label} lead${data.moved === 1 ? '' : 's'} moved to the top of your queue.`);
-        await fetchLeads();
+      const label = source === 'dnp'       ? 'DNP'
+                  : source === 'missed'    ? 'Missed Calls'
+                  : 'Untouched';
+      if (data.pending_definition) {
+        setReopenToast(`"Untouched" bucket isn't wired up yet — coming soon.`);
+      } else if (data.moved > 0) {
+        setReopenToast(`✓ ${data.moved} ${label} lead${data.moved === 1 ? '' : 's'} moved to the top — starting auto-call.`);
+        // Refetch and capture the fresh leads, then auto-start calling.
+        // We can't rely on the leads state being updated synchronously
+        // before startAutoMode reads it, so we pass the array directly.
+        const fresh = await fetchLeads({ returnLeads: true });
+        if (fresh && fresh.length > 0) {
+          startAutoModeWith(fresh);
+        }
       } else {
         setReopenToast(`No ${label} leads to move right now.`);
       }
       setQueueEndOpen(false);
+      setQueueEndDismissed(true);   // don't re-pop the modal immediately
       setTimeout(() => setReopenToast(''), 4000);
     } catch (e) {
       setReopenToast('⚠ ' + (e.message || 'Reopen failed'));
@@ -279,9 +331,41 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
     };
   }, [breakInfo]);
 
+  /* Activity-state effect — derives status from (editLead, autoMode, breakInfo),
+     mirrors to localStorage, and dispatches a window event so CallerShell can
+     fire an immediate heartbeat instead of waiting for its 30s tick. */
+  useEffect(() => {
+    let status = 'idle';
+    let breakPayload = null;
+    if (breakInfo) {
+      status = 'on_break';
+      breakPayload = {
+        reason:    breakInfo.reason,
+        minutes:   breakInfo.minutes,
+        startedAt: breakInfo.startedAt || (breakInfo.endsAt - breakInfo.minutes * 60 * 1000),
+        endsAt:    breakInfo.endsAt,
+      };
+    } else if (editLead || autoMode === 'calling') {
+      status = 'working';
+    }
+    const payload = { status, break: breakPayload, updatedAt: Date.now() };
+    try { localStorage.setItem(activityStorageKey, JSON.stringify(payload)); } catch { /* sandbox */ }
+    try { window.dispatchEvent(new CustomEvent('mhs:activity:changed', { detail: payload })); } catch { /* no-op */ }
+  }, [editLead, autoMode, breakInfo, activityStorageKey]);
+
   function startAutoMode() {
     if (!leads.length) return;
-    const queue = [...leads];        // snapshot of current visible list
+    startAutoModeWith(leads);
+  }
+
+  /* Same as startAutoMode but takes the leads array as an argument — needed
+     by reopenFrom(), which calls await fetchLeads() then immediately wants
+     to start auto-call. At that moment the React `leads` state hasn't
+     re-rendered yet, so reading it via closure would see the stale (empty)
+     array. */
+  function startAutoModeWith(arr) {
+    if (!arr || !arr.length) return;
+    const queue = [...arr];          // snapshot of the fresh list
     setAutoQueue(queue);
     setAutoIndex(0);
     setAutoTotal(queue.length);
@@ -312,6 +396,8 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
         setAutoMode('off');
         setAutoIndex(0);
         setAutoTotal(0);
+        setQueueEndReason('auto_finished');
+        setQueueEndDismissed(false);
         setQueueEndOpen(true);
         return [];
       }
@@ -351,6 +437,24 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
   // Clean up timer if module unmounts mid-cooldown
   useEffect(() => () => clearCooldownTimer(), []);
 
+  /* Auto-start trigger fired from the Call page's big glow button.
+     Wait until leads have loaded and at least one is available, then kick
+     off the same auto-call flow as the manual "Start Auto Call" button.
+     Consume the flag once so re-mounting doesn't restart endlessly. */
+  useEffect(() => {
+    if (!pendingAutoStart) return;
+    if (loading) return;
+    if (!leads.length) return;
+    // Don't override an already-running auto session.
+    if (autoMode !== 'off') {
+      if (typeof clearPendingAutoStart === 'function') clearPendingAutoStart();
+      return;
+    }
+    startAutoMode();
+    if (typeof clearPendingAutoStart === 'function') clearPendingAutoStart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoStart, loading, leads.length, autoMode]);
+
   /* Drive the break-picker inactivity timer off the modal-step state.
      Entering 'choose' resets strikes + starts the 10-s window. Leaving
      it (any other step, including 'other' / null) tears the timer down. */
@@ -382,12 +486,12 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
     return () => clearTimeout(t);
   }, [externalHighlightId]);
 
-  const fetchLeads = useCallback(async () => {
+  const fetchLeads = useCallback(async (opts = {}) => {
     if (!jwt) {
       setLeads([]);
       setLoading(false);
       setError('');
-      return;
+      return opts.returnLeads ? [] : undefined;
     }
     setLoading(true);
     setError('');
@@ -395,9 +499,12 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
       const res = await fetch('/api/caller/leads', { headers: { Authorization: `Bearer ${jwt}` } });
       if (!res.ok) throw new Error('Failed to load leads.');
       const data = await res.json();
-      setLeads(data.leads || []);
+      const arr  = data.leads || [];
+      setLeads(arr);
+      return opts.returnLeads ? arr : undefined;
     } catch (e) {
       setError(e.message || 'Failed to load leads.');
+      return opts.returnLeads ? [] : undefined;
     } finally {
       setLoading(false);
     }
@@ -423,10 +530,25 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
       try {
         const msg = JSON.parse(ev.data);
         if (msg?.type === 'lead.assigned' && msg.lead) {
+          // Next-Batch promotions (admin started a new batch — parked leads
+          // come back as overdue follow-ups). The SSE payload only carries
+          // {id, promoted_from:'next_batch'} so we can't optimistically merge.
+          // Do a full refetch — the backend sort places overdue follow-ups
+          // at the very TOP, so the promoted leads land at row 0..N.
+          if (msg.lead.promoted_from === 'next_batch') {
+            fetchLeads();
+            setHighlight(msg.lead.id);
+            setTimeout(() => setHighlight(h => h === msg.lead.id ? null : h), 3000);
+            return;
+          }
           setLeads(prev => {
             // Skip if we already have this lead (e.g. simultaneous fetch)
             if (prev.some(l => l.id === msg.lead.id)) return prev;
-            return [msg.lead, ...prev];
+            // Organic SSE arrivals append to the BOTTOM of the queue —
+            // only leads pulled in via the empty-state refill modal
+            // (DNP / Missed / Untouched) get the top-of-list position
+            // (handled server-side via the pinned_at column).
+            return [...prev, msg.lead];
           });
           setHighlight(msg.lead.id);
           setTimeout(() => setHighlight(h => h === msg.lead.id ? null : h), 2500);
@@ -450,6 +572,31 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
     es.onerror = () => { /* auto-reconnect handled by EventSource */ };
     return () => { es.close(); sseRef.current = null; };
   }, [jwt]);
+
+  /* Auto-pop the refill modal when the Assigned page is empty on load —
+     so the caller is prompted to pull leads from DNP / Missed / Untouched
+     instead of staring at a blank table. We suppress the prompt while:
+       • leads are still loading
+       • a fetch error is showing
+       • the caller is on a break
+       • a call note modal is open (in the middle of a call)
+       • auto-call mode is already running
+       • the caller dismissed the modal in this session
+     Once leads arrive (organic SSE or refill), we reset the dismissed flag
+     so the next "queue drained" event can pop it again. */
+  useEffect(() => {
+    if (leads.length > 0) {
+      if (queueEndDismissed) setQueueEndDismissed(false);
+      return;
+    }
+    if (loading || error)         return;
+    if (breakInfo || editLead)    return;
+    if (autoMode !== 'off')       return;
+    if (queueEndOpen)             return;
+    if (queueEndDismissed)        return;
+    setQueueEndReason('initial_empty');
+    setQueueEndOpen(true);
+  }, [leads.length, loading, error, breakInfo, editLead, autoMode, queueEndOpen, queueEndDismissed]);
 
   const filtered = leads;
 
@@ -504,7 +651,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
       )}
 
       {/* Table */}
-      <div className="bg-white rounded-card shadow-card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="shadow-card" style={{ padding: 0, overflow: 'hidden', background: '#EDEAF8', borderRadius: 8 }}>
         {loading ? (
           <EmptyState>Loading assigned leads…</EmptyState>
         ) : filtered.length === 0 ? (
@@ -516,7 +663,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Outfit, sans-serif' }}>
               <thead>
-                <tr style={{ background: 'rgba(237,234,248,0.50)', textAlign: 'left' }}>
+                <tr style={{ background: '#5B21B6', textAlign: 'left' }}>
                   <th style={thStyle}>Name</th>
                   <th style={thStyle}>Phone</th>
                   <th style={thStyle}>Sugar</th>
@@ -534,11 +681,11 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
                     <tr key={l.id}
                       ref={el => { if (el) rowRefs.current[l.id] = el; else delete rowRefs.current[l.id]; }}
                       style={{
-                      borderTop: '1px solid rgba(209,196,240,0.30)',
+                      borderTop: '1px solid rgba(91,33,182,0.18)',
                       background: followUpDue
-                        ? 'rgba(245,158,11,0.06)'
+                        ? 'rgba(245,158,11,0.18)'
                         : highlightId === l.id
-                          ? 'rgba(91,33,182,0.16)'
+                          ? 'rgba(91,33,182,0.28)'
                           : 'transparent',
                       transition: 'background 800ms ease',
                     }}>
@@ -588,17 +735,54 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
           key={editLead.id}
           jwt={jwt}
           lead={editLead}
+          /* Mood bridge — flip the floating mascot to `thinking` whenever the
+             modal lands on a reason card (caller is being asked why a call
+             didn't connect or why the form wasn't filled). Return to `idle`
+             on every other phase. */
+          onPhaseChange={(phase) => {
+            if (typeof setMood !== 'function') return;
+            if (phase === 'form_reason_card' || phase === 'agent_reason_card') {
+              setMood('thinking');
+            } else {
+              setMood('idle');
+            }
+          }}
           onClose={() => {
             const wasInAuto = autoMode === 'calling';
             setEditLead(null);
             // Closing modal mid auto-call without saving = caller bailed → exit auto.
             if (wasInAuto) stopAutoMode();
+            // Reason-card overlay is gone — drop the mascot back to idle.
+            if (typeof setMood === 'function') setMood('idle');
           }}
-          onSaved={(_outcome, meta) => {
+          onSaved={(outcome, meta) => {
             const finishedLead = editLead;
             setEditLead(null);
             const remaining = leads.filter(x => x.id !== finishedLead.id);
             setLeads(remaining);
+            // Capture the lead tag (HOT/WARM/COLD/JUNK) so the celebration
+            // bubble can show the matching message. Stays in state until
+            // the next call's save overwrites it.
+            setLastCompletedTag(meta?.lead_tag || null);
+            // Play tag-specific celebration audio — only for "real" call
+            // completions (form was actually filled). Skip DNP / auto-paused
+            // since those aren't celebratory moments.
+            const REAL_OUTCOMES = new Set(['completed', 'follow_up', 'not_interested']);
+            if (REAL_OUTCOMES.has(outcome)) {
+              const src = TAG_AUDIO[meta?.lead_tag] || noTagMp3;
+              try {
+                const audio = new Audio(src);
+                audio.volume = 0.85;
+                // .play() returns a promise that rejects if autoplay is
+                // blocked (no user gesture). The Complete-Call button IS a
+                // user gesture in the same task, so this almost always
+                // resolves — but swallow errors either way.
+                audio.play().catch(() => {});
+              } catch { /* sandboxed env / no Audio API */ }
+            }
+            // Call was successfully completed — full-screen celebration
+            // (centred bot + confetti) for ~4.5s, then back to idle corner.
+            if (typeof setMood === 'function') setMood('happy', 4500);
             if (autoMode === 'calling') {
               // Legacy autoMode keeps its own queue
               startCooldown();
@@ -665,7 +849,14 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
         </div>
       )}
 
-      {/* 5-second cooldown card between auto-dialed leads */}
+      {/* 5-second post-Complete-Call celebration overlay.
+          Layers (back → front):
+            1. Dim blurred backdrop
+            2. Full-viewport confetti
+            3. Centered vertical stack: speech-bubble → robot → timer → buttons.
+          The speech bubble emerges from above the robot's head with a tail
+          pointing down to it. Message text is hardcoded for now — wire to
+          real per-call logic later. */}
       {autoMode === 'cooldown' && (
         <div
           style={{
@@ -675,33 +866,110 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: '0 16px',
             animation: 'cdFade 200ms ease',
+            fontFamily: 'Outfit, sans-serif',
           }}
         >
           <style>{`
-            @keyframes cdFade   { from { opacity: 0; } to { opacity: 1; } }
-            @keyframes cdScale  { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-            @keyframes cdRing   { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 251.2; } }
+            @keyframes cdFade    { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes cdPop     { 0% { transform: scale(0.55) translateY(40px); opacity: 0; }
+                                   60% { transform: scale(1.06) translateY(0);   opacity: 1; }
+                                   100% { transform: scale(1)   translateY(0);   opacity: 1; } }
+            @keyframes cdRing    { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 251.2; } }
+            @keyframes cdBubble  { 0%   { transform: scale(0.6) translateY(20px); opacity: 0; }
+                                   60%  { transform: scale(1.04) translateY(0);    opacity: 1; }
+                                   100% { transform: scale(1)    translateY(0);    opacity: 1; } }
+            @keyframes cdBubbleFloat {
+              0%   { transform: translateY(0); }
+              50%  { transform: translateY(-4px); }
+              100% { transform: translateY(0); }
+            }
           `}</style>
+
+          {/* Layer 2 — Full-viewport confetti, drawn behind the content stack */}
           <div style={{
-            width: '100%', maxWidth: 380,
-            background: '#fff', borderRadius: 22,
-            padding: '28px 26px',
-            fontFamily: 'Outfit, sans-serif',
-            boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
-            textAlign: 'center',
-            animation: 'cdScale 220ms ease',
+            position: 'absolute', inset: 0,
+            pointerEvents: 'none',
+            zIndex: 0,
           }}>
-            <div style={{ position: 'relative', width: 96, height: 96, margin: '0 auto 16px' }}>
-              {/* Background ring */}
+            <Lottie
+              animationData={confettiData}
+              loop={false}
+              autoplay
+              style={{ width: '100%', height: '100%' }}
+              rendererSettings={{ preserveAspectRatio: 'xMidYMid slice' }}
+            />
+          </div>
+
+          <div style={{
+            position: 'relative', zIndex: 1,
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            gap: 18, textAlign: 'center',
+            animation: 'cdPop 480ms cubic-bezier(0.34,1.56,0.64,1) both',
+          }}>
+            {/* 0 — Speech bubble from the robot's head */}
+            <div style={{
+              position: 'relative',
+              maxWidth: 'min(360px, 80vw)',
+              padding: '14px 22px',
+              background: '#fff',
+              color: '#3B0764',
+              borderRadius: 22,
+              boxShadow: '0 12px 32px rgba(15,0,40,0.35), 0 2px 8px rgba(15,0,40,0.18)',
+              fontWeight: 700, fontSize: '0.98rem', lineHeight: 1.35,
+              marginBottom: -10,  // pulls the tail close to the robot's head
+              animation: 'cdBubble 520ms cubic-bezier(0.34,1.56,0.64,1) both, cdBubbleFloat 2.6s ease-in-out 600ms infinite',
+              animationDelay: '120ms, 740ms',  // bubble pops in slightly after the robot
+            }}>
+              {(() => {
+                switch (lastCompletedTag) {
+                  case 'HOT':
+                    return 'Hey buddy, you got a Hot Lead! Keep rocking!';
+                  case 'WARM':
+                    return 'Hey buddy, you got a Warm Lead! Keep the conversation going!';
+                  case 'COLD':
+                    return 'Hey buddy, you got a Cold Lead! Don’t worry, every call matters!';
+                  case 'JUNK':
+                    return 'Hey buddy, this one looks like a Junk Lead! Let’s move to the next win!';
+                  default:
+                    // Falls through when the form had nothing to classify
+                    // (e.g. not_picked / auto_paused outcomes).
+                    return 'Great work — call completed!';
+                }
+              })()}
+              {/* Bubble tail — pointed down toward the robot's head */}
+              <div style={{
+                position: 'absolute',
+                bottom: -10, left: '50%',
+                width: 0, height: 0,
+                transform: 'translateX(-50%)',
+                borderLeft:  '12px solid transparent',
+                borderRight: '12px solid transparent',
+                borderTop:   '12px solid #fff',
+                filter: 'drop-shadow(0 4px 4px rgba(15,0,40,0.18))',
+              }} />
+            </div>
+
+            {/* 1 — Robot */}
+            <div style={{ width: 'min(260px, 60vw)', height: 'min(260px, 60vw)' }}>
+              <Lottie
+                animationData={happyBotData}
+                loop={false}
+                autoplay
+                style={{ width: '100%', height: '100%' }}
+                rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }}
+              />
+            </div>
+
+            {/* 2 — Countdown timer ring with the live seconds inside */}
+            <div style={{ position: 'relative', width: 96, height: 96 }}>
               <svg width="96" height="96" viewBox="0 0 96 96" style={{ position: 'absolute', inset: 0 }}>
-                <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(91,33,182,0.10)" strokeWidth="6"/>
+                <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(255,255,255,0.20)" strokeWidth="6"/>
               </svg>
-              {/* Animated countdown ring */}
               <svg width="96" height="96" viewBox="0 0 96 96" style={{ position: 'absolute', inset: 0, transform: 'rotate(-90deg)' }}>
                 <circle
                   cx="48" cy="48" r="40"
                   fill="none"
-                  stroke="#5B21B6"
+                  stroke="#fff"
                   strokeWidth="6"
                   strokeLinecap="round"
                   strokeDasharray="251.2"
@@ -711,27 +979,30 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
               <div style={{
                 position: 'absolute', inset: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 800, fontSize: '2.2rem', color: '#3B0764',
+                fontWeight: 800, fontSize: '2.2rem', color: '#fff',
+                textShadow: '0 2px 12px rgba(0,0,0,0.30)',
               }}>
                 {cooldownLeft}
               </div>
             </div>
-            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#3B0764', marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#fff', marginTop: -4 }}>
               Next call in {cooldownLeft}s
             </div>
-            <div style={{ fontSize: '0.82rem', color: 'rgba(91,33,182,0.60)', marginBottom: 18 }}>
+            <div style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.80)' }}>
               {autoQueue.length > 1
                 ? `Up next: ${autoQueue[1]?.full_name || '—'} (${autoTotal - (autoIndex + 1)} more after this)`
                 : 'Last call in this batch'}
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+
+            {/* 3 — Action buttons */}
+            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
               <button
                 onClick={advanceAutoCall}
                 style={{
-                  flex: 1, height: '2.5rem', borderRadius: 50, border: 'none',
+                  minWidth: 130, height: '2.6rem', padding: '0 22px', borderRadius: 50, border: 'none',
                   background: '#5B21B6', color: '#fff',
                   fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.86rem',
-                  cursor: 'pointer', boxShadow: '0 2px 10px rgba(91,33,182,0.30)',
+                  cursor: 'pointer', boxShadow: '0 6px 20px rgba(91,33,182,0.40)',
                 }}
               >
                 Skip wait
@@ -739,11 +1010,11 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
               <button
                 onClick={() => { clearCooldownTimer(); setCooldownLeft(0); setBreakStep('choose'); }}
                 style={{
-                  flex: 1, height: '2.5rem', borderRadius: 50,
-                  border: '1px solid rgba(220,38,38,0.30)',
-                  background: '#fff', color: '#DC2626',
+                  minWidth: 110, height: '2.6rem', padding: '0 22px', borderRadius: 50,
+                  border: '1px solid rgba(255,255,255,0.50)',
+                  background: 'rgba(255,255,255,0.10)', color: '#fff',
                   fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.86rem',
-                  cursor: 'pointer',
+                  cursor: 'pointer', backdropFilter: 'blur(6px)',
                 }}
               >
                 Stop
@@ -942,7 +1213,12 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
         </div>
       )}
 
-      {/* ── Queue-end refill modal ── */}
+      {/* ── Queue-end / empty-state refill modal ──
+         Pops in two cases (see queueEndReason state):
+           • 'initial_empty'  — caller opened the page with zero leads
+           • 'auto_finished'  — the auto-call queue just drained
+         Buttons hit POST /api/caller/leads/reopen which stamps pinned_at=NOW()
+         so the moved leads bubble to the top of the list. */}
       {queueEndOpen && (
         <div
           style={{
@@ -952,7 +1228,11 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: '0 16px', fontFamily: 'Outfit, sans-serif',
           }}
-          onClick={() => !reopening && setQueueEndOpen(false)}
+          onClick={() => {
+            if (reopening) return;
+            setQueueEndOpen(false);
+            setQueueEndDismissed(true);
+          }}
         >
           <div onClick={e => e.stopPropagation()} style={{
             width: '100%', maxWidth: 420, background: '#fff', borderRadius: 22,
@@ -964,41 +1244,24 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
               </svg>
             </div>
             <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.10rem', color: '#3B0764', textAlign: 'center' }}>
-              Queue complete
+              {queueEndReason === 'auto_finished' ? 'Queue complete' : 'No leads in your queue'}
             </h3>
             <p style={{ margin: '6px 0 18px', fontSize: '0.84rem', color: 'rgba(91,33,182,0.65)', textAlign: 'center' }}>
-              Will you take any more calls? Refill from DNP or Missed Calls and
-              start another round.
+              {queueEndReason === 'auto_finished'
+                ? 'Will you take any more calls? Add some from a bucket below and we’ll start auto-calling right away.'
+                : 'Your Assigned page is empty. Pull leads from another bucket and we’ll start auto-calling right away.'}
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button
-                onClick={() => reopenFrom('dnp')}
-                disabled={!!reopening}
-                style={{
-                  height: '2.9rem', borderRadius: 12, border: 'none',
-                  background: reopening === 'dnp' ? 'rgba(91,33,182,0.45)' : '#5B21B6',
-                  color: '#fff', fontWeight: 700, fontSize: '0.92rem',
-                  cursor: reopening ? 'wait' : 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  boxShadow: '0 4px 14px rgba(91,33,182,0.30)',
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" transform="rotate(135 12 12)"/>
-                  <line x1="2" y1="22" x2="22" y2="2"/>
-                </svg>
-                {reopening === 'dnp' ? 'Moving…' : 'DNP Calls'}
-              </button>
               <button
                 onClick={() => reopenFrom('missed')}
                 disabled={!!reopening}
                 style={{
-                  height: '2.9rem', borderRadius: 12,
-                  border: '1px solid rgba(91,33,182,0.25)',
-                  background: reopening === 'missed' ? 'rgba(237,234,248,0.80)' : '#fff',
-                  color: '#5B21B6', fontWeight: 700, fontSize: '0.92rem',
+                  height: '2.9rem', borderRadius: 12, border: 'none',
+                  background: reopening === 'missed' ? 'rgba(91,33,182,0.45)' : '#5B21B6',
+                  color: '#fff', fontWeight: 700, fontSize: '0.92rem',
                   cursor: reopening ? 'wait' : 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  boxShadow: '0 4px 14px rgba(91,33,182,0.30)',
                 }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
@@ -1007,7 +1270,45 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId }) {
                 {reopening === 'missed' ? 'Moving…' : 'Missed Calls'}
               </button>
               <button
-                onClick={() => setQueueEndOpen(false)}
+                onClick={() => reopenFrom('dnp')}
+                disabled={!!reopening}
+                style={{
+                  height: '2.9rem', borderRadius: 12,
+                  border: '1px solid rgba(91,33,182,0.25)',
+                  background: reopening === 'dnp' ? 'rgba(237,234,248,0.80)' : '#fff',
+                  color: '#5B21B6', fontWeight: 700, fontSize: '0.92rem',
+                  cursor: reopening ? 'wait' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" transform="rotate(135 12 12)"/>
+                  <line x1="2" y1="22" x2="22" y2="2"/>
+                </svg>
+                {reopening === 'dnp' ? 'Moving…' : 'Not Picked (DNP)'}
+              </button>
+              <button
+                onClick={() => reopenFrom('untouched')}
+                disabled={!!reopening}
+                title="Coming soon — the Untouched bucket definition is pending."
+                style={{
+                  height: '2.9rem', borderRadius: 12,
+                  border: '1px dashed rgba(91,33,182,0.30)',
+                  background: reopening === 'untouched' ? 'rgba(237,234,248,0.80)' : '#fff',
+                  color: 'rgba(91,33,182,0.65)', fontWeight: 700, fontSize: '0.92rem',
+                  cursor: reopening ? 'wait' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                {reopening === 'untouched' ? 'Checking…' : 'Untouched (soon)'}
+              </button>
+              <button
+                onClick={() => { setQueueEndOpen(false); setQueueEndDismissed(true); }}
                 disabled={!!reopening}
                 style={{
                   height: '2.4rem', borderRadius: 8, border: 'none',
@@ -1304,7 +1605,7 @@ const thStyle = {
   fontWeight: 700,
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
-  color: 'rgba(91,33,182,0.60)',
+  color: '#fff',
   whiteSpace: 'nowrap',
 };
 

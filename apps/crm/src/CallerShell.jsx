@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import AdminLogin              from './admin/AdminLogin';
+import CallModule              from './modules/CallModule';
 import AssignedLeadsModule     from './modules/AssignedLeadsModule';
 import UntouchedLeadsModule    from './modules/UntouchedLeadsModule';
 import CompletedLeadsModule    from './modules/CompletedLeadsModule';
@@ -7,8 +8,18 @@ import NotPickedLeadsModule    from './modules/NotPickedLeadsModule';
 import MissedCallsModule       from './modules/MissedCallsModule';
 import NextBatchModule         from './modules/NextBatchModule';
 import IncomingCallToast       from './components/IncomingCallToast';
+import MascotBot               from './components/MascotBot';
 
 const PAGES = [
+  {
+    id: 'call',
+    label: 'Call',
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+      </svg>
+    ),
+  },
   {
     id: 'assigned',
     label: 'Assigned Leads',
@@ -78,6 +89,7 @@ const PAGES = [
 ];
 
 const PAGE_TITLES = {
+  call:         { title: 'Call',             subtitle: '' },
   assigned:     { title: 'Assigned Leads',   subtitle: 'Leads assigned to you for follow-up' },
   untouched:    { title: 'Untouched',        subtitle: "Leads you haven't contacted yet" },
   completed:    { title: 'Completed Leads',  subtitle: 'Leads you have already handled' },
@@ -92,13 +104,45 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
     if (raw) { try { return JSON.parse(raw); } catch { return null; } }
     return null;
   });
-  const [activePage, setActive]       = useState('assigned');
+  const [activePage, setActive]       = useState('call');
+  /* When the Call page's big start button is pressed, we navigate to the
+     Assigned tab and flag a one-shot "auto-start me when leads are ready".
+     AssignedLeadsModule consumes the flag and clears it on first trigger. */
+  const [pendingAutoStart, setPendingAutoStart] = useState(false);
+  const requestAutoStart   = useCallback(() => {
+    setActive('assigned');
+    setPendingAutoStart(true);
+  }, []);
+  const clearPendingAutoStart = useCallback(() => setPendingAutoStart(false), []);
   const [showDropdown, setShowDropdown] = useState(false);
   const [externalHighlightId, setExternalHighlightId] = useState(null);
   const dropRef = useRef(null);
   /* Pause state — live-tracked via /api/caller/me + SSE caller.paused / caller.resumed.
      null = unknown (still loading), true = active, false = paused-by-admin. */
   const [isActive, setIsActive] = useState(null);
+
+  /* Mascot mood — purely-visual local state owned by the shell.
+     `setMood(mood)`              → switch to mood, stays there.
+     `setMood(mood, autoRevertMs)` → switch to mood, auto-revert to 'idle' after Nms.
+     Any pending revert timer is cleared on each call. */
+  const [mascotMood, setMascotMood] = useState('idle');
+  const mascotTimerRef = useRef(null);
+  const setMood = useCallback((mood, autoRevertMs) => {
+    if (mascotTimerRef.current) {
+      clearTimeout(mascotTimerRef.current);
+      mascotTimerRef.current = null;
+    }
+    setMascotMood(mood || 'idle');
+    if (mood && mood !== 'idle' && typeof autoRevertMs === 'number' && autoRevertMs > 0) {
+      mascotTimerRef.current = setTimeout(() => {
+        mascotTimerRef.current = null;
+        setMascotMood('idle');
+      }, autoRevertMs);
+    }
+  }, []);
+  useEffect(() => () => {
+    if (mascotTimerRef.current) clearTimeout(mascotTimerRef.current);
+  }, []);
 
   /* Toast → "Open lead" handler: jump to Assigned tab and ask the module
      to highlight the row. The module clears the highlight on its own timer. */
@@ -160,6 +204,57 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
       } catch { /* ignore */ }
     };
     return () => { cancelled = true; es.close(); };
+  }, [user, jwtForEffect]);
+
+  /* Activity heartbeat — POST /api/caller/heartbeat every 30s reflecting the
+     latest activity state stamped into localStorage by AssignedLeadsModule.
+     Also fires an immediate heartbeat on any `mhs:activity:changed` window
+     event so the admin's Status column reacts within a second to start-call /
+     break-start / break-end transitions instead of waiting up to 30s. */
+  useEffect(() => {
+    if (!user || !jwtForEffect) return undefined;
+    const activityKey = (() => {
+      try {
+        const [, payload] = jwtForEffect.split('.');
+        const uid = JSON.parse(atob(payload || ''))?.user_id;
+        return uid ? `mhs_activity_${uid}` : 'mhs_activity_anon';
+      } catch { return 'mhs_activity_anon'; }
+    })();
+
+    function readState() {
+      try {
+        const raw = localStorage.getItem(activityKey);
+        if (!raw) return { status: 'idle', break: null };
+        const parsed = JSON.parse(raw);
+        return {
+          status: parsed?.status || 'idle',
+          break:  parsed?.break  || null,
+        };
+      } catch { return { status: 'idle', break: null }; }
+    }
+
+    async function send() {
+      const state = readState();
+      try {
+        await fetch('/api/caller/heartbeat', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtForEffect}` },
+          body:    JSON.stringify(state),
+        });
+      } catch { /* network blips ignored — next tick will retry */ }
+    }
+
+    // Fire one heartbeat immediately on mount so the admin sees the caller
+    // online without a 30s lag.
+    send();
+
+    const intervalId = setInterval(send, 30_000);
+    const onChange = () => { send(); };
+    window.addEventListener('mhs:activity:changed', onChange);
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('mhs:activity:changed', onChange);
+    };
   }, [user, jwtForEffect]);
 
   function handleLogout() {
@@ -329,18 +424,24 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
         </div>
       </div>
 
-      {/* ── Page header ── */}
-      <div style={{ marginBottom: 16, padding: '0 4px' }}>
-        <h1 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#3B0764' }}>
-          {PAGE_TITLES[activePage]?.title || 'Dashboard'}
-        </h1>
-        <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)' }}>
-          {PAGE_TITLES[activePage]?.subtitle || ''}
-        </p>
-      </div>
+      {/* ── Page header ──
+         The Call page is fullscreen-cinematic on purpose (orbit flow +
+         centred glow button), so its header is suppressed. Every other
+         page still shows the standard title + subtitle. */}
+      {activePage !== 'call' && (
+        <div style={{ marginBottom: 16, padding: '0 4px' }}>
+          <h1 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#3B0764' }}>
+            {PAGE_TITLES[activePage]?.title || 'Dashboard'}
+          </h1>
+          <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)' }}>
+            {PAGE_TITLES[activePage]?.subtitle || ''}
+          </p>
+        </div>
+      )}
 
       {/* ── Active page ── */}
-      {activePage === 'assigned'     && <AssignedLeadsModule  jwt={jwt} externalHighlightId={externalHighlightId} />}
+      {activePage === 'call'         && <CallModule           jwt={jwt} onStartAutoCall={requestAutoStart} />}
+      {activePage === 'assigned'     && <AssignedLeadsModule  jwt={jwt} externalHighlightId={externalHighlightId} setMood={setMood} pendingAutoStart={pendingAutoStart} clearPendingAutoStart={clearPendingAutoStart} />}
       {activePage === 'untouched'    && <UntouchedLeadsModule jwt={jwt} />}
       {activePage === 'completed'    && <CompletedLeadsModule jwt={jwt} />}
       {activePage === 'not_picked'   && <NotPickedLeadsModule jwt={jwt} />}
@@ -349,6 +450,9 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
 
       {/* ── Floating incoming-call toasts (top-right, persists across tabs) ── */}
       <IncomingCallToast jwt={jwt} onOpenLead={handleOpenLead} />
+
+      {/* ── Mascot bot (bottom-right, behind pause overlay at z 9900) ── */}
+      <MascotBot mood={mascotMood} />
 
       {/* ── Paused-by-admin blocking overlay ──
          Renders only when /api/caller/me reports is_active = false. No dismiss

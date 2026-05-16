@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import DatePicker from './DatePicker';
+import DateTimePicker from './DateTimePicker';
 
 const DURATION_LABELS = { new: '< 1 yr', mid: '1–5 yrs', long: '5+ yrs', pre: 'Pre-diabetic' };
 const SUGAR_LABELS    = { '150-250': '150–250', '250+': '250+' };
@@ -163,8 +163,17 @@ export default function LeadsTable({ token, source = 'meta' }) {
     if (webinarFilter && String(l.webinar_id) !== String(webinarFilter)) return false;
     if (dateFrom || dateTo) {
       const created = new Date(l.created_at);
-      if (dateFrom && created < new Date(dateFrom + 'T00:00:00+05:30')) return false;
-      if (dateTo   && created > new Date(dateTo   + 'T23:59:59+05:30')) return false;
+      // DateTimePicker emits "YYYY-MM-DDTHH:mm:ss" (exact moment); the
+      // legacy "Today" button still sets a date-only "YYYY-MM-DD" string.
+      // Treat date-only values as start-of-day (from) / end-of-day (to) in IST.
+      if (dateFrom) {
+        const from = dateFrom.includes('T') ? new Date(dateFrom) : new Date(dateFrom + 'T00:00:00+05:30');
+        if (created < from) return false;
+      }
+      if (dateTo) {
+        const to = dateTo.includes('T') ? new Date(dateTo) : new Date(dateTo + 'T23:59:59+05:30');
+        if (created > to) return false;
+      }
     }
     if (activeFilter === 'all')        return true;
     if (activeFilter === 'high_sugar') return l.sugar_level === '250+';
@@ -263,8 +272,14 @@ export default function LeadsTable({ token, source = 'meta' }) {
 
   const dateFiltered = leads.filter(l => {
     if (webinarFilter && String(l.webinar_id) !== String(webinarFilter)) return false;
-    if (dateFrom && new Date(l.created_at) < new Date(dateFrom + 'T00:00:00+05:30')) return false;
-    if (dateTo   && new Date(l.created_at) > new Date(dateTo   + 'T23:59:59+05:30')) return false;
+    if (dateFrom) {
+      const from = dateFrom.includes('T') ? new Date(dateFrom) : new Date(dateFrom + 'T00:00:00+05:30');
+      if (new Date(l.created_at) < from) return false;
+    }
+    if (dateTo) {
+      const to = dateTo.includes('T') ? new Date(dateTo) : new Date(dateTo + 'T23:59:59+05:30');
+      if (new Date(l.created_at) > to) return false;
+    }
     return true;
   });
   const waClicked    = dateFiltered.filter(l => l.wa_clicked === true).length;
@@ -462,9 +477,9 @@ export default function LeadsTable({ token, source = 'meta' }) {
         </svg>
         <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', whiteSpace: 'nowrap' }}>Date Range</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <DatePicker value={dateFrom} onChange={setDateFrom} placeholder="From date" />
+          <DateTimePicker value={dateFrom} onChange={setDateFrom} placeholder="From date" />
           <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: 'rgba(91,33,182,0.45)', fontWeight: 600 }}>to</span>
-          <DatePicker value={dateTo} onChange={setDateTo} placeholder="To date" />
+          <DateTimePicker value={dateTo} onChange={setDateTo} placeholder="To date" />
         </div>
         {(() => {
           const istToday = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);

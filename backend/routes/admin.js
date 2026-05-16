@@ -8,6 +8,7 @@ const { getPassword, writeConfig } = require('../utils/adminConfig');
 const cache = require('../utils/webinarConfigCache');
 const { broadcast } = require('../utils/sseClients');
 const callerSse = require('../utils/callerSse');
+const activityLogger = require('../utils/activityLogger');
 const { syncLeadsToSheet } = require('../utils/leadsSheetSync');
 const { rotateLink }       = require('../utils/linkRotation');
 const { nextWebinarName, nextUpcomingWebinarName } = require('../utils/webinarName');
@@ -125,6 +126,12 @@ router.put('/webinar-config', configValidators, async (req, res) => {
       const fresh = { ...rows[0] };
       cache.set(fresh, source);
       broadcast(fresh, source);
+      // Cross-service: post-split, funnel-meta and funnel-yt run in different
+      // processes than this CRM admin route, so the in-process broadcast above
+      // only reaches admin SPA clients connected to THIS service. The funnels
+      // receive the same payload via pg_notify -> their LISTEN handler.
+      pool.query(`SELECT pg_notify('webinar.config.updated', $1)`, [source])
+        .catch(e => console.error('[admin] webinar.config.updated notify error:', e.message));
     }
 
     // Promote parked "Next Batch" leads when the caller schedules a fresh
@@ -294,13 +301,22 @@ router.get('/settings', async (req, res) => {
   const source = getSource(req);
   try {
     const { rows } = await pool.query(
-      'SELECT alert_phone_number, meta_campaign_ids FROM webinar_config WHERE source = $1',
+      'SELECT alert_phone_number, alert_phone_numbers, meta_campaign_ids FROM webinar_config WHERE source = $1',
       [source]
     );
+    // Multi-recipient migration: if the new array column is empty but the
+    // legacy single column has a value, surface that single value as a
+    // one-element array so the UI shows the migrated number. Once the admin
+    // saves through the new UI, the array column will be populated.
+    const arr = Array.isArray(rows[0]?.alert_phone_numbers) ? rows[0].alert_phone_numbers : [];
+    const legacy = rows[0]?.alert_phone_number || '';
+    const phones = (arr.length === 0 && legacy) ? [legacy] : arr;
     res.json({
       source,
-      alert_phone_number: rows[0]?.alert_phone_number || '',
-      meta_campaign_ids:  rows[0]?.meta_campaign_ids  || [],
+      // Legacy field kept for callers still reading it; equals phones[0] || ''.
+      alert_phone_number:  phones[0] || '',
+      alert_phone_numbers: phones,
+      meta_campaign_ids:   rows[0]?.meta_campaign_ids || [],
     });
   } catch (err) {
     console.error('Get settings error:', err.message);
@@ -317,7 +333,7 @@ router.put('/settings', async (req, res) => {
   const updates = [];
   const params  = [];
 
-  // alert_phone_number (optional)
+  // alert_phone_number (optional, legacy single-value field)
   if (Object.prototype.hasOwnProperty.call(req.body || {}, 'alert_phone_number')) {
     let phone = req.body.alert_phone_number;
     if (typeof phone !== 'string') {
@@ -328,6 +344,32 @@ router.put('/settings', async (req, res) => {
       return res.status(422).json({ error: 'alert_phone_number must be 10–15 digits' });
     }
     params.push(phone || null);
+    updates.push(`alert_phone_number = $${params.length}`);
+  }
+
+  // alert_phone_numbers (optional, multi-recipient array). Each entry is
+  // validated to be 10–15 digits. When this field is supplied we also
+  // mirror the first entry into the legacy single column so any back-end
+  // code that hasn't been migrated yet (e.g. one-off scripts) still works.
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'alert_phone_numbers')) {
+    const list = req.body.alert_phone_numbers;
+    if (!Array.isArray(list)) {
+      return res.status(422).json({ error: 'alert_phone_numbers must be an array' });
+    }
+    const cleaned = [];
+    for (const entry of list) {
+      if (typeof entry !== 'string') continue;
+      const digits = entry.replace(/\D/g, '');
+      if (!digits) continue;
+      if (!/^\d{10,15}$/.test(digits)) {
+        return res.status(422).json({ error: `phone "${entry}" must be 10–15 digits` });
+      }
+      if (!cleaned.includes(digits)) cleaned.push(digits);   // de-duplicate
+    }
+    params.push(JSON.stringify(cleaned));
+    updates.push(`alert_phone_numbers = $${params.length}::jsonb`);
+    // Mirror first entry into legacy column for back-compat readers.
+    params.push(cleaned[0] || null);
     updates.push(`alert_phone_number = $${params.length}`);
   }
 
@@ -359,13 +401,17 @@ router.put('/settings', async (req, res) => {
     // reflects the new selection immediately instead of waiting 30 min.
     if (campaignFilterTouched) clearMetaCache();
     const { rows } = await pool.query(
-      'SELECT alert_phone_number, meta_campaign_ids FROM webinar_config WHERE source = $1',
+      'SELECT alert_phone_number, alert_phone_numbers, meta_campaign_ids FROM webinar_config WHERE source = $1',
       [source]
     );
+    const arr = Array.isArray(rows[0]?.alert_phone_numbers) ? rows[0].alert_phone_numbers : [];
+    const legacy = rows[0]?.alert_phone_number || '';
+    const phones = (arr.length === 0 && legacy) ? [legacy] : arr;
     res.json({
       success: true,
-      alert_phone_number: rows[0]?.alert_phone_number || '',
-      meta_campaign_ids:  rows[0]?.meta_campaign_ids  || [],
+      alert_phone_number:  phones[0] || '',
+      alert_phone_numbers: phones,
+      meta_campaign_ids:   rows[0]?.meta_campaign_ids || [],
     });
   } catch (err) {
     console.error('Update settings error:', err.message);
@@ -409,14 +455,32 @@ router.post('/settings/send-test-template', async (req, res) => {
   const parameters = Array.isArray(req.body?.parameters)
     ? req.body.parameters.map(v => String(v))
     : [];
+
+  // Optional override — if the admin types a number in the UI and clicks
+  // Test without saving first, the frontend passes that number here so the
+  // test goes to what they just typed, not the previously-saved value.
+  let overridePhone = null;
+  if (typeof req.body?.override_phone === 'string') {
+    const digits = req.body.override_phone.replace(/\D/g, '');
+    if (digits) {
+      if (!/^\d{10,15}$/.test(digits)) {
+        return res.status(422).json({ error: 'override_phone must be 10–15 digits' });
+      }
+      overridePhone = digits;
+    }
+  }
+
   try {
-    const { rows } = await pool.query(
-      'SELECT alert_phone_number FROM webinar_config WHERE source = $1',
-      [source]
-    );
-    const phone = rows[0]?.alert_phone_number;
+    let phone = overridePhone;
     if (!phone) {
-      return res.status(422).json({ error: 'No phone saved for this source. Save a number first.' });
+      const { rows } = await pool.query(
+        'SELECT alert_phone_number FROM webinar_config WHERE source = $1',
+        [source]
+      );
+      phone = rows[0]?.alert_phone_number || null;
+    }
+    if (!phone) {
+      return res.status(422).json({ error: 'No phone supplied. Type a number or save one first.' });
     }
     const wati = require('../utils/watiClient');
     if (!wati.isConfigured()) {
@@ -426,6 +490,7 @@ router.post('/settings/send-test-template', async (req, res) => {
     res.json({
       ok:        result.ok,
       phone,
+      override:  !!overridePhone,
       template:  templateName,
       parameters,
       status:    result.status,
@@ -895,9 +960,16 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
     return res.status(400).json({ error: 'No fields to update.' });
   }
 
-  const keys = Object.keys(updates);
-  const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
-  const values = keys.map(k => updates[k]);
+  // When the admin flips is_active back to TRUE, also clear the SmartFlow
+  // auto-pause bookkeeping so the next system-driven pause starts from a
+  // clean slate. The two columns are no-ops for any user that was paused
+  // manually (they were never set).
+  const setFragments = Object.keys(updates).map((k, i) => `${k} = $${i + 1}`);
+  if (Object.prototype.hasOwnProperty.call(updates, 'is_active') && updates.is_active === true) {
+    setFragments.push('auto_paused_at = NULL', 'auto_pause_reason = NULL');
+  }
+  const setClause = setFragments.join(', ');
+  const values = Object.keys(updates).map(k => updates[k]);
   values.push(id);
 
   try {
@@ -905,6 +977,7 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
       `UPDATE crm_users SET ${setClause}
        WHERE id = $${values.length}
        RETURNING id, full_name, email, phone, role, is_active,
+                 auto_paused_at, auto_pause_reason,
                  tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
                  tata_smartflo_api_key,
                  created_at`,
@@ -922,6 +995,12 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
       } catch (sseErr) {
         console.error('[admin] caller-paused SSE push error:', sseErr.message);
       }
+      // Activity audit: record the admin-initiated pause/resume so the
+      // activity drawer can show "Paused by admin" entries with timing.
+      activityLogger.logPointEvent(
+        id,
+        updates.is_active ? 'UNPAUSED_BY_ADMIN' : 'PAUSED_BY_ADMIN'
+      );
     }
     res.json({ user: rows[0] });
   } catch (err) {
@@ -1361,6 +1440,149 @@ router.get('/meta-insights', async (req, res) => {
    shifted back so the frontend can show ▲/▼ arrows.
 
    Defaults: from = to = today (IST). */
+/* ── GET /api/admin/caller-activity/:id?date=YYYY-MM-DD ──
+   Returns the chronological activity audit log for one caller for one
+   IST day. Used by the Performance grid's Status pill → activity drawer.
+   Each row carries: tag, started_at, ended_at, duration_sec, context.
+   Open events (ended_at IS NULL) are returned as ongoing — the frontend
+   shows them with a live ticking duration. */
+router.get('/caller-activity/:id', async (req, res) => {
+  const id = String(req.params.id || '');
+  // crm_users.id is a UUID — accept the standard 36-char format.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return res.status(400).json({ error: 'invalid id' });
+  }
+
+  // Date is the IST calendar day. Default = today (IST).
+  const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const todayYmd = istNow.toISOString().slice(0, 10);
+  const dateYmd = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : todayYmd;
+
+  // IST day window → UTC bounds. IST is UTC+5:30, so the IST day Y-M-D
+  // runs from (Y-M-D 00:00 IST) = (Y-M-D 18:30 prev-UTC) to next-day 18:30 UTC.
+  const dayStartUtc = new Date(`${dateYmd}T00:00:00+05:30`);
+  const dayEndUtc   = new Date(dayStartUtc.getTime() + 24 * 3600 * 1000);
+
+  try {
+    const { rows: caller } = await pool.query(
+      'SELECT id, full_name, role, is_active FROM crm_users WHERE id = $1',
+      [id]
+    );
+    if (caller.length === 0) return res.status(404).json({ error: 'caller not found' });
+
+    const { rows } = await pool.query(
+      `SELECT id, tag, started_at, ended_at, duration_sec, context
+         FROM caller_activity_events
+        WHERE caller_id = $1
+          AND started_at < $3
+          AND (ended_at IS NULL OR ended_at >= $2)
+        ORDER BY started_at ASC`,
+      [id, dayStartUtc.toISOString(), dayEndUtc.toISOString()]
+    );
+
+    res.json({
+      caller: caller[0],
+      date: dateYmd,
+      events: rows,
+    });
+  } catch (err) {
+    console.error('[admin] caller-activity error:', err.message);
+    res.status(500).json({ error: 'failed to load activity' });
+  }
+});
+
+/* ── GET /api/admin/sales-performance/leads-export ──
+   Returns the deduplicated set of leads that match ANY of the requested
+   categories within the date window, optionally scoped to a single
+   webinar. Used by the Performance "Export CSV" modal so admins can
+   download lead-level rows (not per-caller aggregates) for any
+   combination of buckets like hot, warm, touched, connected, etc.
+
+   Each lead appears exactly once. A `matched_categories` array on each
+   row shows which buckets that lead falls into. Categories map:
+     • assigned     → l.assigned_at in window
+     • hot          → l.lead_score >= 4   AND assigned in window
+     • warm         → l.lead_score IN (2,3) AND assigned in window
+     • touched      → l.last_note_at in window AND assigned in window
+     • untouched    → l.last_note_at IS NULL AND l.assigned_at < NOW() - 24h
+     • follow_up    → l.last_note_outcome = 'follow_up'
+     • total_calls  → has ANY call in window
+     • incoming     → has inbound  call in window
+     • outgoing     → has outbound call in window
+     • connected    → has connected (duration_sec > 0) call in window  */
+router.get('/sales-performance/leads-export', async (req, res) => {
+  const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const todayYmd = istNow.toISOString().slice(0, 10);
+  const fromYmd = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : todayYmd;
+  const toYmd   = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '')   ? req.query.to   : fromYmd;
+  const dayStart = new Date(`${fromYmd}T00:00:00+05:30`).toISOString();
+  const dayEnd   = new Date(`${toYmd}T23:59:59.999+05:30`).toISOString();
+  const webinarId = req.query.webinar_id ? String(req.query.webinar_id) : null;
+
+  const validCats = new Set([
+    'assigned', 'hot', 'warm', 'touched', 'untouched', 'follow_up',
+    'total_calls', 'incoming', 'outgoing', 'connected',
+  ]);
+  const requested = String(req.query.categories || '')
+    .split(',').map(s => s.trim()).filter(c => validCats.has(c));
+  if (requested.length === 0) {
+    return res.status(400).json({ error: 'no valid categories' });
+  }
+
+  // Build the per-category boolean expression. Each one tags the lead row
+  // with `1` if it matches the bucket, `0` if not. The outer SELECT then
+  // returns leads where ANY bucket = 1, and aggregates the matched buckets
+  // into a text[] so the CSV can show which categories each lead fell into.
+  try {
+    const { rows } = await pool.query(
+      `
+      WITH w AS (
+        SELECT $1::timestamptz AS d_start, $2::timestamptz AS d_end
+      ),
+      base AS (
+        SELECT l.*,
+               u.full_name AS assigned_to_name,
+               u.role      AS assigned_to_role
+          FROM leads l
+          LEFT JOIN crm_users u ON u.id = l.assigned_user_id
+         WHERE l.assigned_user_id IS NOT NULL
+           AND ($3::text IS NULL OR l.webinar_id::text = $3::text)
+      ),
+      tagged AS (
+        SELECT b.*,
+               (b.assigned_at >= w.d_start AND b.assigned_at <= w.d_end)::int AS c_assigned,
+               (b.lead_score >= 4 AND b.assigned_at >= w.d_start AND b.assigned_at <= w.d_end)::int AS c_hot,
+               (b.lead_score IN (2,3) AND b.assigned_at >= w.d_start AND b.assigned_at <= w.d_end)::int AS c_warm,
+               (b.last_note_at IS NOT NULL AND b.last_note_at >= w.d_start AND b.last_note_at <= w.d_end AND b.assigned_at >= w.d_start AND b.assigned_at <= w.d_end)::int AS c_touched,
+               (b.last_note_at IS NULL AND b.assigned_at < NOW() - INTERVAL '24 hours')::int AS c_untouched,
+               (b.last_note_outcome = 'follow_up')::int AS c_follow_up,
+               (EXISTS (SELECT 1 FROM calls c WHERE c.lead_id = b.id AND c.started_at >= w.d_start AND c.started_at <= w.d_end))::int AS c_total_calls,
+               (EXISTS (SELECT 1 FROM calls c WHERE c.lead_id = b.id AND c.direction = 'inbound'  AND c.started_at >= w.d_start AND c.started_at <= w.d_end))::int AS c_incoming,
+               (EXISTS (SELECT 1 FROM calls c WHERE c.lead_id = b.id AND c.direction = 'outbound' AND c.started_at >= w.d_start AND c.started_at <= w.d_end))::int AS c_outgoing,
+               (EXISTS (SELECT 1 FROM calls c WHERE c.lead_id = b.id AND c.duration_sec > 0 AND c.started_at >= w.d_start AND c.started_at <= w.d_end))::int AS c_connected
+          FROM base b CROSS JOIN w
+      )
+      SELECT id, full_name, whatsapp_number, email, language_pref, sugar_level,
+             diabetes_duration, lead_score, lead_tag, last_note_outcome,
+             assigned_to_name, assigned_to_role,
+             assigned_at, last_note_at, completed_at,
+             c_assigned, c_hot, c_warm, c_touched, c_untouched, c_follow_up,
+             c_total_calls, c_incoming, c_outgoing, c_connected
+        FROM tagged
+       WHERE ${requested.map(c => `c_${c} = 1`).join(' OR ')}
+       ORDER BY assigned_at DESC NULLS LAST
+       LIMIT 50000
+      `,
+      [dayStart, dayEnd, webinarId]
+    );
+
+    res.json({ leads: rows });
+  } catch (err) {
+    console.error('[admin] sales-performance/leads-export error:', err.message);
+    res.status(500).json({ error: 'failed to load leads' });
+  }
+});
+
 router.get('/sales-performance', async (req, res) => {
   const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
   const todayYmd = istNow.toISOString().slice(0, 10);
@@ -1389,6 +1611,13 @@ router.get('/sales-performance', async (req, res) => {
     params.push(salespersonId);
     salespersonFilter = `WHERE cb.caller_id = $${params.length}`;
   }
+  // Optional webinar filter — scopes lead + call aggregates to a single
+  // webinar so each caller row reflects their numbers for that batch only.
+  // We compare as text so the column's underlying type (BIGINT vs UUID)
+  // doesn't matter to the SQL.
+  const webinarId = req.query.webinar_id ? String(req.query.webinar_id) : null;
+  params.push(webinarId);
+  const webinarParamIdx = params.length;  // e.g. $5 if no salesperson filter
 
   try {
     // Predicted-enrollments coefficient: enrolled-hot / total-hot over last 30 days, globally.
@@ -1410,7 +1639,11 @@ router.get('/sales-performance', async (req, res) => {
         -- Include paused (is_active = FALSE) callers in the result so the
         -- admin's Sales Performance kebab can show a Paused pill and a
         -- Resume action. The frontend reads is_active per row.
-        SELECT u.id AS caller_id, u.full_name AS name, u.role, u.is_active
+        -- Also surfaces the heartbeat columns so the Status column can render
+        -- live green/orange/red badges per caller.
+        SELECT u.id AS caller_id, u.full_name AS name, u.role, u.is_active,
+               u.last_heartbeat_at, u.activity_status, u.activity_break,
+               u.rest_started_at
           FROM crm_users u
          WHERE u.role IN ('junior_caller','senior_caller','team_leader','manager')
       ),
@@ -1428,6 +1661,7 @@ router.get('/sales-performance', async (req, res) => {
                COUNT(*) FILTER (WHERE l.last_note_outcome = 'completed' AND l.completed_at >= w.d_start AND l.completed_at <= w.d_end)::int AS enrolled
           FROM leads l CROSS JOIN w
          WHERE l.assigned_user_id IS NOT NULL
+           AND ($${webinarParamIdx}::text IS NULL OR l.webinar_id::text = $${webinarParamIdx}::text)
          GROUP BY l.assigned_user_id
       ),
       lead_prev AS (
@@ -1436,6 +1670,7 @@ router.get('/sales-performance', async (req, res) => {
                COUNT(*) FILTER (WHERE l.assigned_at >= w.p_start AND l.assigned_at <= w.p_end)::int AS assigned_prev
           FROM leads l CROSS JOIN w
          WHERE l.assigned_user_id IS NOT NULL
+           AND ($${webinarParamIdx}::text IS NULL OR l.webinar_id::text = $${webinarParamIdx}::text)
          GROUP BY l.assigned_user_id
       ),
       call_agg AS (
@@ -1449,6 +1684,11 @@ router.get('/sales-performance', async (req, res) => {
           FROM calls c CROSS JOIN w
          WHERE c.caller_id IS NOT NULL
            AND c.started_at >= w.d_start AND c.started_at <= w.d_end
+           AND ($${webinarParamIdx}::text IS NULL OR EXISTS (
+                 SELECT 1 FROM leads ll
+                  WHERE ll.id = c.lead_id
+                    AND ll.webinar_id::text = $${webinarParamIdx}::text
+               ))
          GROUP BY c.caller_id
       ),
       call_prev AS (
@@ -1457,9 +1697,15 @@ router.get('/sales-performance', async (req, res) => {
           FROM calls c CROSS JOIN w
          WHERE c.caller_id IS NOT NULL
            AND c.started_at >= w.p_start AND c.started_at <= w.p_end
+           AND ($${webinarParamIdx}::text IS NULL OR EXISTS (
+                 SELECT 1 FROM leads ll
+                  WHERE ll.id = c.lead_id
+                    AND ll.webinar_id::text = $${webinarParamIdx}::text
+               ))
          GROUP BY c.caller_id
       )
       SELECT cb.caller_id, cb.name, cb.role, cb.is_active,
+             cb.last_heartbeat_at, cb.activity_status, cb.activity_break, cb.rest_started_at,
              COALESCE(la.assigned, 0)            AS assigned,
              COALESCE(la.hot, 0)                 AS hot,
              COALESCE(la.warm, 0)                AS warm,
@@ -1562,6 +1808,166 @@ router.get('/calls', async (req, res) => {
   } catch (err) {
     console.error('admin/calls error:', err.message);
     res.status(500).json({ error: 'Failed to load calls.' });
+  }
+});
+
+/* ── GET /api/admin/leads/assignment-pool?from=ISO&to=ISO ──
+   Used by the "Manual Assign Leads" modal in Sales → Leads.
+   Returns:
+     - available:   count of unassigned leads whose created_at falls in the
+                    given datetime range.
+     - callers:     active junior/senior callers (id, full_name, role)
+                    with their current open-lead count for context. */
+router.get('/leads/assignment-pool', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) {
+    return res.status(400).json({ error: 'from and to ISO datetime params are required' });
+  }
+  try {
+    const { rows: poolRows } = await pool.query(
+      `SELECT COUNT(*)::int AS available
+         FROM leads
+        WHERE assigned_user_id IS NULL
+          AND created_at >= $1::timestamptz
+          AND created_at <= $2::timestamptz`,
+      [from, to]
+    );
+    const { rows: callers } = await pool.query(
+      `SELECT u.id, u.full_name, u.role, u.is_active,
+              COUNT(l.id) FILTER (
+                WHERE l.last_note_outcome IS NULL
+                   OR l.last_note_outcome = 'follow_up'
+              )::int AS open_count
+         FROM crm_users u
+         LEFT JOIN leads l ON l.assigned_user_id = u.id
+        WHERE u.is_active = TRUE
+          AND u.role IN ('junior_caller','senior_caller')
+        GROUP BY u.id
+        ORDER BY u.role DESC, u.full_name ASC`
+    );
+    res.json({ available: poolRows[0]?.available || 0, callers });
+  } catch (err) {
+    console.error('assignment-pool error:', err.message);
+    res.status(500).json({ error: 'Failed to load assignment pool.' });
+  }
+});
+
+/* ── POST /api/admin/leads/manual-assign ──
+   Hands a custom-count distribution of unassigned leads (within a datetime
+   window) to a chosen set of callers. Each entry in `distribution` says
+   "give caller X exactly N leads".
+
+   Body:
+     {
+       from:         ISO datetime (created_at >=),
+       to:           ISO datetime (created_at <=),
+       distribution: [{ user_id: UUID, count: integer ≥ 1 }, …]
+     }
+
+   Leads are pulled in created_at ASC order so the OLDEST unassigned leads
+   are handed out first. The caller distribution is processed in the order
+   supplied. If the requested total exceeds availability, the LAST callers
+   in the list get short rations or zero — we never error half-way.
+
+   Wrapped in a transaction with row-level locks so a concurrent manual /
+   auto assign cannot grab the same leads. */
+router.post('/leads/manual-assign', async (req, res) => {
+  const { from, to } = req.body || {};
+  const distribution = Array.isArray(req.body?.distribution) ? req.body.distribution : null;
+
+  if (!from || !to) {
+    return res.status(400).json({ error: 'from and to ISO datetime params are required' });
+  }
+  if (!distribution || distribution.length === 0) {
+    return res.status(400).json({ error: 'distribution must be a non-empty array' });
+  }
+
+  // Validate distribution shape — UUID + integer count ≥ 1 per row, no dupes.
+  const seen = new Set();
+  for (const row of distribution) {
+    if (!row || typeof row !== 'object') {
+      return res.status(400).json({ error: 'distribution rows must be objects' });
+    }
+    if (!row.user_id || typeof row.user_id !== 'string') {
+      return res.status(400).json({ error: 'each distribution row needs user_id' });
+    }
+    if (seen.has(row.user_id)) {
+      return res.status(400).json({ error: 'distribution user_ids must be distinct' });
+    }
+    seen.add(row.user_id);
+    if (!Number.isInteger(row.count) || row.count < 1) {
+      return res.status(400).json({ error: 'each count must be an integer ≥ 1' });
+    }
+  }
+
+  const totalRequested = distribution.reduce((s, r) => s + r.count, 0);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Verify every destination is an active junior/senior caller.
+    const userIds = distribution.map(r => r.user_id);
+    const { rows: tgt } = await client.query(
+      `SELECT id FROM crm_users
+        WHERE id = ANY($1::uuid[])
+          AND is_active = TRUE
+          AND role IN ('junior_caller','senior_caller')`,
+      [userIds]
+    );
+    if (tgt.length !== userIds.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'One or more destination callers not found or not active.' });
+    }
+
+    // Lock the available unassigned leads in the window, oldest first.
+    const { rows: pool_ } = await client.query(
+      `SELECT id FROM leads
+        WHERE assigned_user_id IS NULL
+          AND created_at >= $1::timestamptz
+          AND created_at <= $2::timestamptz
+        ORDER BY created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT $3`,
+      [from, to, totalRequested]
+    );
+    const available = pool_.length;
+
+    // Walk distribution in order, slicing leads off the front of the pool.
+    let cursor = 0;
+    const actual = [];
+    for (const row of distribution) {
+      const ask = Math.min(row.count, available - cursor);
+      if (ask <= 0) {
+        actual.push({ user_id: row.user_id, requested: row.count, assigned: 0 });
+        continue;
+      }
+      const chunkIds = pool_.slice(cursor, cursor + ask).map(r => r.id);
+      cursor += ask;
+      await client.query(
+        `UPDATE leads
+            SET assigned_user_id = $1::uuid,
+                assigned_at      = NOW()
+          WHERE id = ANY($2::uuid[])`,
+        [row.user_id, chunkIds]
+      );
+      actual.push({ user_id: row.user_id, requested: row.count, assigned: ask });
+    }
+
+    await client.query('COMMIT');
+
+    res.json({
+      total_requested: totalRequested,
+      total_assigned:  cursor,
+      available,
+      distribution:    actual,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('manual-assign error:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to assign leads.' });
+  } finally {
+    client.release();
   }
 });
 

@@ -138,14 +138,6 @@ export default function SalesLeadsLogicView({ token }) {
         </div>
       )}
 
-      {/* Summary grid */}
-      <div className="ll-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        <Stat label="Eligible Callers" value={enabled.length} accent="#5B21B6" tint="rgba(91,33,182,0.08)" />
-        <Stat label="Disabled / Inactive" value={disabled.length} accent="#6B7280" tint="rgba(107,114,128,0.12)" />
-        <Stat label="Receive 250+" value={enabled.filter(c => c.allowed_lead_types.includes('all') || c.allowed_lead_types.includes('250+')).length} accent="#B91C1C" tint="rgba(239,68,68,0.10)" />
-        <Stat label="Receive 150-250" value={enabled.filter(c => c.allowed_lead_types.includes('all') || c.allowed_lead_types.includes('150-250')).length} accent="#A16207" tint="rgba(245,197,24,0.12)" />
-      </div>
-
       {/* Eligible callers list */}
       <div className="bg-white rounded-card shadow-card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid rgba(209,196,240,0.40)' }}>

@@ -1,5 +1,26 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import Lottie from 'lottie-react';
 import DateTimePicker from '../admin/DateTimePicker';
+import LeadTagBadge from '../components/LeadTagBadge';
+import { classifyLeadTag } from '../utils/leadTagging';
+import sadBotRaw from '../assets/bot/robot-sad.json';
+import { patchRobotArm } from '../utils/patchRobotArm';
+import pickTheCallMp3 from '../assets/audio/pick-the-call.mp3';
+import formFillMp3   from '../assets/audio/form-fill.mp3';
+// Patch once at module load — fixes the always-raised right arm so the
+// "sad" bot's hands sit at his sides instead of waving constantly.
+const sadBotData = patchRobotArm(sadBotRaw);
+
+/* One-shot audio helper. Each reason card plays its prompt once when it
+   opens. .play() may reject if the browser blocks autoplay; we swallow
+   the error rather than crashing. */
+function playClipOnce(src) {
+  try {
+    const audio = new Audio(src);
+    audio.volume = 0.9;
+    audio.play().catch(() => {});
+  } catch { /* no Audio API */ }
+}
 
 /* ──────────────────────────────────────────────────────────────────────────
    Lead Call Note Modal — opens when caller clicks the pencil icon on a lead.
@@ -85,9 +106,13 @@ function buildNoteWithDelays(noteText, delayReasons, agentReasons) {
 }
 
 const FORM_WINDOW_SECS = 30;
-const AGENT_RETRY_CAP  = 5;   // 5 SmartFlow miss-reason loops before auto-pause
+// When the caller exceeds this many SmartFlow miss-reason submissions on a
+// single lead, the lead is auto-paused AND the caller's account is auto-
+// paused server-side (POST /api/caller/leads/:id/note flips
+// crm_users.is_active=FALSE). Only a super admin can resume the caller.
+const AGENT_RETRY_CAP  = 15;
 
-export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
+export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhaseChange }) {
   const [fullName, setFullName]                   = useState(lead.full_name || '');
   const [phoneNumber]                             = useState(lead.whatsapp_number || '');
   const [confirmedRange, setConfirmedRange]       = useState('');
@@ -164,6 +189,11 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const customerAttemptRef = useRef(1);
   const wasAgentAnsweredRef = useRef(false);
   const wasCustomerAnsweredRef = useRef(false);
+  // Mirror of dnpRetry state for closures inside SSE/poll callbacks. Tells
+  // the agent.answered handler whether the in-flight call is a TRUE recall
+  // (customer was on the line, both legs reconnect on agent pickup) or a
+  // DNP first-press redial (brand-new dial, customer leg still ringing).
+  const dnpRetryRef = useRef(false);
   const lastSeenSigsRef    = useRef(new Set());
   const customerMissedTimerRef = useRef(null);
   // Earliest started_at we accept signals from in the polling fallback.
@@ -195,6 +225,24 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
   // the missed event after a ring-window expires.
   const phaseTimeoutRef    = useRef(null);
   useEffect(() => { callPhaseRef.current = callPhase; },             [callPhase]);
+  useEffect(() => { dnpRetryRef.current  = dnpRetry;  },             [dnpRetry]);
+
+  /* Bubble phase changes up to the shell so the floating mascot can react
+     (e.g. flip to `thinking` while a reason card is open). Optional prop —
+     the modal works fine without it. */
+  useEffect(() => {
+    if (typeof onPhaseChange === 'function') {
+      try { onPhaseChange(callPhase); } catch { /* never let UI listeners crash the modal */ }
+    }
+  }, [callPhase, onPhaseChange]);
+
+  /* Reason-card audio cues — fire each prompt's MP3 exactly once when the
+     overlay opens. Effect depends on callPhase so re-opening the same card
+     replays the clip. */
+  useEffect(() => {
+    if (callPhase === 'agent_reason_card') playClipOnce(pickTheCallMp3);
+    else if (callPhase === 'form_reason_card') playClipOnce(formFillMp3);
+  }, [callPhase]);
 
   /* Structured log on every phase transition. One JSON line per change —
      greppable in browser DevTools and forwarded to any client-side log
@@ -247,15 +295,28 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
 
     if (eventType === 'agent.answered') {
       wasAgentAnsweredRef.current = true;
-      // Recall path / form-window: agent picking up means customer was already
-      // on the call before the recall flow → jump straight to customer_on_call.
-      // Tata's click-to-call recall fires only agent.answered (no separate
-      // customer.answered) since the customer stayed on the line — so we
-      // flip the customer-answered flag here too. Without this, the next
-      // customer.missed / call.hangup would be treated as "customer never
-      // picked up" and the form_window timer would never appear on the
-      // second disconnect.
+      // recall_ringing covers TWO distinct flows that look identical to the
+      // state machine until we read dnpRetryRef:
+      //
+      //   (a) TRUE Recall — caller clicked the Recall button after the
+      //       customer dropped during form_window. Tata's click-to-call
+      //       reuses the existing customer leg, so agent.answered means
+      //       both legs reconnected → jump straight to 'customer_on_call'
+      //       and pre-flip wasCustomerAnsweredRef so a later customer.missed
+      //       lands form_window correctly.
+      //
+      //   (b) DNP first-press — caller pressed DNP, which redials the same
+      //       lead with a brand-new outbound call. agent.answered here only
+      //       confirms the CALLER picked their SmartFlow; the customer leg
+      //       is still ringing. Going to 'customer_on_call' would lie
+      //       ("Customer is on the call.") — go to 'customer_ringing' so
+      //       the banner stays "Calling customer…" until the real
+      //       customer.answered (or customer.missed) lands.
       if (phase === 'recall_ringing' || phase === 'form_window' || phase === 'form_reason_card') {
+        if (dnpRetryRef.current) {
+          setCallPhase('customer_ringing');
+          return;
+        }
         wasCustomerAnsweredRef.current = true;
         setCustomerAnsweredOnce(true);
         setCallPhase('customer_on_call');
@@ -776,11 +837,20 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
 
   /* Single-shot wrapper for onSaved. The dnp_alert / auto_paused setTimeout
      paths can race with a manual DNP click; this guard ensures the parent
-     advances exactly once. */
+     advances exactly once.
+
+     We compute the live HOT/WARM/COLD/JUNK tag from the current form state
+     and bubble it up via `opts.lead_tag` so the parent (and eventually the
+     backend) has a single canonical classification per save. */
   function callOnSaved(outcome, opts) {
     if (savedRef.current) return;
     savedRef.current = true;
-    onSaved?.(outcome, opts);
+    const leadTag = classifyLeadTag({
+      confirmedRange, otherLanguages, hba1c, takesMedicine, alreadyPaid,
+      webinarAttended, availableForWebinar, nextBatchJoining, patientAge,
+      workingProfessional,
+    });
+    onSaved?.(outcome, { ...(opts || {}), lead_tag: leadTag });
   }
 
   /* Guarded close handler — if the customer was on the call at any point,
@@ -856,7 +926,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
           full_name: (fullName || lead.full_name || '').trim() || null,
           outcome:   'auto_paused',
           note:      buildNoteWithDelays(
-            'Auto-paused after 5 SmartFlow misses by caller.',
+            `Auto-paused after ${AGENT_RETRY_CAP} SmartFlow misses by caller.`,
             delayReasons,
             agentReasons,
           ),
@@ -1047,8 +1117,24 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved }) {
       }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 10 }}>
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <h2 style={{ fontWeight: 700, fontSize: '1.05rem', color: '#3B0764', margin: 0 }}>Fill up call details</h2>
+            {/* Live HOT / WARM / COLD / JUNK classifier — updates as the
+               form's hard-criteria fields change. */}
+            <LeadTagBadge
+              fields={{
+                confirmedRange,
+                otherLanguages,
+                hba1c,
+                takesMedicine,
+                alreadyPaid,
+                webinarAttended,
+                availableForWebinar,
+                nextBatchJoining,
+                patientAge,
+                workingProfessional,
+              }}
+            />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
@@ -1547,34 +1633,99 @@ function CenteredOverlay({
 
   if (phase === 'agent_reason_card') {
     return wrap(
-      <div style={cardStyle}>
-        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#991B1B', textAlign: 'center' }}>
-          Why didn't you pick the call?
-        </h3>
-        <p style={{ margin: '10px 0 14px', fontSize: '0.82rem', color: 'rgba(91,33,182,0.65)', textAlign: 'center' }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 14, width: '100%', maxWidth: 480,
+        fontFamily: 'Outfit, sans-serif',
+      }}>
+        <style>{`
+          @keyframes sadBubblePop {
+            0%   { transform: scale(0.6)  translateY(16px); opacity: 0; }
+            60%  { transform: scale(1.04) translateY(0);    opacity: 1; }
+            100% { transform: scale(1)    translateY(0);    opacity: 1; }
+          }
+          @keyframes sadBubbleFloat {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-4px); }
+          }
+        `}</style>
+
+        {/* Speech bubble — emerges from above the robot's head with a tail
+           pointing down to it. */}
+        <div style={{
+          position: 'relative',
+          background: '#fff',
+          color: '#3B0764',
+          padding: '14px 22px',
+          borderRadius: 22,
+          maxWidth: 'min(420px, 90vw)',
+          textAlign: 'center',
+          fontWeight: 700, fontSize: '0.98rem', lineHeight: 1.35,
+          boxShadow: '0 12px 32px rgba(15,0,40,0.35), 0 2px 8px rgba(15,0,40,0.18)',
+          marginBottom: -10,
+          animation: 'sadBubblePop 480ms cubic-bezier(0.34,1.56,0.64,1) both, sadBubbleFloat 2.6s ease-in-out 700ms infinite',
+        }}>
+          Hey buddy! Enna aachu? Yen call ah pick pannala?
+          <div style={{
+            position: 'absolute', bottom: -10, left: '50%',
+            width: 0, height: 0, transform: 'translateX(-50%)',
+            borderLeft:  '12px solid transparent',
+            borderRight: '12px solid transparent',
+            borderTop:   '12px solid #fff',
+            filter: 'drop-shadow(0 4px 4px rgba(15,0,40,0.18))',
+          }} />
+        </div>
+
+        {/* Sad robot */}
+        <div style={{ width: 200, height: 200 }}>
+          <Lottie
+            animationData={sadBotData}
+            loop
+            autoplay
+            style={{ width: '100%', height: '100%' }}
+            rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }}
+          />
+        </div>
+
+        {/* Attempt indicator */}
+        <div style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.85)', textAlign: 'center' }}>
           Submitting will retrigger the call. Attempt {agentAttempts + 1} of {retryCap}.
-        </p>
+        </div>
+
+        {/* Reason textarea (box option) */}
         <textarea
           value={agentReason}
           onChange={e => onAgentReasonChange(e.target.value)}
           placeholder="e.g. SmartFlow not ready, away from desk…"
           autoFocus rows={3}
           style={{
-            width: '100%', padding: '10px 12px', borderRadius: 6,
-            border: '1px solid rgba(220,38,38,0.30)', background: '#fff',
-            fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', color: '#3B0764',
+            width: 'min(420px, 90vw)',
+            padding: '12px 14px', borderRadius: 12,
+            border: '1px solid rgba(255,255,255,0.40)',
+            background: 'rgba(255,255,255,0.95)',
+            fontFamily: 'Outfit, sans-serif', fontSize: '0.92rem', color: '#3B0764',
             outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+            boxShadow: '0 8px 24px rgba(15,0,40,0.25)',
           }}
         />
+
+        {/* Submit button */}
         <button type="button" onClick={onAgentReasonSubmit} disabled={!agentReason.trim()}
           style={{
-            width: '100%', marginTop: 14,
-            height: '2.6rem', borderRadius: 8, border: 'none',
-            background: agentReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
-            color: '#fff', fontWeight: 800, fontSize: '0.88rem',
+            width: 'min(420px, 90vw)',
+            height: '2.8rem', borderRadius: 50, border: 'none',
+            background: agentReason.trim()
+              ? 'linear-gradient(135deg, #DC2626, #B91C1C)'
+              : 'rgba(220,38,38,0.35)',
+            color: '#fff', fontWeight: 800, fontSize: '0.92rem',
             cursor: agentReason.trim() ? 'pointer' : 'not-allowed',
-          }}>
-          Submit Reason & Retry
+            boxShadow: agentReason.trim() ? '0 8px 24px rgba(220,38,38,0.40)' : 'none',
+            transition: 'transform 140ms ease',
+          }}
+          onMouseEnter={e => { if (agentReason.trim()) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = ''; }}
+        >
+          Submit Reason &amp; Retry
         </button>
       </div>
     );
@@ -1582,33 +1733,100 @@ function CenteredOverlay({
 
   if (phase === 'form_reason_card') {
     return wrap(
-      <div style={cardStyle}>
-        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#991B1B', textAlign: 'center' }}>
-          Please enter the reason for not completing the form.
-        </h3>
-        <p style={{ margin: '10px 0 14px', fontSize: '0.82rem', color: 'rgba(91,33,182,0.65)', textAlign: 'center' }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 14, width: '100%', maxWidth: 480,
+        fontFamily: 'Outfit, sans-serif',
+      }}>
+        {/* Reuses the same keyframes injected by the agent_reason_card branch
+           — both cards use class-less inline animations referencing
+           sadBubblePop / sadBubbleFloat; declared once below for safety. */}
+        <style>{`
+          @keyframes sadBubblePop {
+            0%   { transform: scale(0.6)  translateY(16px); opacity: 0; }
+            60%  { transform: scale(1.04) translateY(0);    opacity: 1; }
+            100% { transform: scale(1)    translateY(0);    opacity: 1; }
+          }
+          @keyframes sadBubbleFloat {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-4px); }
+          }
+        `}</style>
+
+        {/* Speech bubble */}
+        <div style={{
+          position: 'relative',
+          background: '#fff',
+          color: '#3B0764',
+          padding: '14px 22px',
+          borderRadius: 22,
+          maxWidth: 'min(420px, 90vw)',
+          textAlign: 'center',
+          fontWeight: 700, fontSize: '0.98rem', lineHeight: 1.35,
+          boxShadow: '0 12px 32px rgba(15,0,40,0.35), 0 2px 8px rgba(15,0,40,0.18)',
+          marginBottom: -10,
+          animation: 'sadBubblePop 480ms cubic-bezier(0.34,1.56,0.64,1) both, sadBubbleFloat 2.6s ease-in-out 700ms infinite',
+        }}>
+          Enna aachu en form fill pannala?
+          <div style={{
+            position: 'absolute', bottom: -10, left: '50%',
+            width: 0, height: 0, transform: 'translateX(-50%)',
+            borderLeft:  '12px solid transparent',
+            borderRight: '12px solid transparent',
+            borderTop:   '12px solid #fff',
+            filter: 'drop-shadow(0 4px 4px rgba(15,0,40,0.18))',
+          }} />
+        </div>
+
+        {/* Sad robot */}
+        <div style={{ width: 200, height: 200 }}>
+          <Lottie
+            animationData={sadBotData}
+            loop
+            autoplay
+            style={{ width: '100%', height: '100%' }}
+            rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }}
+          />
+        </div>
+
+        {/* Restart-timer indicator */}
+        <div style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.85)', textAlign: 'center' }}>
           Submitting restarts the {totalWindow}-second timer.
-        </p>
+        </div>
+
+        {/* Reason textarea */}
         <textarea
           value={delayReason}
           onChange={e => onDelayReasonChange(e.target.value)}
           placeholder="e.g. Looking up patient history, asking supervisor…"
           autoFocus rows={3}
           style={{
-            width: '100%', padding: '10px 12px', borderRadius: 6,
-            border: '1px solid rgba(220,38,38,0.30)', background: '#fff',
-            fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem', color: '#3B0764',
+            width: 'min(420px, 90vw)',
+            padding: '12px 14px', borderRadius: 12,
+            border: '1px solid rgba(255,255,255,0.40)',
+            background: 'rgba(255,255,255,0.95)',
+            fontFamily: 'Outfit, sans-serif', fontSize: '0.92rem', color: '#3B0764',
             outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+            boxShadow: '0 8px 24px rgba(15,0,40,0.25)',
           }}
         />
+
+        {/* Submit button */}
         <button type="button" onClick={onDelayReasonSubmit} disabled={!delayReason.trim()}
           style={{
-            width: '100%', marginTop: 14,
-            height: '2.6rem', borderRadius: 8, border: 'none',
-            background: delayReason.trim() ? '#B91C1C' : 'rgba(220,38,38,0.30)',
-            color: '#fff', fontWeight: 800, fontSize: '0.88rem',
+            width: 'min(420px, 90vw)',
+            height: '2.8rem', borderRadius: 50, border: 'none',
+            background: delayReason.trim()
+              ? 'linear-gradient(135deg, #DC2626, #B91C1C)'
+              : 'rgba(220,38,38,0.35)',
+            color: '#fff', fontWeight: 800, fontSize: '0.92rem',
             cursor: delayReason.trim() ? 'pointer' : 'not-allowed',
-          }}>
+            boxShadow: delayReason.trim() ? '0 8px 24px rgba(220,38,38,0.40)' : 'none',
+            transition: 'transform 140ms ease',
+          }}
+          onMouseEnter={e => { if (delayReason.trim()) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = ''; }}
+        >
           Submit Reason
         </button>
       </div>

@@ -60,7 +60,17 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
         // not enough space either side — anchor to top with full available height
         top = 8;
       }
-      setDropPos({ top, left: r.left, width: r.width, maxH });
+      // Popover needs a comfortable minimum width regardless of how narrow
+      // the trigger button is, otherwise the 7-column calendar grid + the
+      // time / AM-PM block get squashed and unreadable. Anchor to the
+      // trigger's left edge but clamp width into a sensible range.
+      const POPOVER_W = Math.max(320, Math.min(380, r.width));
+      // Keep the popover inside the viewport horizontally.
+      let left = r.left;
+      if (left + POPOVER_W > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - POPOVER_W - 8);
+      }
+      setDropPos({ top, left, width: POPOVER_W, maxH });
     }
     setOpen(o => !o);
   }
@@ -219,8 +229,7 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
           {/* Month nav */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <button type="button" onClick={prevMonth}
-              disabled={!isViewingPastMonth() && viewYear === today.getFullYear() && viewMonth === today.getMonth()}
-              style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(139,92,246,0.18)', background: 'rgba(237,234,248,0.50)', cursor: (viewYear === today.getFullYear() && viewMonth === today.getMonth()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: (viewYear === today.getFullYear() && viewMonth === today.getMonth()) ? 0.3 : 1 }}>
+              style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(139,92,246,0.18)', background: 'rgba(237,234,248,0.50)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#3B0764' }}>{MONTHS[viewMonth]} {viewYear}</span>
@@ -242,27 +251,23 @@ export default function DateTimePicker({ value, onChange, placeholder = 'Select 
             {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
               const sel = isSelected(day);
               const tod = isToday(day);
-              const past = isPast(day);
               return (
                 <button
                   key={day}
                   type="button"
-                  disabled={past}
-                  onClick={() => !past && pickDay(day)}
+                  onClick={() => pickDay(day)}
                   style={{
                     height: 26, borderRadius: 7, border: 'none',
                     background: sel ? '#5B21B6' : tod ? 'rgba(139,92,246,0.12)' : 'transparent',
-                    color: past ? '#d1d5db' : sel ? '#fff' : tod ? '#5B21B6' : '#3B0764',
+                    color: sel ? '#fff' : tod ? '#5B21B6' : '#3B0764',
                     fontWeight: sel ? 700 : tod ? 600 : 400,
                     fontSize: '0.78rem',
-                    cursor: past ? 'not-allowed' : 'pointer',
+                    cursor: 'pointer',
                     transition: 'all 150ms',
                     outline: tod && !sel ? '1.5px solid rgba(91,33,182,0.35)' : 'none',
-                    textDecoration: past ? 'line-through' : 'none',
-                    opacity: past ? 0.5 : 1,
                   }}
-                  onMouseEnter={e => { if (!sel && !past) e.currentTarget.style.background = 'rgba(139,92,246,0.15)'; }}
-                  onMouseLeave={e => { if (!sel && !past) e.currentTarget.style.background = tod ? 'rgba(139,92,246,0.12)' : 'transparent'; }}
+                  onMouseEnter={e => { if (!sel) e.currentTarget.style.background = 'rgba(139,92,246,0.15)'; }}
+                  onMouseLeave={e => { if (!sel) e.currentTarget.style.background = tod ? 'rgba(139,92,246,0.12)' : 'transparent'; }}
                 >
                   {day}
                 </button>

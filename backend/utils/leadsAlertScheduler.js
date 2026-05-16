@@ -44,18 +44,28 @@ const ALERT_WINDOWS = [
   { name: 'leads_alert_1hr',     lt: 1,        gt: 0  },
 ];
 
+/* Returns the recipient phones for a source as an array. Prefers the
+   new alert_phone_numbers JSONB column; falls back to the legacy
+   alert_phone_number single string if the array is empty. */
+function getAlertPhones(cfg) {
+  const arr = Array.isArray(cfg?.alert_phone_numbers) ? cfg.alert_phone_numbers : [];
+  if (arr.length) return arr.filter(Boolean);
+  return cfg?.alert_phone_number ? [cfg.alert_phone_number] : [];
+}
+
 async function checkSource(source) {
   // 1. Read config
   const { rows: cfgRows } = await pool.query(
     `SELECT next_webinar_at, backup_webinar_at, next_webinar_date,
-            alert_phone_number
+            alert_phone_number, alert_phone_numbers
        FROM webinar_config
       WHERE source = $1`,
     [source]
   );
   const cfg = cfgRows[0];
   if (!cfg) return { source, skipped: 'no_config_row' };
-  if (!cfg.alert_phone_number) return { source, skipped: 'no_alert_phone' };
+  const phones = getAlertPhones(cfg);
+  if (phones.length === 0) return { source, skipped: 'no_alert_phone' };
   if (!cfg.next_webinar_at)    return { source, skipped: 'no_current_deadline' };
 
   // 2. Hours to current deadline
@@ -103,27 +113,33 @@ async function checkSource(source) {
   const currentWebinarId = actRows[0]?.id || null;
   if (!currentWebinarId) return { source, skipped: 'no_active_webinar' };
 
-  // 6. Dedup — claim the alert row first, send only if claim succeeded.
+  // 6. Dedup — claim ONE alert row first; the single claim covers the
+  // fan-out send so we don't double-fire on a re-run.
   const claim = await pool.query(
     `INSERT INTO alert_log (webinar_id, source, template_name, sent_to)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (webinar_id, template_name) DO NOTHING
      RETURNING id`,
-    [currentWebinarId, source, win.name, cfg.alert_phone_number]
+    [currentWebinarId, source, win.name, phones.join(',')]
   );
   if (claim.rows.length === 0) return { source, skipped: 'already_sent', template: win.name };
 
-  // 7. Send WATI
-  const result = await wati.sendTemplate({
-    phone:        cfg.alert_phone_number,
-    templateName: win.name,
-  });
+  // 7. Send WATI — one request per recipient so each saved number gets
+  // its own message. We collect per-phone results and stamp an aggregate
+  // success flag on the single alert_log row (true iff ALL recipients
+  // accepted; otherwise the response JSON has the per-phone detail).
+  const sendResults = [];
+  for (const ph of phones) {
+    const r = await wati.sendTemplate({ phone: ph, templateName: win.name });
+    sendResults.push({ phone: ph, ok: r.ok, status: r.status, error: r.error });
+    console.log(`[leadsAlert:${source}] sent ${win.name} to ${ph} (${hours.toFixed(2)}h remaining) — ok=${r.ok}`);
+  }
+  const allOk = sendResults.every(r => r.ok);
   await pool.query(
     `UPDATE alert_log SET success = $1, response = $2 WHERE id = $3`,
-    [result.ok, result.body || { error: result.error }, claim.rows[0].id]
+    [allOk, { recipients: sendResults }, claim.rows[0].id]
   );
-  console.log(`[leadsAlert:${source}] sent ${win.name} to ${cfg.alert_phone_number} (${hours.toFixed(2)}h remaining) — ok=${result.ok}`);
-  return { source, sent: win.name, ok: result.ok, hoursRemaining: hours };
+  return { source, sent: win.name, ok: allOk, recipients: sendResults, hoursRemaining: hours };
 }
 
 /**
@@ -145,14 +161,15 @@ const WA_LINK_BUCKET_END   = 950;
 async function checkWaLinkAlert(source) {
   // 1. Read config
   const { rows: cfgRows } = await pool.query(
-    `SELECT alert_phone_number, pending_whatsapp_link_2, whatsapp_link_swap_at_2
+    `SELECT alert_phone_number, alert_phone_numbers, pending_whatsapp_link_2, whatsapp_link_swap_at_2
        FROM webinar_config
       WHERE source = $1`,
     [source]
   );
   const cfg = cfgRows[0];
   if (!cfg) return { source, kind: 'wa_link', skipped: 'no_config_row' };
-  if (!cfg.alert_phone_number) return { source, kind: 'wa_link', skipped: 'no_alert_phone' };
+  const phones = getAlertPhones(cfg);
+  if (phones.length === 0) return { source, kind: 'wa_link', skipped: 'no_alert_phone' };
 
   // 2. Gate: skip entirely if the admin already configured a 2nd link.
   const pending2 = (cfg.pending_whatsapp_link_2 || '').trim();
@@ -193,21 +210,27 @@ async function checkWaLinkAlert(source) {
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (webinar_id, template_name) DO NOTHING
        RETURNING id`,
-      [currentWebinarId, source, logName, cfg.alert_phone_number]
+      [currentWebinarId, source, logName, phones.join(',')]
     );
     if (claim.rows.length === 0) continue; // already fired this bucket
-    const result = await wati.sendTemplate({
-      phone:        cfg.alert_phone_number,
-      templateName: 'wa_link_alert',
-      parameters:   [String(b)],
-      broadcastName: 'wa_link_alert',
-    });
+    // Fan out — one WATI send per saved phone number.
+    const bucketResults = [];
+    for (const ph of phones) {
+      const r = await wati.sendTemplate({
+        phone:         ph,
+        templateName:  'wa_link_alert',
+        parameters:    [String(b)],
+        broadcastName: 'wa_link_alert',
+      });
+      bucketResults.push({ phone: ph, ok: r.ok });
+      console.log(`[wa_link_alert:${source}] sent bucket=${b} to ${ph} (count=${leadCount}) ok=${r.ok}`);
+    }
+    const bucketAllOk = bucketResults.every(r => r.ok);
     await pool.query(
       `UPDATE alert_log SET success = $1, response = $2 WHERE id = $3`,
-      [result.ok, result.body || { error: result.error }, claim.rows[0].id]
+      [bucketAllOk, { recipients: bucketResults }, claim.rows[0].id]
     );
-    sent.push({ bucket: b, ok: result.ok });
-    console.log(`[wa_link_alert:${source}] sent bucket=${b} to ${cfg.alert_phone_number} (count=${leadCount}) ok=${result.ok}`);
+    sent.push({ bucket: b, ok: bucketAllOk, recipients: bucketResults });
   }
 
   if (sent.length === 0) {

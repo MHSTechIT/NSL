@@ -13,6 +13,15 @@ const { startScheduler: startLeadsAlert }       = require('./utils/leadsAlertSch
 const { startStaleCallReaper }                  = require('./utils/staleCallReaper');
 const { startDailyReconciliation }              = require('./utils/dailyReconciliation');
 
+// Single-process dev mode: also register the cross-service NOTIFY handlers
+// so the same pg_notify('lead.created') / pg_notify('webinar.config.updated')
+// fires that routes/leads.js and routes/admin.js emit actually drive the
+// in-process assigner and SSE rebroadcast. In the split deployment these
+// handlers live on different services (CRM and the funnel pair respectively).
+const { startListener }                          = require('./utils/pgListener');
+const { handleLeadCreated, sweepUnassignedLeads } = require('./utils/leadCreatedListener');
+const { handleWebinarConfigUpdated }             = require('./utils/webinarConfigListener');
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`MHS server running on port ${PORT}`);
@@ -46,4 +55,13 @@ app.listen(PORT, () => {
   // last_note_outcome=NULL for > 24 h. Catches anything the save-on-close
   // guard missed (tab crash, network drop, etc.).
   startDailyReconciliation();
+
+  // Register both LISTEN handlers in this single process so the same code
+  // works whether the deployer runs `node index.js` (everything in one
+  // process) or boots the three split entries separately.
+  startListener({
+    'lead.created':           handleLeadCreated,
+    'webinar.config.updated': handleWebinarConfigUpdated,
+  });
+  sweepUnassignedLeads().catch(e => console.error('[startup sweep] failed:', e.message));
 });

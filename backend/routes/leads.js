@@ -3,7 +3,9 @@ const { body, validationResult } = require('express-validator');
 const router = express.Router();
 const pool = require('../db');
 const { rotateLink } = require('../utils/linkRotation');
-const { assignNewLead } = require('../utils/leadAssigner');
+// assignNewLead is no longer called from this route — see the pg_notify
+// block in the POST handler. The lead-assigner runs only on the CRM service
+// (or single-process dev mode), driven by the 'lead.created' notification.
 
 function computeLeadScore(sugarLevel, duration) {
   if (duration === 'pre') return 2;
@@ -112,10 +114,25 @@ router.post('/leads', validators, async (req, res) => {
       rotateLink(webinar_id).catch(e => console.error('[LinkRotation] post-lead error:', e.message));
     }
 
-    // Fire-and-forget: round-robin assign this lead to an eligible caller
+    // Fire-and-forget: round-robin assign this lead to an eligible caller.
+    //
+    // Post-split this no longer happens in-process — funnel-meta and funnel-yt
+    // don't run the assigner directly because the round-robin state lives on
+    // the CRM service. Instead we fire pg_notify('lead.created') and the CRM
+    // service's LISTEN handler picks it up and runs assignNewLead there.
+    //
+    // The single-process app.js dev entry registers its OWN LISTEN handler
+    // for the same channel so this still works end-to-end in dev mode.
     if (webinar_id) {
-      assignNewLead(rows[0].id, sugar_level, webinar_id)
-        .catch(e => console.error('[Assigner] post-lead error:', e.message));
+      pool.query(
+        `SELECT pg_notify('lead.created', $1)`,
+        [JSON.stringify({
+          leadId:     rows[0].id,
+          source,
+          sugarLevel: sugar_level,
+          webinarId:  webinar_id,
+        })]
+      ).catch(e => console.error('[Assigner notify] post-lead error:', e.message));
     }
   } catch (err) {
     console.error('Lead insert error:', err.message);

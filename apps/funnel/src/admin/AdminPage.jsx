@@ -1,11 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
 import AdminLogin from './AdminLogin';
+import FunnelOverview from './FunnelOverview';
 import HomeDashboard from './HomeDashboard';
 import LeadsTable from './LeadsTable';
 import WhatsAppLinksEditor from './WhatsAppLinksEditor';
 import TimerConfig from './TimerConfig';
 
 const TAB_ICONS = {
+  funnel: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {/* Classic funnel silhouette */}
+      <path d="M3 4h18l-7 9v7l-4-2v-5L3 4z"/>
+    </svg>
+  ),
   dashboard: (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -32,6 +39,7 @@ const TAB_ICONS = {
 };
 
 const TABS = [
+  { id: 'funnel',    label: 'Funnel' },
   { id: 'dashboard', label: 'Page Performance' },
   { id: 'leads',     label: 'Leads' },
   { id: 'whatsapp',  label: 'WhatsApp Links' },
@@ -199,7 +207,7 @@ function ChangePwModal({ token, onClose, onSuccess }) {
 /* ══════════════════════ AdminPage ══════════════════════ */
 export default function AdminPage() {
   const [token, setToken]           = useState(() => sessionStorage.getItem('mhs_admin_token') || '');
-  const [tab, setTab]               = useState('dashboard');
+  const [tab, setTab]               = useState('funnel');
   const [showDropdown, setShowDropdown] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
   const dropRef = useRef(null);
@@ -328,6 +336,7 @@ export default function AdminPage() {
 
         {/* Content card */}
         <div className="bg-white rounded-card shadow-card p-6 admin-content-card">
+          {tab === 'funnel'    && <FunnelOverview token={token} />}
           {tab === 'dashboard' && <HomeDashboard token={token} />}
           {tab === 'leads'     && <LeadsTable token={token} />}
           {tab === 'whatsapp'  && <WhatsAppLinksEditor token={token} />}

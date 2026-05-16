@@ -15,7 +15,6 @@ const FILTERS = [
   { id: 'warm',      label: 'Warm',        kind: 'leads' },
   { id: 'touched',   label: 'Touched',     kind: 'leads' },
   { id: 'untouched', label: 'Untouched',   kind: 'leads' },
-  { id: 'stale_24h', label: '>24h Stale',  kind: 'leads' },
   { id: 'follow_up', label: 'Follow-ups',  kind: 'leads' },
   { id: 'calls',     label: 'Total Calls', kind: 'calls' },
   { id: 'in',        label: 'Incoming',    kind: 'calls' },

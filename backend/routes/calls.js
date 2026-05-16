@@ -9,6 +9,7 @@ const router  = express.Router();
 const pool    = require('../db');
 const tata    = require('../utils/tataClient');
 const { callerAuth } = require('../middleware/callerAuth');
+const activityLogger = require('../utils/activityLogger');
 
 router.use(callerAuth);
 
@@ -129,6 +130,13 @@ router.post('/calls/start', async (req, res) => {
       }));
     } catch (_) { /* best-effort */ }
 
+    // Activity audit: open an ON_CALL window for this caller. The
+    // matching hangup endpoint closes it. Carries lead name + lead_id
+    // so the drawer can show "ON CALL · Aman Sharma".
+    activityLogger.startEvent(req.caller.id, 'ON_CALL', {
+      lead_id, call_id: callId, lead_name: lead.full_name,
+    });
+
     res.json({
       success: true,
       call_id: callId,
@@ -170,6 +178,15 @@ router.post('/leads/:lead_id/hangup', async (req, res) => {
     if (!call.provider_call_id) {
       return res.json({ success: true, no_provider_id: true });
     }
+    // Stub calls (test leads) never went to Tata — just mark the row ended.
+    if (String(call.provider_call_id).startsWith('stub-')) {
+      await pool.query(
+        `UPDATE calls SET status = 'ended', ended_at = COALESCE(ended_at, NOW()), updated_at = NOW() WHERE id = $1`,
+        [call.id]
+      );
+      activityLogger.endEvent(req.caller.id, 'ON_CALL');
+      return res.json({ success: true, call_id: call.id, stubbed: true });
+    }
     const result = await tata.hangup({
       providerCallId: call.provider_call_id,
       accountType:    call.tata_account_type || undefined,
@@ -183,6 +200,8 @@ router.post('/leads/:lead_id/hangup', async (req, res) => {
         [call.id]
       );
     }
+    // Activity audit: close the ON_CALL window for this caller.
+    activityLogger.endEvent(req.caller.id, 'ON_CALL');
     res.json({
       success: !!result.ok,
       call_id: call.id,
@@ -223,6 +242,15 @@ router.post('/calls/:call_id/hangup', async (req, res) => {
     if (!call.provider_call_id) {
       return res.json({ success: true, no_provider_id: true });
     }
+    // Stub calls (test leads) never went to Tata — just mark ended.
+    if (String(call.provider_call_id).startsWith('stub-')) {
+      await pool.query(
+        `UPDATE calls SET status = 'ended', ended_at = COALESCE(ended_at, NOW()), updated_at = NOW() WHERE id = $1`,
+        [callId]
+      );
+      activityLogger.endEvent(req.caller.id, 'ON_CALL');
+      return res.json({ success: true, stubbed: true });
+    }
 
     const result = await tata.hangup({
       providerCallId: call.provider_call_id,
@@ -240,6 +268,8 @@ router.post('/calls/:call_id/hangup', async (req, res) => {
         [callId]
       );
     }
+    // Activity audit: close the ON_CALL window for this caller.
+    activityLogger.endEvent(req.caller.id, 'ON_CALL');
 
     res.json({
       success: !!result.ok,

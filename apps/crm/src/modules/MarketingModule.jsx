@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import FunnelOverview      from '../admin/FunnelOverview';
 import HomeDashboard       from '../admin/HomeDashboard';
 import LeadsTable          from '../admin/LeadsTable';
 import WhatsAppLinksEditor from '../admin/WhatsAppLinksEditor';
@@ -6,6 +7,11 @@ import TimerConfig         from '../admin/TimerConfig';
 import SettingsConfig      from '../admin/SettingsConfig';
 
 const TAB_ICONS = {
+  funnel: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 4h18l-7 9v7l-4-2v-5L3 4z"/>
+    </svg>
+  ),
   dashboard: (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -38,6 +44,7 @@ const TAB_ICONS = {
 };
 
 const TABS = [
+  { id: 'funnel',    label: 'Funnel' },
   { id: 'dashboard', label: 'Page Performance' },
   { id: 'leads',     label: 'Leads' },
   { id: 'whatsapp',  label: 'WhatsApp Links' },
@@ -46,7 +53,7 @@ const TABS = [
 ];
 
 export default function MarketingModule({ token, source = 'meta' }) {
-  const [tab, setTab] = useState('dashboard');
+  const [tab, setTab] = useState('funnel');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -84,6 +91,7 @@ export default function MarketingModule({ token, source = 'meta' }) {
 
       {/* Content card */}
       <div className="marketing-content-card bg-white rounded-card shadow-card p-6">
+        {tab === 'funnel'    && <FunnelOverview token={token} source={source} />}
         {tab === 'dashboard' && <HomeDashboard token={token} source={source} />}
         {tab === 'leads'     && <LeadsTable token={token} source={source} />}
         {tab === 'whatsapp'  && <WhatsAppLinksEditor token={token} source={source} />}
