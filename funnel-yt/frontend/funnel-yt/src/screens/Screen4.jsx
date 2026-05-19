@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { m } from 'framer-motion';
 import { useFunnel } from '../context/FunnelContext';
@@ -90,6 +90,25 @@ export default function Screen4() {
     fetch('/api/health').catch(() => {});
   }, []);
 
+  /* Google Ads ATC — fires once the user has cleared the first two fields
+     (Full Name valid + WhatsApp valid) AND has started typing into the
+     third (Email has any character). Counts the strongest pre-submit
+     intent signal so Ads bidding can optimise on it before they actually
+     hit COMPLETE REGISTRATION. The ref-guard makes the fire idempotent
+     within a single page session — deleting + retyping email won't double
+     count, and field-order doesn't matter (paste / autofill works too). */
+  const atcFiredRef = useRef(false);
+  useEffect(() => {
+    if (atcFiredRef.current) return;
+    const nameValid     = /^[a-zA-Z\s]{2,}$/.test(fullName.trim());
+    const whatsappValid = /^\d{10}$/.test(whatsappNumber);
+    const emailStarted  = email.length > 0;
+    if (nameValid && whatsappValid && emailStarted) {
+      atcFiredRef.current = true;
+      gtagAtc();
+    }
+  }, [fullName, whatsappNumber, email]);
+
   function handlePhoneInput(e) {
     const val = e.target.value.replace(/\D/g, '').slice(0, 10);
     setWhatsappNumber(val);
@@ -101,10 +120,9 @@ export default function Screen4() {
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
-    // Google Ads ATC — fire as soon as a valid submit click happens, before
-    // the POST. Counts "user committed to register" intent separately from
-    // the (out-of-scope) success-only Lead conversion.
-    gtagAtc();
+    // (ATC conversion already fired earlier — see the useEffect that
+    // watches fullName + whatsappNumber + email. We do NOT fire it here
+    // to avoid double-counting.)
 
     setSubmitting(true);
     setServerError('');
