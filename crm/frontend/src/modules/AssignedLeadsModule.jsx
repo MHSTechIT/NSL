@@ -5,6 +5,7 @@ import happyBotRaw     from '../assets/bot/robot-happy.json';
 import confettiData    from '../assets/bot/confetti.json';
 import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
 import { emitCallerState } from '../utils/callerActivity';
+import SourceBadge from '../components/SourceBadge';
 // Tag-specific celebration audio. Played alongside the speech-bubble line.
 import hotLeadMp3   from '../assets/audio/hot-lead.mp3';
 import warmLeadMp3  from '../assets/audio/warm-lead.mp3';
@@ -808,6 +809,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
                       <td style={tdStyle}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                           <span style={{ fontWeight: 600, color: '#3B0764' }}>{l.full_name || '—'}</span>
+                          <SourceBadge source={l.source} />
                           {followUpDue && (
                             <span style={{
                               display: 'inline-block', padding: '2px 8px', borderRadius: 50,

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import EditCallNoteModal from './EditCallNoteModal';
+import SourceBadge from '../components/SourceBadge';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Completed Leads — leads the caller has marked done OR follow-up-scheduled
@@ -322,6 +323,7 @@ function LeadRow({ lead, jwt, expanded, onToggle, onSaved }) {
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 600, color: '#3B0764', fontSize: '0.92rem' }}>{lead.full_name || '—'}</span>
+            <SourceBadge source={lead.source} />
             {qBadge && (
               <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 50, fontSize: '0.68rem', fontWeight: 700, background: qBadge.bg, color: qBadge.fg, whiteSpace: 'nowrap' }}>
                 {qBadge.label}

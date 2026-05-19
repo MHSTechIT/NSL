@@ -562,7 +562,7 @@ export default function Screen1A() {
                 fontSize: 'clamp(2rem, 3.5vw, 3.2rem)', lineHeight: 1.1,
                 textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 14,
               }}>
-                REVERSE DIABETES<br />WITHOUT TABLETS
+                MANAGE DIABETES<br />WITHOUT TABLETS
               </h1>
               <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.05rem', color: '#3b1f6e', lineHeight: 1.65, fontWeight: 500 }}>
                 {t.screen1A.subheadline.english}
@@ -595,7 +595,7 @@ export default function Screen1A() {
             </div>
             <div className="glass-card" style={{ paddingTop: 20, paddingBottom: 22, paddingLeft: 20, paddingRight: 20, textAlign: 'center', position: 'relative', zIndex: 1, background: 'rgba(255,255,255,0.55)' }}>
               <h1 className="heading-shine" style={{ fontFamily: '"Montserrat", sans-serif', fontWeight: 900, fontSize: 'clamp(1.45rem, 7vw, 1.9rem)', lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '0.01em', marginBottom: 10 }}>
-                REVERSE DIABETES<br />WITHOUT TABLETS
+                MANAGE DIABETES<br />WITHOUT TABLETS
               </h1>
               <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: '#3b1f6e', lineHeight: 1.55, fontWeight: 500, marginBottom: 18 }}>
                 {t.screen1A.subheadline.english}

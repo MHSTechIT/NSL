@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import SourceBadge from '../components/SourceBadge';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Missed Calls — inbound calls (customer dialed the Tata DID) that didn't
@@ -238,6 +239,7 @@ export default function MissedCallsModule({ jwt }) {
                       <span style={{ fontWeight: 600, color: '#3B0764', fontSize: '0.92rem' }}>
                         {c.full_name || 'Unknown caller'}
                       </span>
+                      <SourceBadge source={c.source} />
                       {!c.is_known && (
                         <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: '0.68rem', fontWeight: 700, background: 'rgba(91,33,182,0.08)', color: '#5B21B6' }}>
                           NEW

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import SourceBadge from '../components/SourceBadge';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Not Picked Leads — leads the caller dialed but couldn't reach. Marked via
@@ -117,7 +118,10 @@ export default function NotPickedLeadsModule({ jwt }) {
                   return (
                     <tr key={l.id} style={{ borderTop: '1px solid rgba(209,196,240,0.30)' }}>
                       <Td>
-                        <div style={{ fontWeight: 600, color: '#3B0764' }}>{l.full_name || '—'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, color: '#3B0764' }}>{l.full_name || '—'}</span>
+                          <SourceBadge source={l.source} />
+                        </div>
                         <div style={{ fontSize: '0.72rem', color: 'rgba(91,33,182,0.55)' }}>{l.email || '—'}</div>
                       </Td>
                       <Td mono>{fmtPhone(l.whatsapp_number)}</Td>

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import DateTimePicker from './DateTimePicker';
+import SourceBadge from '../components/SourceBadge';
 
 const DURATION_LABELS = { new: '< 1 yr', mid: '1–5 yrs', long: '5+ yrs', pre: 'Pre-diabetic' };
 const SUGAR_LABELS    = { '150-250': '150–250', '250+': '250+' };
@@ -649,7 +650,12 @@ export default function LeadsTable({ token, source = 'meta' }) {
                     />
                   </td>
                 )}
-                <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">{l.full_name}</td>
+                <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {l.full_name}
+                    <SourceBadge source={l.source} />
+                  </span>
+                </td>
                 <td className="px-3 py-3 text-gray-600 whitespace-nowrap font-mono text-xs">+91 {l.whatsapp_number}</td>
                 {/* Email — truncated with full value on hover via title */}
                 <td className="px-3 py-3 text-gray-600 whitespace-nowrap text-xs" style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }} title={l.email || ''}>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import DateTimePicker from '../admin/DateTimePicker';
 import ManualAssignModal from './ManualAssignModal';
+import SourceBadge from '../components/SourceBadge';
 
 const SUGAR_BADGE = {
   '250+':    { bg: '#FEE2E2', fg: '#B91C1C' },
@@ -351,7 +352,10 @@ export default function SalesLeadsTable({ token }) {
                   return (
                     <tr key={l.id} style={{ borderTop: '1px solid rgba(209,196,240,0.30)' }}>
                       <td style={tdStyle}>
-                        <div style={{ fontWeight: 600, color: '#3B0764' }}>{l.full_name || '—'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, color: '#3B0764' }}>{l.full_name || '—'}</span>
+                          <SourceBadge source={l.source} />
+                        </div>
                         <div style={{ fontSize: '0.72rem', color: 'rgba(91,33,182,0.55)' }}>{l.email || '—'}</div>
                       </td>
                       <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontSize: '0.80rem' }}>

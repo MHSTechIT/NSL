@@ -201,7 +201,7 @@ router.get('/me', async (req, res) => {
    Follow-ups whose time hasn't arrived live in the Completed Leads page. */
 const LEAD_SELECT = `
   SELECT l.id, l.full_name, l.whatsapp_number, l.email, l.sugar_level, l.diabetes_duration,
-         l.language_pref, l.lead_score, l.wa_clicked, l.webinar_id,
+         l.language_pref, l.lead_score, l.wa_clicked, l.webinar_id, l.source,
          l.assigned_user_id, l.assigned_at, l.created_at,
          l.last_note_outcome, l.last_note_at, l.follow_up_at, l.completed_at,
          l.last_note_interested,

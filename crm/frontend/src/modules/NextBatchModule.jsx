@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import SourceBadge from '../components/SourceBadge';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Next Batch — leads the caller parked by answering Q14 "Next Batch Joining"
@@ -191,8 +192,11 @@ export default function NextBatchModule({ jwt }) {
                 fontFamily: 'Outfit, sans-serif',
               }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, color: '#3B0764', fontSize: '0.92rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {l.full_name || '—'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, color: '#3B0764', fontSize: '0.92rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {l.full_name || '—'}
+                    </span>
+                    <SourceBadge source={l.source} />
                   </div>
                   <div style={{ fontSize: '0.72rem', color: 'rgba(91,33,182,0.55)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {l.email || ''}
