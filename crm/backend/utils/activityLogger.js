@@ -1,118 +1,126 @@
 /* Caller activity logger — append-only audit trail.
-   Records every status transition in `caller_activity_events`. One open
-   row per (caller_id, tag) is allowed; calling startEvent again for the
-   same tag is a no-op (idempotent). endEvent stamps ended_at + duration.
+   ===================================================================
+   SINGLE-TAG MODEL: a caller has at most ONE open span at any moment.
+   `switchTag` atomically closes the current open span and opens the new
+   one in a transaction; the partial unique index
+   `caller_activity_events_one_open` (see app.js) makes a second open
+   row physically impossible, so races / multi-tab can't double-track.
 
-   All functions are best-effort: errors are logged but never thrown to
-   the caller, so a logging failure can never break the request path
-   (heartbeat, call start/end, admin pause, etc.).
+   Point events (LOGGED_IN / LOGGED_OUT / LATE_RETURN) are zero-duration
+   markers — they carry ended_at, so they never count as "open" spans.
 
-   Tags (kept in sync with frontend CallerActivityDrawer.jsx):
-     LOGGED_IN, LOGGED_OUT, ACTIVE, ON_CALL, AFTER_CALL_FORM,
-     ON_REASON_FORM, BREAK, BREAK_OVER, RESUMED, IDLE,
-     PAUSED_BY_ADMIN, UNPAUSED_BY_ADMIN, OFFLINE
-*/
+   All functions are best-effort: errors are logged, never thrown, so a
+   logging failure can never break the request path.
+   =================================================================== */
 const pool = require('../db');
 
-const VALID_TAGS = new Set([
-  'LOGGED_IN', 'LOGGED_OUT', 'ACTIVE', 'ON_CALL', 'AFTER_CALL_FORM',
-  'ON_REASON_FORM', 'BREAK', 'BREAK_OVER', 'RESUMED', 'IDLE',
-  'PAUSED_BY_ADMIN', 'UNPAUSED_BY_ADMIN', 'OFFLINE',
-  // System-driven pause when a caller trips the SmartFlow agent-leg
-  // retry cap (AGENT_RETRY_CAP in LeadCallNoteModal.jsx). The note-save
-  // endpoint logs this once when it flips crm_users.is_active = FALSE.
-  // Resume is handled by the existing PAUSED_BY_ADMIN / UNPAUSED_BY_ADMIN
-  // pair via the super-admin PATCH endpoint.
-  'PAUSED_BY_SMARTFLOW',
-  // Page-level tags — exactly one open at any time on a logged-in caller.
-  // Emitted by CallerShell when `activePage` changes.
+/* Span tags — exactly one open per caller (DB-enforced). */
+const SPAN_TAGS = new Set([
+  // Page tags — which workspace tab the caller is idling on.
   'ON_PAGE_CALL', 'ON_PAGE_ASSIGNED', 'ON_PAGE_COMPLETED',
   'ON_PAGE_NOT_PICKED', 'ON_PAGE_MISSED_CALLS', 'ON_PAGE_UNTOUCHED',
   'ON_PAGE_NEXT_BATCH',
-  // Modal/overlay tags — replace the page tag while open and resume it on close.
-  // VIEWING_LEAD: lead card modal is open, no call has started yet.
-  // BREAK_PICKER: "Stop auto-call — pick your break reason" card.
-  // BREAK_OTHER_PICKER: the "Other" sub-picker where caller types a custom reason.
-  'VIEWING_LEAD', 'BREAK_PICKER', 'BREAK_OTHER_PICKER',
+  'ON_CALL',            // connected to a customer (talk time)
+  'IN_FORM',            // after-call note form
+  'REASON_CARD',        // "why didn't they pick / why no form" cards
+  'EDITING_COMPLETED',  // editing an already-completed lead
+  'ON_BREAK',           // on a break (type + timer in context)
+  'BREAK_PICKER',       // choosing a break
+  'BLOCKED',            // system auto-pause (reason in context)
+  'PAUSED_BY_ADMIN',    // admin manually paused
 ]);
 
-/* Start an event. If one is already open for this (caller, tag), the
-   call is a no-op so heartbeats can fire freely. */
-async function startEvent(callerId, tag, context = null) {
-  if (!callerId || !VALID_TAGS.has(tag)) return;
+/* Point events — zero-duration markers (ended_at = started_at). */
+const POINT_TAGS = new Set(['LOGGED_IN', 'LOGGED_OUT', 'LATE_RETURN']);
+
+const VALID_TAGS = new Set([...SPAN_TAGS, ...POINT_TAGS]);
+
+/* Atomically switch the caller's single open span to `newTag`.
+   - If the open span already has `newTag`, it's a no-op (context refreshed).
+   - Otherwise every open span is closed (stamped ended_at + duration_sec)
+     and a fresh open span is inserted — all in one transaction.
+   The SELECT ... FOR UPDATE row-lock serialises concurrent callers; the
+   unique index is the final backstop. */
+async function switchTag(callerId, newTag, context = null) {
+  if (!callerId || !SPAN_TAGS.has(newTag)) return null;
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
-      `SELECT id FROM caller_activity_events
-        WHERE caller_id = $1 AND tag = $2 AND ended_at IS NULL
-        LIMIT 1`,
-      [callerId, tag]
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT id, tag, started_at FROM caller_activity_events
+        WHERE caller_id = $1 AND ended_at IS NULL
+        ORDER BY started_at DESC
+        FOR UPDATE`,
+      [callerId]
     );
-    if (rows.length > 0) return rows[0].id;  // already open
-    const { rows: ins } = await pool.query(
+    const open = rows[0];
+    if (open && open.tag === newTag) {
+      if (context) {
+        await client.query(
+          `UPDATE caller_activity_events
+              SET context = COALESCE(context, '{}'::jsonb) || $2::jsonb
+            WHERE id = $1`,
+          [open.id, JSON.stringify(context)]
+        );
+      }
+      await client.query('COMMIT');
+      return open.id;
+    }
+    if (rows.length > 0) {
+      // A span the caller held for under 1 second is a flap or a pass-through
+      // tab switch — delete it rather than logging a 0-second row that
+      // clutters the timeline. Anything 1s or longer is closed normally.
+      const openMs = Date.now() - new Date(open.started_at).getTime();
+      if (rows.length === 1 && openMs < 1000) {
+        await client.query('DELETE FROM caller_activity_events WHERE id = $1', [open.id]);
+      } else {
+        await client.query(
+          `UPDATE caller_activity_events
+              SET ended_at     = NOW(),
+                  duration_sec = GREATEST(0, EXTRACT(EPOCH FROM (NOW() - started_at))::int)
+            WHERE caller_id = $1 AND ended_at IS NULL`,
+          [callerId]
+        );
+      }
+    }
+    const { rows: ins } = await client.query(
       `INSERT INTO caller_activity_events (caller_id, tag, started_at, context)
        VALUES ($1, $2, NOW(), $3::jsonb)
        RETURNING id`,
-      [callerId, tag, context ? JSON.stringify(context) : null]
+      [callerId, newTag, context ? JSON.stringify(context) : null]
     );
+    await client.query('COMMIT');
     return ins[0].id;
   } catch (err) {
-    console.error('[activityLogger] startEvent error:', err.message);
+    try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
+    console.error('[activityLogger] switchTag error:', err.message);
     return null;
+  } finally {
+    client.release();
   }
 }
 
-/* End any open event for (caller, tag). If no open row exists this is
-   a no-op. Optional `contextPatch` shallow-merges into the existing
-   context (used to record over_by_sec when ending BREAK). */
-async function endEvent(callerId, tag, contextPatch = null) {
-  if (!callerId || !VALID_TAGS.has(tag)) return;
-  try {
-    if (contextPatch && typeof contextPatch === 'object') {
-      await pool.query(
-        `UPDATE caller_activity_events
-            SET ended_at     = NOW(),
-                duration_sec = GREATEST(0, EXTRACT(EPOCH FROM (NOW() - started_at))::int),
-                context      = COALESCE(context, '{}'::jsonb) || $3::jsonb
-          WHERE caller_id = $1 AND tag = $2 AND ended_at IS NULL`,
-        [callerId, tag, JSON.stringify(contextPatch)]
-      );
-    } else {
-      await pool.query(
-        `UPDATE caller_activity_events
-            SET ended_at     = NOW(),
-                duration_sec = GREATEST(0, EXTRACT(EPOCH FROM (NOW() - started_at))::int)
-          WHERE caller_id = $1 AND tag = $2 AND ended_at IS NULL`,
-        [callerId, tag]
-      );
-    }
-  } catch (err) {
-    console.error('[activityLogger] endEvent error:', err.message);
-  }
-}
-
-/* End any open events for this caller across multiple tags at once. */
-async function endEventsForCaller(callerId, tags) {
-  if (!callerId || !Array.isArray(tags) || tags.length === 0) return;
-  const filtered = tags.filter(t => VALID_TAGS.has(t));
-  if (filtered.length === 0) return;
+/* Close the caller's open span, if any (used by logout + the reaper).
+   `at` lets the reaper backdate the close to the last heartbeat. */
+async function closeOpenSpan(callerId, at = null) {
+  if (!callerId) return;
   try {
     await pool.query(
       `UPDATE caller_activity_events
-          SET ended_at     = NOW(),
-              duration_sec = GREATEST(0, EXTRACT(EPOCH FROM (NOW() - started_at))::int)
-        WHERE caller_id = $1 AND tag = ANY($2::text[]) AND ended_at IS NULL`,
-      [callerId, filtered]
+          SET ended_at     = COALESCE($2::timestamptz, NOW()),
+              duration_sec = GREATEST(0, EXTRACT(EPOCH FROM (COALESCE($2::timestamptz, NOW()) - started_at))::int)
+        WHERE caller_id = $1 AND ended_at IS NULL`,
+      [callerId, at]
     );
   } catch (err) {
-    console.error('[activityLogger] endEventsForCaller error:', err.message);
+    console.error('[activityLogger] closeOpenSpan error:', err.message);
   }
 }
 
-/* Insert a point-in-time event (no duration). Useful for transitions
-   that don't represent a sustained state: LOGGED_IN, LOGGED_OUT,
-   RESUMED, PAUSED_BY_ADMIN, UNPAUSED_BY_ADMIN. */
+/* Insert a point-in-time event (no duration): LOGGED_IN, LOGGED_OUT,
+   LATE_RETURN. Never counts as an open span. */
 async function logPointEvent(callerId, tag, context = null) {
-  if (!callerId || !VALID_TAGS.has(tag)) return;
+  if (!callerId || !POINT_TAGS.has(tag)) return null;
   try {
     const { rows } = await pool.query(
       `INSERT INTO caller_activity_events (caller_id, tag, started_at, ended_at, duration_sec, context)
@@ -127,4 +135,4 @@ async function logPointEvent(callerId, tag, context = null) {
   }
 }
 
-module.exports = { startEvent, endEvent, endEventsForCaller, logPointEvent, VALID_TAGS };
+module.exports = { switchTag, closeOpenSpan, logPointEvent, VALID_TAGS, SPAN_TAGS, POINT_TAGS };

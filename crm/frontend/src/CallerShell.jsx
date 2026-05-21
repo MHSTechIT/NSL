@@ -9,7 +9,8 @@ import MissedCallsModule       from './modules/MissedCallsModule';
 import NextBatchModule         from './modules/NextBatchModule';
 import IncomingCallToast       from './components/IncomingCallToast';
 import MascotBot               from './components/MascotBot';
-import { emitCallerState, PAGE_TAG_BY_ID } from './utils/callerActivity';
+import RobotGuide              from './components/RobotGuide';
+import { deriveCallerTag, readActivity } from './utils/callerActivity';
 
 const PAGES = [
   {
@@ -105,7 +106,17 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
     if (raw) { try { return JSON.parse(raw); } catch { return null; } }
     return null;
   });
-  const [activePage, setActive]       = useState('call');
+  /* Active tab — restored from sessionStorage so a page refresh keeps the
+     caller on the same tab instead of bouncing back to Call. sessionStorage
+     (not local) keeps it scoped to this login session: a fresh login still
+     lands on the Call page. */
+  const [activePage, setActive]       = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('mhs_caller_active_page');
+      if (saved && PAGES.some(p => p.id === saved)) return saved;
+    } catch { /* sandbox / storage disabled */ }
+    return 'call';
+  });
   /* When the Call page's big start button is pressed, we navigate to the
      Assigned tab and flag a one-shot "auto-start me when leads are ready".
      AssignedLeadsModule consumes the flag and clears it on first trigger. */
@@ -127,6 +138,10 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
   /* Pause state — live-tracked via /api/caller/me + SSE caller.paused / caller.resumed.
      null = unknown (still loading), true = active, false = paused-by-admin. */
   const [isActive, setIsActive] = useState(null);
+  /* When the caller is auto-paused (idle nudge / break overrun / SmartFlow),
+     `autoPausedAt` is set and the activity tag becomes BLOCKED. An admin pause
+     leaves it null, so the tag becomes PAUSED_BY_ADMIN instead. */
+  const [pauseInfo, setPauseInfo] = useState({ autoPausedAt: null, reason: null });
 
   /* Mascot mood — purely-visual local state owned by the shell.
      `setMood(mood)`              → switch to mood, stays there.
@@ -197,92 +212,121 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled) setIsActive(data?.caller?.is_active !== false);
+        if (cancelled) return;
+        const c = data?.caller || {};
+        setIsActive(c.is_active !== false);
+        const ap = c.auto_paused_at || null;
+        const rs = c.auto_pause_reason || null;
+        // Keep the same object reference when nothing changed so the heartbeat
+        // effect doesn't fire on every /me poll.
+        setPauseInfo(prev => (prev.autoPausedAt === ap && prev.reason === rs) ? prev : { autoPausedAt: ap, reason: rs });
       } catch { /* network blips don't lock anyone out */ }
     }
     refresh();
     const url = `/api/caller/leads/events?token=${encodeURIComponent(jwtForEffect)}`;
     const es  = new EventSource(url);
+    // Re-sync the pause state every time the SSE (re)connects. After a backend
+    // restart or a dropped connection the caller's is_active could otherwise
+    // go stale — page usable while the admin shows Paused, or vice-versa.
+    es.onopen = () => { refresh(); };
     es.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg?.type === 'caller.paused')  setIsActive(false);
-        if (msg?.type === 'caller.resumed') setIsActive(true);
+        // Flip the overlay instantly, then refresh() to pull the pause reason.
+        if (msg?.type === 'caller.paused')  { setIsActive(false); refresh(); }
+        if (msg?.type === 'caller.resumed') { setIsActive(true);  refresh(); }
       } catch { /* ignore */ }
     };
     return () => { cancelled = true; es.close(); };
   }, [user, jwtForEffect]);
 
-  /* Page-level activity emitter — fire a 'replace' state event each time
-     `activePage` changes so the admin Activity Log drawer shows which tab
-     the caller is sitting on. The server's 'replace' action atomically
-     ends every other page/modal tag and opens the new one, so the timeline
-     stays one-row-at-a-time.
-
-     Skipped when no user is logged in (login page) and on the very first
-     mount we still emit so an open tab on refresh re-anchors the timeline. */
+  /* Persist the active tab so a refresh restores it (consumed by the
+     activePage useState initialiser above). */
   useEffect(() => {
-    if (!user || !jwtForEffect) return;
-    const tag = PAGE_TAG_BY_ID[activePage];
-    if (!tag) return;
-    emitCallerState(jwtForEffect, { action: 'replace', tag });
-  }, [activePage, user, jwtForEffect]);
+    try { sessionStorage.setItem('mhs_caller_active_page', activePage); } catch { /* sandbox */ }
+  }, [activePage]);
 
-  /* Activity heartbeat — POST /api/caller/heartbeat every 30s reflecting the
-     latest activity state stamped into localStorage by AssignedLeadsModule.
-     Also fires an immediate heartbeat on any `mhs:activity:changed` window
-     event so the admin's Status column reacts within a second to start-call /
-     break-start / break-end transitions instead of waiting up to 30s. */
+  /* Activity heartbeat — POST /api/caller/heartbeat every 30s. The frontend
+     computes ONE current tag (deriveCallerTag); the backend switches the
+     caller's single open activity span to it. Also fires immediately on any
+     `mhs:activity:changed` event (a module sub-state change or a pause) so
+     the admin timeline reacts within a second. */
+  const hbRef = useRef({ activePage: 'call', isActive: null, pauseInfo: { autoPausedAt: null, reason: null } });
+  hbRef.current = { activePage, isActive, pauseInfo };
   useEffect(() => {
     if (!user || !jwtForEffect) return undefined;
-    const activityKey = (() => {
-      try {
-        const [, payload] = jwtForEffect.split('.');
-        const uid = JSON.parse(atob(payload || ''))?.user_id;
-        return uid ? `mhs_activity_${uid}` : 'mhs_activity_anon';
-      } catch { return 'mhs_activity_anon'; }
-    })();
-
-    function readState() {
-      try {
-        const raw = localStorage.getItem(activityKey);
-        if (!raw) return { status: 'idle', break: null };
-        const parsed = JSON.parse(raw);
-        return {
-          status: parsed?.status || 'idle',
-          break:  parsed?.break  || null,
-        };
-      } catch { return { status: 'idle', break: null }; }
-    }
 
     async function send() {
-      const state = readState();
+      const act = readActivity(jwtForEffect);
+      const { activePage: pg, isActive: ia, pauseInfo: pi } = hbRef.current;
+      const tag = deriveCallerTag({
+        activePage:   pg,
+        isActive:     ia,
+        autoPausedAt: pi.autoPausedAt,
+        subTag:       act.subTag,
+      });
+      const context = tag === 'BLOCKED'
+        ? { reason: pi.reason || 'auto_paused' }
+        : (act.subContext || null);
       try {
         await fetch('/api/caller/heartbeat', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtForEffect}` },
-          body:    JSON.stringify(state),
+          body:    JSON.stringify({ status: act.status, break: act.break, tag, context }),
         });
       } catch { /* network blips ignored — next tick will retry */ }
     }
 
-    // Fire one heartbeat immediately on mount so the admin sees the caller
-    // online without a 30s lag.
-    send();
-
+    send();  // immediate heartbeat on mount
     const intervalId = setInterval(send, 30_000);
     const onChange = () => { send(); };
+    // Background tabs get their timers throttled/frozen by the browser, so
+    // the heartbeat lags while the caller is on another tab or app. Fire one
+    // immediately when they return so the activity tag re-syncs at once.
+    const onVisible = () => { if (document.visibilityState === 'visible') send(); };
     window.addEventListener('mhs:activity:changed', onChange);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearInterval(intervalId);
       window.removeEventListener('mhs:activity:changed', onChange);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [user, jwtForEffect]);
+
+  /* Fire an immediate heartbeat when CallerShell-owned state (tab or pause)
+     changes so the activity tag updates without waiting for the 30s tick. */
+  useEffect(() => {
+    if (!user || !jwtForEffect) return;
+    try { window.dispatchEvent(new Event('mhs:activity:changed')); } catch { /* no-op */ }
+  }, [activePage, isActive, pauseInfo, user, jwtForEffect]);
+
+  /* Idea #20 — network-recovered reassurance. When the browser drops offline
+     and then comes back, flash a corner robot so the caller knows it's safe
+     to keep going. `netRecoverPulse` bumps on each recovery and auto-clears
+     after 7 s so the robot disappears on its own. */
+  const [netRecoverPulse, setNetRecoverPulse] = useState(0);
+  useEffect(() => {
+    let wasOffline = false;
+    const onOffline = () => { wasOffline = true; };
+    const onOnline  = () => { if (wasOffline) { wasOffline = false; setNetRecoverPulse(p => p + 1); } };
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online',  onOnline);
+    return () => {
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online',  onOnline);
+    };
+  }, []);
+  useEffect(() => {
+    if (netRecoverPulse === 0) return undefined;
+    const id = setTimeout(() => setNetRecoverPulse(0), 7000);
+    return () => clearTimeout(id);
+  }, [netRecoverPulse]);
 
   function handleLogout() {
     sessionStorage.removeItem('mhs_crm_user');
     sessionStorage.removeItem('mhs_crm_token');
     sessionStorage.removeItem('mhs_admin_token');
+    sessionStorage.removeItem('mhs_caller_active_page');
     setUser(null);
   }
 
@@ -501,6 +545,17 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
       {/* ── Floating incoming-call toasts (top-right, persists across tabs) ── */}
       <IncomingCallToast jwt={jwt} onOpenLead={handleOpenLead} />
 
+      {/* ── #20 — network-recovered robot (auto-clears after 7s) ── */}
+      {netRecoverPulse > 0 && (
+        <RobotGuide
+          variant="corner"
+          mood="happy"
+          text="network vandhuduchu nanba, continue pannu"
+          pulse={netRecoverPulse}
+          bubbleHideMs={6000}
+        />
+      )}
+
       {/* ── Mascot bot (bottom-right) — removed per design.
            The CallModule already shows a much larger version of the same
            bot in the center of the Call page; the corner duplicate just
@@ -508,43 +563,20 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
            case we want to bring it back behind a toggle later. */}
       {false && <MascotBot mood={mascotMood} />}
 
-      {/* ── Paused-by-admin blocking overlay ──
-         Renders only when /api/caller/me reports is_active = false. No dismiss
-         button by design — the caller has to wait for admin to resume them.
-         z-index sits above every other modal (break-picker is 9700, this is
-         9900) so even an in-flight call modal can't be touched. */}
+      {/* ── Paused robot — replaces the old paused-by-admin card ──
+         Renders only when /api/caller/me reports is_active = false (admin
+         pause OR any SmartFlow / nudge-exhaust auto-pause). No dismiss — the
+         caller waits for admin to resume them. RobotGuide's overlay variant
+         sits at z-index 9600; we lift it above every modal with the wrapper
+         z-index 9900 so even an in-flight call modal can't be touched. */}
       {isActive === false && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 9900,
-          background: 'rgba(15,0,40,0.75)',
-          backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '0 16px', fontFamily: 'Outfit, sans-serif',
-        }}>
-          <div style={{
-            width: '100%', maxWidth: 420, background: '#fff', borderRadius: 22,
-            padding: '32px 28px', textAlign: 'center',
-            boxShadow: '0 32px 80px rgba(15,0,40,0.50)',
-          }}>
-            <div style={{
-              width: 64, height: 64, margin: '0 auto 16px', borderRadius: '50%',
-              background: 'rgba(220,38,38,0.12)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="#DC2626">
-                <rect x="6" y="5" width="4" height="14"/>
-                <rect x="14" y="5" width="4" height="14"/>
-              </svg>
-            </div>
-            <h2 style={{ margin: 0, fontWeight: 800, fontSize: '1.18rem', color: '#3B0764' }}>
-              You're paused by admin
-            </h2>
-            <p style={{ margin: '8px 0 0', fontSize: '0.86rem', color: 'rgba(91,33,182,0.70)', lineHeight: 1.5 }}>
-              Your account has been temporarily paused. You can't make outbound
-              calls or receive new leads until admin resumes you. Please reach
-              out to your manager.
-            </p>
-          </div>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9900 }}>
+          <RobotGuide
+            variant="overlay"
+            mood="sad"
+            text="account pause aaiduchu nanba admin ah contact pannu"
+            bubbleHideMs={999999}
+          />
         </div>
       )}
     </div>

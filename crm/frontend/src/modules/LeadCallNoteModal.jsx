@@ -3,11 +3,22 @@ import Lottie from 'lottie-react';
 import DateTimePicker from '../admin/DateTimePicker';
 import LeadTagBadge from '../components/LeadTagBadge';
 import { classifyLeadTag } from '../utils/leadTagging';
-import sadBotRaw from '../assets/bot/robot-sad.json';
+// One robot everywhere — the same robot-idle.json the Call page uses.
+// (Kept the `sadBot*` names to avoid churn; it's the idle robot now.)
+import sadBotRaw from '../assets/bot/robot-idle.json';
 import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
 import pickTheCallMp3 from '../assets/audio/pick-the-call.mp3';
 import formFillMp3   from '../assets/audio/form-fill.mp3';
-import { emitCallerState } from '../utils/callerActivity';
+import { setActivitySub } from '../utils/callerActivity';
+import useRobotNudge from '../hooks/useRobotNudge';
+
+/* Robot nudge lines for the reason cards. The primary line is shown on
+   entry; if the caller doesn't act, the robot re-asks every 30 s and
+   auto-pauses after 5 unanswered nudges. */
+const AGENT_REASON_PRIMARY = 'enna nanba en call attend pannala';
+const AGENT_REASON_NUDGE   = 'nanba irukkingala answer pannunga';
+const FORM_REASON_PRIMARY  = 'enna nanba en card fill pannala';
+const FORM_REASON_NUDGE    = 'nanba irukiya';
 // Patch once at module load — canonical "both arms hanging at sides,
 // anatomically mirrored" pose used everywhere else in the CRM.
 const sadBotData = normalizeLoop(lockArmsDown(sadBotRaw));
@@ -106,7 +117,7 @@ function buildNoteWithDelays(noteText, delayReasons, agentReasons) {
   return note ? [note, ...blocks].join('\n\n') : blocks.join('\n\n');
 }
 
-const FORM_WINDOW_SECS = 30;
+const FORM_WINDOW_SECS = 45;
 // When the caller exceeds this many SmartFlow miss-reason submissions on a
 // single lead, the lead is auto-paused AND the caller's account is auto-
 // paused server-side (POST /api/caller/leads/:id/note flips
@@ -245,47 +256,47 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     else if (callPhase === 'form_reason_card') playClipOnce(formFillMp3);
   }, [callPhase]);
 
-  /* Granular activity emitter — maps each callPhase to its activity-log tag.
-       form_window       → AFTER_CALL_FORM
-       agent_reason_card → ON_REASON_FORM (kind=agent_dnp, attempt=cutCount+1)
-       form_reason_card  → ON_REASON_FORM (kind=form_skip)
-     Other phases are call-progress states owned by the server-emitted ON_CALL
-     (calls.js logs that on /calls/start and ends it on hangup), so we don't
-     duplicate. When the modal unmounts the parent's editLead effect ends the
-     modal-level event and resumes the page state. */
+  /* Robot repeat-nudges for the two reason cards. While the card is open and
+     the caller hasn't acted, the robot re-asks every 30 s; after 5 unanswered
+     nudges the lead auto-pauses (same path as the SmartFlow retry cap). */
+  const { count: agentNudgeCount } = useRobotNudge({
+    active: callPhase === 'agent_reason_card',
+    maxRepeats: 5,
+    storageKey: `mhs_nudge_agent_${lead?.id || 'x'}`,
+    onExhausted: () => { setCallPhase('auto_paused'); saveAutoPaused(); },
+  });
+  const { count: formNudgeCount } = useRobotNudge({
+    active: callPhase === 'form_reason_card',
+    maxRepeats: 5,
+    storageKey: `mhs_nudge_form_${lead?.id || 'x'}`,
+    onExhausted: () => { setCallPhase('auto_paused'); saveAutoPaused(); },
+  });
+
+  /* Activity sub-tag — maps the call phase to the single-tag activity log:
+       agent/form reason cards → REASON_CARD
+       form_window / idle      → IN_FORM
+       ringing / on-call       → ON_CALL
+     CallerShell's heartbeat picks this up; the second effect clears it when
+     the modal unmounts so the page tag resumes. */
   useEffect(() => {
     if (!jwt) return;
-    const leadName = lead?.full_name || '';
-    const leadId   = lead?.id || null;
-    if (callPhase === 'form_window') {
-      emitCallerState(jwt, {
-        action: 'replace',
-        tag: 'AFTER_CALL_FORM',
-        context: { lead_name: leadName, lead_id: leadId },
-      });
-    } else if (callPhase === 'agent_reason_card') {
-      emitCallerState(jwt, {
-        action: 'replace',
-        tag: 'ON_REASON_FORM',
-        context: {
-          lead_name: leadName, lead_id: leadId,
-          kind: 'agent_dnp', attempt: (cutCount || 0) + 1,
-        },
-      });
-    } else if (callPhase === 'form_reason_card') {
-      emitCallerState(jwt, {
-        action: 'replace',
-        tag: 'ON_REASON_FORM',
-        context: {
-          lead_name: leadName, lead_id: leadId,
-          kind: 'form_skip',
-        },
-      });
+    const ctx = { lead_name: lead?.full_name || '', lead_id: lead?.id || null };
+    let sub;
+    if (callPhase === 'agent_reason_card' || callPhase === 'form_reason_card') {
+      sub = 'REASON_CARD';
+      ctx.kind = callPhase === 'agent_reason_card' ? 'agent_dnp' : 'form_skip';
+      if (callPhase === 'agent_reason_card') ctx.attempt = (cutCount || 0) + 1;
+    } else if (callPhase === 'form_window' || callPhase === 'idle'
+               || callPhase === 'dnp_alert' || callPhase === 'auto_paused') {
+      sub = 'IN_FORM';
+    } else {
+      sub = 'ON_CALL';
     }
-    // Other phases (ext_check, agent_ringing_*, customer_ringing,
-    // customer_on_call, recall_ringing, dnp_alert, auto_paused) intentionally
-    // leave the activity tag alone — they're transient call-progress states.
+    setActivitySub(jwt, sub, ctx);
   }, [callPhase, jwt, lead?.full_name, lead?.id, cutCount]);
+
+  /* Clear the sub-tag when the modal unmounts so the page tag resumes. */
+  useEffect(() => () => { if (jwt) setActivitySub(jwt, null, null); }, [jwt]);
 
   /* Structured log on every phase transition. One JSON line per change —
      greppable in browser DevTools and forwarded to any client-side log
@@ -801,11 +812,20 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     try { await postStartCall(); } catch (_) {}
   }
 
+  // Counts form-window → form_reason_card → form-window cycles on THIS call.
+  // After 3 the caller is clearly stuck — pause instead of looping forever.
+  const formLoopCountRef = useRef(0);
   function submitDelayReason() {
     const reason = delayReason.trim();
     if (!reason) return;
     setDelayReasons(prev => [...prev, reason]);
     setDelayReason('');
+    formLoopCountRef.current += 1;
+    if (formLoopCountRef.current > 3) {
+      setCallPhase('auto_paused');
+      saveAutoPaused();
+      return;
+    }
     setFormTimerSecs(FORM_WINDOW_SECS);
     setCallPhase('form_window');
   }
@@ -1250,6 +1270,39 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
             </button>
           </div>
         </div>
+
+        {/* Lead-context strip — which webinar batch this lead belongs to,
+           when the lead registered, and whether this is a follow-up call
+           or a missed-call lead (vs a fresh lead). */}
+        {(() => {
+          const batch = lead?.webinar_name || '—';
+          const arrived = lead?.created_at
+            ? new Date(lead.created_at).toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short',
+                hour: '2-digit', minute: '2-digit', hour12: true })
+            : '—';
+          const isFollowUp = lead?.last_note_outcome === 'follow_up';
+          const isMissed   = !isFollowUp && !!lead?.last_call_customer_missed_at;
+          const type = isFollowUp
+            ? { label: 'Follow-up call', bg: 'rgba(37,99,235,0.12)',  fg: '#1E40AF' }
+            : isMissed
+              ? { label: 'Missed call',  bg: 'rgba(217,119,6,0.14)',  fg: '#B45309' }
+              : { label: 'New lead',     bg: 'rgba(22,163,74,0.12)',  fg: '#15803D' };
+          const chip = (bg, fg) => ({
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '4px 11px', borderRadius: 999,
+            fontFamily: 'Outfit, sans-serif', fontSize: '0.74rem', fontWeight: 700,
+            background: bg, color: fg, whiteSpace: 'nowrap',
+          });
+          return (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+              <span style={chip('rgba(91,33,182,0.10)', '#5B21B6')}>📋 Batch: {batch}</span>
+              <span style={chip('rgba(91,33,182,0.07)', 'rgba(91,33,182,0.78)')}>🕒 Registered: {arrived}</span>
+              <span style={chip(type.bg, type.fg)}>{type.label}</span>
+            </div>
+          );
+        })()}
+
         {recallToast && (
           <div style={{
             margin: '-6px 0 12px', padding: '8px 12px', borderRadius: 6,
@@ -1475,6 +1528,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
           totalWindow={FORM_WINDOW_SECS}
           agentAttempts={agentAttempts}
           retryCap={AGENT_RETRY_CAP}
+          agentBubbleText={agentNudgeCount >= 1 ? AGENT_REASON_NUDGE : AGENT_REASON_PRIMARY}
+          formBubbleText={formNudgeCount >= 1 ? FORM_REASON_NUDGE : FORM_REASON_PRIMARY}
+          agentBubblePulse={agentNudgeCount}
+          formBubblePulse={formNudgeCount}
         />
       )}
     </div>
@@ -1622,7 +1679,18 @@ function CenteredOverlay({
   agentReason, onAgentReasonChange, onAgentReasonSubmit,
   delayReason, onDelayReasonChange, onDelayReasonSubmit, totalWindow,
   agentAttempts, retryCap,
+  agentBubbleText, formBubbleText, agentBubblePulse = 0, formBubblePulse = 0,
 }) {
+  /* Robot speech-bubble text auto-hides 10 s after it (re)appears — the
+     functional card stays. `bubbleShown` flips back true whenever the phase
+     or a nudge pulse changes, then fades out again. */
+  const [bubbleShown, setBubbleShown] = useState(true);
+  useEffect(() => {
+    setBubbleShown(true);
+    const id = setTimeout(() => setBubbleShown(false), 10000);
+    return () => clearTimeout(id);
+  }, [phase, agentBubblePulse, formBubblePulse]);
+
   const cardStyle = {
     width: '100%', maxWidth: 440,
     background: '#fff', borderRadius: 10,
@@ -1713,9 +1781,11 @@ function CenteredOverlay({
           fontWeight: 700, fontSize: '0.98rem', lineHeight: 1.35,
           boxShadow: '0 12px 32px rgba(15,0,40,0.35), 0 2px 8px rgba(15,0,40,0.18)',
           marginBottom: -10,
+          opacity: bubbleShown ? 1 : 0,
+          transition: 'opacity 420ms ease',
           animation: 'sadBubblePop 480ms cubic-bezier(0.34,1.56,0.64,1) both, sadBubbleFloat 2.6s ease-in-out 700ms infinite',
         }}>
-          Hey buddy! Enna aachu? Yen call ah pick pannala?
+          {agentBubbleText}
           <div style={{
             position: 'absolute', bottom: -10, left: '50%',
             width: 0, height: 0, transform: 'translateX(-50%)',
@@ -1815,9 +1885,11 @@ function CenteredOverlay({
           fontWeight: 700, fontSize: '0.98rem', lineHeight: 1.35,
           boxShadow: '0 12px 32px rgba(15,0,40,0.35), 0 2px 8px rgba(15,0,40,0.18)',
           marginBottom: -10,
+          opacity: bubbleShown ? 1 : 0,
+          transition: 'opacity 420ms ease',
           animation: 'sadBubblePop 480ms cubic-bezier(0.34,1.56,0.64,1) both, sadBubbleFloat 2.6s ease-in-out 700ms infinite',
         }}>
-          Enna aachu en form fill pannala?
+          {formBubbleText}
           <div style={{
             position: 'absolute', bottom: -10, left: '50%',
             width: 0, height: 0, transform: 'translateX(-50%)',
@@ -1885,18 +1957,30 @@ function CenteredOverlay({
 
   if (phase === 'dnp_alert') {
     return wrap(
-      <div style={{ ...cardStyle, textAlign: 'center' }}>
-        <div style={{ width: 56, height: 56, margin: '0 auto 14px', borderRadius: '50%', background: 'rgba(245,158,11,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12" y2="16"/>
-          </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, fontFamily: 'Outfit, sans-serif' }}>
+        {/* Robot announces the DNP move, then the flow auto-advances to the
+           next call (the 1.5 s timer in triggerDnp). */}
+        <div style={{
+          position: 'relative', background: '#fff', color: '#3B0764',
+          padding: '14px 22px', borderRadius: 22, maxWidth: 'min(420px, 90vw)',
+          textAlign: 'center', fontWeight: 700, fontSize: '0.98rem', lineHeight: 1.35,
+          boxShadow: '0 12px 32px rgba(15,0,40,0.35), 0 2px 8px rgba(15,0,40,0.18)',
+          marginBottom: -10,
+        }}>
+          na itha DNP calls ku move pannre nanba va namma next call pesalam
+          <div style={{
+            position: 'absolute', bottom: -10, left: '50%',
+            width: 0, height: 0, transform: 'translateX(-50%)',
+            borderLeft: '12px solid transparent', borderRight: '12px solid transparent',
+            borderTop: '12px solid #fff',
+            filter: 'drop-shadow(0 4px 4px rgba(15,0,40,0.18))',
+          }} />
         </div>
-        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#3B0764' }}>
-          The lead has been moved to the 'Did Not Pick' list.
-        </h3>
-        <p style={{ margin: '10px 0 0', fontSize: '0.86rem', color: 'rgba(91,33,182,0.65)' }}>
-          Loading the next lead…
-        </p>
+        <div style={{ width: 180, height: 180 }}>
+          <Lottie animationData={sadBotData} loop autoplay
+            style={{ width: '100%', height: '100%' }}
+            rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }} />
+        </div>
       </div>
     );
   }

@@ -321,6 +321,42 @@ const _activityEventsMigration = pool.query(`
     ON caller_activity_events(caller_id, started_at DESC);
   CREATE INDEX IF NOT EXISTS caller_activity_events_open_idx
     ON caller_activity_events(caller_id, tag) WHERE ended_at IS NULL;
+
+  -- Single-tag model: at most ONE open span per caller. First close any
+  -- pre-existing dangling duplicates (keep only the newest open row per
+  -- caller), then enforce it with a partial unique index. Point events
+  -- carry ended_at, so they never count against this constraint.
+  UPDATE caller_activity_events
+     SET ended_at     = NOW(),
+         duration_sec = GREATEST(0, EXTRACT(EPOCH FROM (NOW() - started_at))::int)
+   WHERE ended_at IS NULL
+     AND id NOT IN (
+       SELECT DISTINCT ON (caller_id) id
+         FROM caller_activity_events
+        WHERE ended_at IS NULL
+        ORDER BY caller_id, started_at DESC, id DESC
+     );
+  CREATE UNIQUE INDEX IF NOT EXISTS caller_activity_events_one_open
+    ON caller_activity_events (caller_id) WHERE ended_at IS NULL;
+
+  -- Single-tag cutover. Pre-redesign rows used three overlapping channels
+  -- (status / page / call), so a single day summed well past 24h. That data
+  -- cannot be projected onto the single-tag model. We stamp a cutover time
+  -- ONCE (guarded by a marker table) and close any span still open from the
+  -- old code; the activity endpoint only returns rows at/after the cutover,
+  -- so the old overlapping history is hidden (not deleted) and the log reads
+  -- cleanly from here on.
+  CREATE TABLE IF NOT EXISTS activity_log_redesign_flag (applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+  DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM activity_log_redesign_flag) THEN
+      UPDATE caller_activity_events
+         SET ended_at     = NOW(),
+             duration_sec = GREATEST(0, EXTRACT(EPOCH FROM (NOW() - started_at))::int)
+       WHERE ended_at IS NULL;
+      INSERT INTO activity_log_redesign_flag DEFAULT VALUES;
+    END IF;
+  END $$;
 `);
 if (_activityEventsMigration && typeof _activityEventsMigration.catch === 'function') {
   _activityEventsMigration.catch(err => console.error('[Migration] caller_activity_events error:', err.message));

@@ -24,6 +24,13 @@ const TAG_META = {
   PAUSED_BY_ADMIN:    { label: 'Paused by admin', color: '#B91C1C', bg: 'rgba(185,28,28,0.12)'  },
   UNPAUSED_BY_ADMIN:  { label: 'Unpaused by admin', color: '#15803D', bg: 'rgba(21,128,61,0.12)' },
   OFFLINE:            { label: 'Offline',         color: '#6B7280', bg: 'rgba(107,114,128,0.18)' },
+  // ── Single-tag model (current tag set) ──
+  IN_FORM:            { label: 'In Form',         color: '#7C3AED', bg: 'rgba(124,58,237,0.10)' },
+  REASON_CARD:        { label: 'Reason Card',     color: '#D97706', bg: 'rgba(217,119,6,0.12)'  },
+  EDITING_COMPLETED:  { label: 'Editing',         color: '#0891B2', bg: 'rgba(8,145,178,0.10)'  },
+  ON_BREAK:           { label: 'On Break',        color: '#F59E0B', bg: 'rgba(245,158,11,0.12)' },
+  BLOCKED:            { label: 'Page Blocked',    color: '#B91C1C', bg: 'rgba(185,28,28,0.12)'  },
+  LATE_RETURN:        { label: 'Late Return',     color: '#DC2626', bg: 'rgba(220,38,38,0.12)'  },
   // Page-level — which workspace tab the caller is sitting on. Soft purples
   // so they read as "background context" vs. the brighter modal/call tags.
   ON_PAGE_CALL:         { label: 'Page: Call',            color: '#6D28D9', bg: 'rgba(109,40,217,0.08)' },
@@ -49,6 +56,20 @@ function fmtDuration(sec) {
   if (h > 0) return `${h}h ${m}m ${s}s`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+/* Duration of an event clamped to the selected IST day — the overlap of
+   [started_at, ended_at ?? now] with [dayStart, dayEnd]. Keeps per-day
+   totals honest when a span crosses midnight or was left open for days. */
+function clampedDuration(ev, dayStartMs, dayEndMs, nowMs) {
+  const start = new Date(ev.started_at).getTime();
+  const end   = ev.ended_at ? new Date(ev.ended_at).getTime() : nowMs;
+  if (dayStartMs == null || dayEndMs == null) {
+    return Math.max(0, Math.floor((end - start) / 1000));
+  }
+  const lo = Math.max(start, dayStartMs);
+  const hi = Math.min(end, dayEndMs);
+  return Math.max(0, Math.floor((hi - lo) / 1000));
 }
 
 function todayIstYmd() {
@@ -78,6 +99,8 @@ export default function CallerActivityDrawer({
   const canTogglePause = typeof onTogglePause === 'function' && typeof isActive === 'boolean';
   const [date,    setDate]    = useState(() => todayIstYmd());
   const [events,  setEvents]  = useState([]);
+  const [dayStart, setDayStart] = useState(null);  // IST-day window bounds (ms)
+  const [dayEnd,   setDayEnd]   = useState(null);  // — from the API response
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
   /* nowTick — re-renders every second so ongoing entries (ended_at IS NULL)
@@ -96,7 +119,11 @@ export default function CallerActivityDrawer({
       .then(d => {
         if (cancelled) return;
         if (d.error) { setError(d.error); setEvents([]); }
-        else { setEvents(d.events || []); }
+        else {
+          setEvents(d.events || []);
+          setDayStart(d.day_start ? new Date(d.day_start).getTime() : null);
+          setDayEnd(d.day_end ? new Date(d.day_end).getTime() : null);
+        }
       })
       .catch(err => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -124,19 +151,6 @@ export default function CallerActivityDrawer({
       return new Date(b.started_at) - new Date(a.started_at);
     });
   }, [events]);
-
-  /* Per-tag totals for the summary header — only count closed events
-     plus the live duration of open ones. */
-  const summary = useMemo(() => {
-    const totals = {};
-    for (const ev of events) {
-      const dur = ev.ended_at
-        ? ev.duration_sec || 0
-        : Math.max(0, Math.floor((nowTick - new Date(ev.started_at).getTime()) / 1000));
-      totals[ev.tag] = (totals[ev.tag] || 0) + dur;
-    }
-    return totals;
-  }, [events, nowTick]);
 
   return (
     <>
@@ -252,32 +266,6 @@ export default function CallerActivityDrawer({
           </div>
         </div>
 
-        {/* Summary chips */}
-        {!loading && events.length > 0 && (
-          <div style={{
-            display: 'flex', flexWrap: 'wrap', gap: 6,
-            padding: '12px 22px', borderBottom: '1px solid rgba(209,196,240,0.45)',
-            background: '#FAF7FF',
-          }}>
-            {Object.entries(summary)
-              .sort((a, b) => b[1] - a[1])
-              .map(([tag, sec]) => {
-                const meta = TAG_META[tag] || { label: tag, color: '#374151', bg: 'rgba(55,65,81,0.10)' };
-                return (
-                  <span key={tag} style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '4px 10px', borderRadius: 999,
-                    background: meta.bg, color: meta.color,
-                    fontSize: '0.74rem', fontWeight: 700,
-                  }}>
-                    <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>{meta.label}</span>
-                    <span style={{ opacity: 0.75 }}>{fmtDuration(sec)}</span>
-                  </span>
-                );
-              })}
-          </div>
-        )}
-
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
           {loading ? (
@@ -295,9 +283,7 @@ export default function CallerActivityDrawer({
           ) : sortedEvents.map(ev => {
             const meta = TAG_META[ev.tag] || { label: ev.tag, color: '#374151', bg: 'rgba(55,65,81,0.10)' };
             const ongoing = ev.ended_at == null;
-            const liveDur = ongoing
-              ? Math.max(0, Math.floor((nowTick - new Date(ev.started_at).getTime()) / 1000))
-              : (ev.duration_sec || 0);
+            const liveDur = clampedDuration(ev, dayStart, dayEnd, nowTick);
             const ctx = ev.context || {};
             return (
               <div

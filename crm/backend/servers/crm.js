@@ -36,6 +36,7 @@ const { syncLeadsToSheet }                      = require('../utils/leadsSheetSy
 const { startScheduler: startTataInboundSync }  = require('../utils/tataInboundSync');
 const { startScheduler: startLeadsAlert }       = require('../utils/leadsAlertScheduler');
 const { startStaleCallReaper }                  = require('../utils/staleCallReaper');
+const { startActivitySpanReaper }               = require('../utils/activitySpanReaper');
 const { startDailyReconciliation }              = require('../utils/dailyReconciliation');
 
 const { startListener }                         = require('../utils/pgListener');
@@ -61,7 +62,7 @@ app.listen(PORT, () => {
   console.log(`[crm] running on port ${PORT}`);
 
   if (DISABLE_SCHEDULERS) {
-    console.log('[crm] DISABLE_SCHEDULERS=true → skipping linkSwap, tataInboundSync, leadsAlert, sheetsSync, staleCallReaper, dailyReconciliation');
+    console.log('[crm] DISABLE_SCHEDULERS=true → skipping linkSwap, tataInboundSync, leadsAlert, sheetsSync, staleCallReaper, activitySpanReaper, dailyReconciliation');
   } else {
     // All schedulers — race-prone if run in more than one process, so CRM owns
     // every one and the funnel services start none.
@@ -74,6 +75,7 @@ app.listen(PORT, () => {
     });
     console.log('[Sheets Sync] Daily sync scheduled at 11:55 PM IST');
     startStaleCallReaper();
+    startActivitySpanReaper();
     startDailyReconciliation();
   }
 

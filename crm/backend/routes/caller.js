@@ -31,7 +31,7 @@ router.use(callerAuth);
      - 'working' → other    → rest_started_at = NOW() (only if was previously NULL)
      - other → other        → rest_started_at unchanged */
 router.post('/heartbeat', async (req, res) => {
-  const { status, break: breakInfo } = req.body || {};
+  const { status, break: breakInfo, tag, context } = req.body || {};
   const allowed = new Set(['working', 'on_break', 'idle']);
   if (!allowed.has(status)) {
     return res.status(422).json({ error: 'status must be one of: working, on_break, idle' });
@@ -40,7 +40,7 @@ router.post('/heartbeat', async (req, res) => {
     // Fetch previous state so we can update rest_started_at correctly,
     // and detect transitions for the activity audit log.
     const { rows: prev } = await pool.query(
-      'SELECT activity_status, rest_started_at, last_heartbeat_at FROM crm_users WHERE id = $1',
+      'SELECT activity_status, rest_started_at, last_heartbeat_at, is_active FROM crm_users WHERE id = $1',
       [req.caller.id]
     );
     const prevStatus = prev[0]?.activity_status || null;
@@ -72,35 +72,40 @@ router.post('/heartbeat', async (req, res) => {
       ]
     );
 
-    // Activity audit log — emit transition events. Best-effort; never
-    // throws. A "logged in" point event fires when this is the first
-    // heartbeat in >90s (re-login or initial open).
+    // ── Activity log (single-tag model) ──────────────────────────────────
+    // The frontend computes ONE current tag and sends it here; we switch the
+    // caller's single open span to it. Best-effort — never throws.
     try {
       const callerId = req.caller.id;
       const gapMs = prevHb ? Date.now() - new Date(prevHb).getTime() : Infinity;
-      const justLoggedIn = !prevHb || gapMs > 90_000;
-      if (justLoggedIn) {
-        await activityLogger.endEventsForCaller(callerId, ['OFFLINE']);
+      if (!prevHb || gapMs > 90_000) {
         await activityLogger.logPointEvent(callerId, 'LOGGED_IN');
       }
 
-      if (status === 'working') {
-        // Working = active between calls. End any BREAK / IDLE,
-        // open ACTIVE if not already open. End BREAK records over_by_sec
-        // when relevant (break minutes exceeded).
-        if (prevStatus === 'on_break') {
-          await activityLogger.endEvent(callerId, 'BREAK');
-          await activityLogger.logPointEvent(callerId, 'RESUMED');
+      // Break-overrun auto-pause: >10 min past the break's end time pauses
+      // the caller. The custom "Other" break is additionally exempt until
+      // 30 min have elapsed since the break started.
+      let autoPaused = false;
+      if (tag === 'ON_BREAK' && breakInfo && breakInfo.endsAt && prev[0]?.is_active !== false) {
+        const overtimeMs = Date.now() - new Date(breakInfo.endsAt).getTime();
+        const elapsedMs  = breakInfo.startedAt ? Date.now() - new Date(breakInfo.startedAt).getTime() : 0;
+        const isOther    = ![TEA_LABEL, LUNCH_LABEL, TWOHR_LABEL].includes(breakInfo.reason);
+        if (overtimeMs > 10 * 60_000 && (!isOther || elapsedMs > 30 * 60_000)) {
+          await pool.query(
+            `UPDATE crm_users
+                SET is_active = FALSE, auto_paused_at = NOW(), auto_pause_reason = $2
+              WHERE id = $1`,
+            [callerId, 'break_overrun']
+          );
+          try { callerSse.pushTo(callerId, { type: 'caller.paused' }); } catch (_) {}
+          await activityLogger.switchTag(callerId, 'BLOCKED', { reason: 'break_overrun' });
+          autoPaused = true;
         }
-        await activityLogger.endEvent(callerId, 'IDLE');
-        await activityLogger.startEvent(callerId, 'ACTIVE');
-      } else if (status === 'on_break') {
-        await activityLogger.endEvent(callerId, 'ACTIVE');
-        await activityLogger.endEvent(callerId, 'IDLE');
-        await activityLogger.startEvent(callerId, 'BREAK', breakInfo || null);
-      } else if (status === 'idle') {
-        await activityLogger.endEvent(callerId, 'ACTIVE');
-        await activityLogger.startEvent(callerId, 'IDLE');
+      }
+
+      // Switch the single open span to the frontend-derived tag.
+      if (!autoPaused && tag && activityLogger.SPAN_TAGS.has(tag)) {
+        await activityLogger.switchTag(callerId, tag, context || null);
       }
     } catch (logErr) {
       console.error('caller/heartbeat activity log error:', logErr.message);
@@ -113,67 +118,112 @@ router.post('/heartbeat', async (req, res) => {
   }
 });
 
-/* ── POST /api/caller/state ──
-   Caller-driven UI-state transition for the granular activity log.
+/* POST /api/caller/state was removed in the single-tag redesign — the
+   heartbeat (above) is now the sole activity channel. The frontend derives
+   ONE current tag and sends it on every heartbeat. */
 
-   The heartbeat above tracks coarse working / on_break / idle status. This
-   endpoint records the fine-grained "what page / modal is the caller on
-   right now" timeline (Assigned Leads page → Viewing Lead → On Call → Form
-   → Reason picker → Assigned Leads page again …).
-
-   Body shape:
-     { action: 'start'|'end'|'replace', tag, context?, end_tag? }
-
-   - action='start'   → activityLogger.startEvent(caller, tag, context)
-   - action='end'     → activityLogger.endEvent(caller, tag, context)  (context = optional patch)
-   - action='replace' → end_tag (or every other page/modal tag) is closed, then `tag` starts.
-                        Use 'replace' for clean A → B transitions so the timeline
-                        shows two consecutive rows instead of overlapping ones.
-
-   All operations are best-effort; the response is always { ok:true } unless the
-   tag is unknown. Logging failures never surface to the caller. */
-const PAGE_TAGS = [
-  'ON_PAGE_CALL', 'ON_PAGE_ASSIGNED', 'ON_PAGE_COMPLETED',
-  'ON_PAGE_NOT_PICKED', 'ON_PAGE_MISSED_CALLS', 'ON_PAGE_UNTOUCHED',
-  'ON_PAGE_NEXT_BATCH',
-];
-const MODAL_TAGS = [
-  'VIEWING_LEAD', 'AFTER_CALL_FORM', 'ON_REASON_FORM',
-  'BREAK_PICKER', 'BREAK_OTHER_PICKER',
-];
-
-router.post('/state', async (req, res) => {
-  const { action, tag, context, end_tag } = req.body || {};
-  if (!action || !tag) {
-    return res.status(422).json({ error: 'action and tag are required' });
+/* Most-recent 08:00 AM IST as a UTC Date — the daily break-budget window
+   start. 08:00 IST = 02:30 UTC. If "now" (IST) is before 08:00, the window
+   opened yesterday. */
+function breakBudgetWindowStart() {
+  const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+  let y = istNow.getUTCFullYear(), m = istNow.getUTCMonth(), d = istNow.getUTCDate();
+  if (istNow.getUTCHours() < 8) {
+    const prev = new Date(Date.UTC(y, m, d) - 86400000);
+    y = prev.getUTCFullYear(); m = prev.getUTCMonth(); d = prev.getUTCDate();
   }
-  if (!activityLogger.VALID_TAGS.has(tag)) {
-    return res.status(422).json({ error: `unknown tag: ${tag}` });
-  }
-  const callerId = req.caller.id;
+  return new Date(Date.UTC(y, m, d, 2, 30, 0)); // 08:00 IST
+}
+
+/* ── GET /api/caller/break-budget ──
+   Today's break usage (since 08:00 IST) for this caller, computed from the
+   BREAK rows in caller_activity_events. Drives the break-picker: Tea is
+   capped at 2/day, Lunch 1/day, 2-hr 1/day, and "Other" shares a 30-min/day
+   pool. Ongoing breaks count via elapsed time. */
+const TEA_LABEL   = 'Tea Break';
+const LUNCH_LABEL = 'Lunch Break';
+const TWOHR_LABEL = '2 Hour Permission';
+router.get('/break-budget', async (req, res) => {
   try {
-    if (action === 'end') {
-      await activityLogger.endEvent(callerId, tag, context || null);
-    } else if (action === 'start') {
-      await activityLogger.startEvent(callerId, tag, context || null);
-    } else if (action === 'replace') {
-      // Close any modal-level event first so the new state takes precedence.
-      // If a specific end_tag was supplied, close only that one; otherwise
-      // sweep all modal tags + the page tags that aren't `tag` itself.
-      if (end_tag && activityLogger.VALID_TAGS.has(end_tag)) {
-        await activityLogger.endEvent(callerId, end_tag);
-      } else {
-        const sweep = [...MODAL_TAGS, ...PAGE_TAGS].filter(t => t !== tag);
-        await activityLogger.endEventsForCaller(callerId, sweep);
-      }
-      await activityLogger.startEvent(callerId, tag, context || null);
-    } else {
-      return res.status(422).json({ error: 'action must be one of: start, end, replace' });
+    const { rows } = await pool.query(
+      `SELECT context->>'reason' AS reason,
+              COALESCE(duration_sec, GREATEST(0, EXTRACT(EPOCH FROM (NOW() - started_at))::int)) AS dur_sec
+         FROM caller_activity_events
+        WHERE caller_id = $1 AND tag = 'ON_BREAK' AND started_at >= $2`,
+      [req.caller.id, breakBudgetWindowStart()]
+    );
+    let tea = 0, lunch = 0, twohr = 0, otherSec = 0;
+    for (const r of rows) {
+      if (r.reason === TEA_LABEL)        tea++;
+      else if (r.reason === LUNCH_LABEL) lunch++;
+      else if (r.reason === TWOHR_LABEL) twohr++;
+      else                               otherSec += Number(r.dur_sec) || 0;
     }
+    res.json({
+      tea_used:           tea,
+      lunch_used:         lunch,
+      twohr_used:         twohr,
+      other_minutes_used: Math.round(otherSec / 60),
+      // limits — caps the picker uses to grey out options
+      limits: { tea: 2, lunch: 1, twohr: 1, other_minutes: 30 },
+    });
+  } catch (err) {
+    console.error('caller/break-budget error:', err.message);
+    res.status(500).json({ error: 'break_budget_failed' });
+  }
+});
+
+/* ── POST /api/caller/late-reason ──
+   Caller came back from a break >10 min late and typed why. We record it as
+   a LATE_RETURN point event so it surfaces in the admin Activity Log drawer
+   (admin sees the reason + how late). Body: { reason, over_by_sec }. */
+router.post('/late-reason', async (req, res) => {
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
+  const overBySec = Number(req.body?.over_by_sec) || 0;
+  if (!reason) return res.status(422).json({ error: 'reason is required' });
+  try {
+    await activityLogger.logPointEvent(req.caller.id, 'LATE_RETURN', {
+      reason, over_by_sec: overBySec,
+    });
+    console.log(JSON.stringify({
+      type: 'caller.late_return', caller_id: req.caller.id,
+      over_by_sec: overBySec, reason, at: new Date().toISOString(),
+    }));
     res.json({ ok: true });
   } catch (err) {
-    console.error('caller/state error:', err.message);
-    res.status(500).json({ error: 'state_failed' });
+    console.error('caller/late-reason error:', err.message);
+    res.status(500).json({ error: 'late_reason_failed' });
+  }
+});
+
+/* ── POST /api/caller/self-pause ──
+   The caller workspace auto-pauses the account after repeated ignored robot
+   nudges (idle screen, reason cards, break picker). Flips is_active = FALSE
+   and pushes `caller.paused` over SSE so CallerShell shows the paused robot
+   straight away. Resume is admin-only (the existing PATCH endpoint).
+   Body: { reason? }. */
+router.post('/self-pause', async (req, res) => {
+  const reason = typeof req.body?.reason === 'string'
+    ? req.body.reason.trim().slice(0, 200) : 'robot nudge ignored';
+  try {
+    await pool.query(
+      `UPDATE crm_users
+          SET is_active        = FALSE,
+              auto_paused_at    = NOW(),
+              auto_pause_reason = $2
+        WHERE id = $1`,
+      [req.caller.id, reason]
+    );
+    await activityLogger.logPointEvent(req.caller.id, 'PAUSED_BY_SMARTFLOW', { reason });
+    try { callerSse.pushTo(req.caller.id, { type: 'caller.paused' }); } catch (_) {}
+    console.log(JSON.stringify({
+      type: 'caller.self_pause', caller_id: req.caller.id, reason,
+      at: new Date().toISOString(),
+    }));
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('caller/self-pause error:', err.message);
+    res.status(500).json({ error: 'self_pause_failed' });
   }
 });
 
@@ -184,15 +234,23 @@ router.post('/state', async (req, res) => {
 router.get('/me', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT is_active FROM crm_users WHERE id = $1',
+      'SELECT is_active, auto_paused_at, auto_pause_reason FROM crm_users WHERE id = $1',
       [req.caller.id]
     );
-    const isActive = rows[0]?.is_active !== false;  // default to active if row vanished
-    res.json({ caller: { ...req.caller, is_active: isActive } });
+    const row = rows[0] || {};
+    res.json({ caller: {
+      ...req.caller,
+      is_active:         row.is_active !== false,  // default to active if row vanished
+      auto_paused_at:    row.auto_paused_at || null,
+      auto_pause_reason: row.auto_pause_reason || null,
+    } });
   } catch (err) {
     console.error('caller/me error:', err.message);
-    // Fall back to JWT-only payload so an outage doesn't lock callers out.
-    res.json({ caller: { ...req.caller, is_active: true } });
+    // Return an error — never a fabricated is_active. A transient DB blip
+    // must NOT flip the caller's pause state: that flipped the activity tag
+    // between BLOCKED and the page tag, littering the log with 0s spans.
+    // The frontend keeps its last known pause state on a failed /me.
+    res.status(503).json({ error: 'me_unavailable' });
   }
 });
 
@@ -323,6 +381,36 @@ const LEAD_SELECT = `
     ) latest_note ON TRUE
 `;
 
+/* "Current + previous" webinars, computed PER SOURCE (meta / yt).
+   For each source:
+     - "current"  = the active webinar (is_active = TRUE).
+     - "previous" = the webinar immediately before it by date.
+     - the window is capped at that source's active webinar date so a
+       future scheduled "next" webinar can't displace the genuine previous
+       one. Fallback (no active webinar for the source): the source's
+       latest webinar.
+   Result = up to 4 webinars (2 per source). Leads on these stay in the
+   caller's Assigned queue; leads on any OLDER webinar move to the Untouched
+   page. Leads with NULL webinar_id always stay in Assigned (can't age them). */
+const RECENT_WEBINARS = `(
+  SELECT ranked.id FROM (
+    SELECT w.id,
+           ROW_NUMBER() OVER (
+             PARTITION BY w.source
+             ORDER BY w.date_time DESC NULLS LAST, w.id DESC
+           ) AS rn
+      FROM webinars w
+      JOIN (
+        SELECT source,
+               COALESCE(MAX(date_time) FILTER (WHERE is_active), MAX(date_time)) AS cap
+          FROM webinars
+         GROUP BY source
+      ) caps ON caps.source = w.source
+     WHERE w.date_time <= caps.cap
+  ) ranked
+  WHERE ranked.rn <= 2
+)`;
+
 router.get('/leads', async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -332,6 +420,10 @@ router.get('/leads', async (req, res) => {
           AND (
             l.last_note_outcome IS NULL
             OR (l.last_note_outcome = 'follow_up' AND l.follow_up_at <= NOW())
+          )
+          AND (
+            l.webinar_id IS NULL
+            OR l.webinar_id IN ${RECENT_WEBINARS}
           )
         ORDER BY
           (l.last_note_outcome = 'follow_up' AND l.follow_up_at <= NOW()) DESC NULLS LAST,
@@ -363,6 +455,34 @@ router.get('/leads/not-picked', async (req, res) => {
   } catch (err) {
     console.error('caller/leads/not-picked error:', err.message);
     res.status(500).json({ error: 'Failed to fetch not-picked leads' });
+  }
+});
+
+/* ── GET /api/caller/leads/untouched ──
+   Leads still assigned to this caller but tied to an OLDER webinar — older
+   than the current + previous webinar. They drop out of the Assigned queue
+   so the caller focuses on the latest two webinars, but stay fully callable
+   here. Same uncompleted/non-parked filter as /leads, just the inverse
+   webinar window. NULL-webinar leads never land here (they stay in Assigned). */
+router.get('/leads/untouched', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `${LEAD_SELECT}
+        WHERE l.assigned_user_id = $1
+          AND l.next_batch_parked = FALSE
+          AND (
+            l.last_note_outcome IS NULL
+            OR (l.last_note_outcome = 'follow_up' AND l.follow_up_at <= NOW())
+          )
+          AND l.webinar_id IS NOT NULL
+          AND l.webinar_id NOT IN ${RECENT_WEBINARS}
+        ORDER BY l.assigned_at ASC NULLS LAST, l.created_at ASC`,
+      [req.caller.id]
+    );
+    res.json({ leads: rows, total: rows.length });
+  } catch (err) {
+    console.error('caller/leads/untouched error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch untouched leads' });
   }
 });
 

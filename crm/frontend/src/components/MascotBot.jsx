@@ -21,15 +21,18 @@ const PATCHED_THINKING = normalizeLoop(lockArmsDown(thinkingData));
    celebration moment (after Complete Call) is rendered by the cooldown
    card in AssignedLeadsModule.jsx, not here — this component is *only*
    the small corner mascot. */
+/* One robot everywhere — every mood renders the same robot-idle.json the
+   Call page uses; only size/placement varies. PATCHED_HAPPY / PATCHED_THINKING
+   are kept imported but no longer mapped. */
 const MOOD_MAP = {
   idle:     PATCHED_IDLE,
-  happy:    PATCHED_HAPPY,
-  thinking: PATCHED_THINKING,
+  happy:    PATCHED_IDLE,
+  thinking: PATCHED_IDLE,
 };
 
 export default function MascotBot({ mood = 'idle' }) {
   const animationData = MOOD_MAP[mood] || idleData;
-  const loop = mood !== 'happy';
+  const loop = true;
 
   /* Key on mood so happy can re-trigger cleanly when fired back-to-back. */
   const key = useMemo(() => `mascot-${mood}-${Date.now()}`, [mood]);

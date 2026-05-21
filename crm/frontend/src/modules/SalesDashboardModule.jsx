@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import SalesLeadsTable        from './SalesLeadsTable';
 import SalesLeadsLogicView    from './SalesLeadsLogicView';
 import SalesPerformanceView   from './SalesPerformanceView';
+import SalesNotificationsView from './SalesNotificationsView';
 
 const TABS = [
   {
@@ -32,6 +33,16 @@ const TABS = [
         <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
         <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
         <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'notifications',
+    label: 'Notifications',
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
       </svg>
     ),
   },
@@ -97,9 +108,10 @@ export default function SalesDashboardModule({ token }) {
         />
       </div>
 
-      {tab === 'performance' && <SalesPerformanceView token={token} actionsSlotEl={slotEl} />}
-      {tab === 'leads'       && <SalesLeadsTable      token={token} />}
-      {tab === 'logic'       && <SalesLeadsLogicView  token={token} />}
+      {tab === 'performance'   && <SalesPerformanceView   token={token} actionsSlotEl={slotEl} />}
+      {tab === 'leads'         && <SalesLeadsTable        token={token} />}
+      {tab === 'logic'         && <SalesLeadsLogicView    token={token} />}
+      {tab === 'notifications' && <SalesNotificationsView token={token} />}
     </div>
   );
 }

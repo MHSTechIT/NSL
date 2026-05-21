@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import DateTimePicker from '../admin/DateTimePicker';
+import { setActivitySub } from '../utils/callerActivity';
 import {
   RANGES, AGE_BUCKETS, RANGE_FOR, MEDICINE, YES_NO, HBA1C,
   WORKING_PROFESSIONAL, LOCATIONS,
@@ -51,6 +52,13 @@ export default function EditCallNoteModal({ jwt, lead, onClose, onSaved }) {
   const [followUpAtLocal, setFollowUpAtLocal]         = useState(toLocalDatetime(initialFollowUp));
   const [saving, setSaving]                           = useState(false);
   const [error, setError]                             = useState('');
+
+  /* Report the EDITING_COMPLETED activity sub-tag while this modal is open. */
+  useEffect(() => {
+    if (!jwt) return undefined;
+    setActivitySub(jwt, 'EDITING_COMPLETED', { lead_name: lead?.full_name || '', lead_id: lead?.id || null });
+    return () => { setActivitySub(jwt, null, null); };
+  }, [jwt, lead?.id, lead?.full_name]);
 
   async function handleSubmit() {
     setError('');

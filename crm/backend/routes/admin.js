@@ -1091,6 +1091,28 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
   }
 });
 
+/* ── GET /api/admin/auto-paused-callers ──
+   Notifications feed for the Sales dashboard. Returns every caller the
+   SYSTEM auto-paused — robot-nudge self-pause or the SmartFlow retry-cap.
+   Admin pauses are excluded: they leave auto_paused_at NULL. The card's
+   Resume button calls PATCH /crm-users/:id { is_active: true }, which
+   clears auto_paused_at + auto_pause_reason so the row drops off this feed. */
+router.get('/auto-paused-callers', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, full_name, role, auto_paused_at, auto_pause_reason
+         FROM crm_users
+        WHERE is_active = FALSE
+          AND auto_paused_at IS NOT NULL
+        ORDER BY auto_paused_at DESC`
+    );
+    res.json({ callers: rows });
+  } catch (err) {
+    console.error('auto-paused-callers error:', err.message);
+    res.status(500).json({ error: 'Failed to load notifications.' });
+  }
+});
+
 /* ── GET /api/admin/lead-share-config?webinar_id=<uuid> ── */
 router.get('/lead-share-config', async (req, res) => {
   const { webinar_id } = req.query;
@@ -1563,19 +1585,39 @@ router.get('/caller-activity/:id', async (req, res) => {
     );
     if (caller.length === 0) return res.status(404).json({ error: 'caller not found' });
 
+    // Single-tag cutover — pre-redesign rows used three overlapping channels,
+    // so a day summed past 24h. Only rows at/after the cutover are returned.
+    const { rows: flag } = await pool.query(
+      'SELECT applied_at FROM activity_log_redesign_flag ORDER BY applied_at ASC LIMIT 1'
+    );
+    const cutover = flag[0]?.applied_at
+      ? new Date(flag[0].applied_at).toISOString()
+      : '1970-01-01T00:00:00.000Z';
+
+    // `day_duration_sec` clamps each event to the selected IST day — the
+    // overlap of [started_at, ended_at ?? now] with [dayStart, dayEnd]. This
+    // is what the drawer sums, so a span crossing midnight (or an event left
+    // open for days) can never inflate the day's totals past 24h.
     const { rows } = await pool.query(
-      `SELECT id, tag, started_at, ended_at, duration_sec, context
+      `SELECT id, tag, started_at, ended_at, duration_sec, context,
+              GREATEST(0, EXTRACT(EPOCH FROM (
+                LEAST(COALESCE(ended_at, NOW()), $3::timestamptz)
+                - GREATEST(started_at, $2::timestamptz)
+              ))::int) AS day_duration_sec
          FROM caller_activity_events
         WHERE caller_id = $1
           AND started_at < $3
+          AND started_at >= $4
           AND (ended_at IS NULL OR ended_at >= $2)
         ORDER BY started_at ASC`,
-      [id, dayStartUtc.toISOString(), dayEndUtc.toISOString()]
+      [id, dayStartUtc.toISOString(), dayEndUtc.toISOString(), cutover]
     );
 
     res.json({
       caller: caller[0],
       date: dateYmd,
+      day_start: dayStartUtc.toISOString(),
+      day_end: dayEndUtc.toISOString(),
       events: rows,
     });
   } catch (err) {

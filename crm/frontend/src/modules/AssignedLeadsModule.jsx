@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Lottie from 'lottie-react';
 import LeadCallNoteModal from './LeadCallNoteModal';
-import happyBotRaw     from '../assets/bot/robot-happy.json';
+// One robot everywhere — the same robot-idle.json the Call page uses.
+// (Kept the `happyBot*` names to avoid churn; it's the idle robot now.)
+import happyBotRaw     from '../assets/bot/robot-idle.json';
 import confettiData    from '../assets/bot/confetti.json';
 import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
-import { emitCallerState } from '../utils/callerActivity';
+import { setActivityStatus, setActivitySub } from '../utils/callerActivity';
 import SourceBadge from '../components/SourceBadge';
+import useRobotNudge from '../hooks/useRobotNudge';
+import RobotGuide from '../components/RobotGuide';
 // Tag-specific celebration audio. Played alongside the speech-bubble line.
 import hotLeadMp3   from '../assets/audio/hot-lead.mp3';
 import warmLeadMp3  from '../assets/audio/warm-lead.mp3';
@@ -179,8 +183,14 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
   const [breakTimeLeft, setBreakTimeLeft] = useState(0);
   const [breakElapsed,  setBreakElapsed]  = useState(0);
   const [otherMessage, setOtherMessage]   = useState('');
-  const [otherMinutes, setOtherMinutes]   = useState(10);
+  const [otherMinutes, setOtherMinutes]   = useState(30);
   const breakTimerRef = useRef(null);
+
+  /* Daily break budget — fetched from GET /api/caller/break-budget each time
+     the break picker opens. Drives per-option greying (Tea ×2/day, Lunch ×1,
+     2-hr ×1) and the Custom-break minute cap (shared 30-min/day pool).
+     null until the first fetch resolves — nothing is greyed until then. */
+  const [breakBudget, setBreakBudget] = useState(null);
 
   /* Activity heartbeat — mirror the caller's real-time state to localStorage
      so CallerShell's heartbeat poller (every 30s) reports it to the server.
@@ -203,49 +213,129 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
   const breakChooseTimerRef    = useRef(null);
   const breakChooseStrikesRef  = useRef(0);
 
-  /* Granular activity emitter — VIEWING_LEAD when the call-note modal opens,
-     BREAK_PICKER / BREAK_OTHER_PICKER for the break-reason flow. Each useEffect
-     fires a `replace` so the admin Activity Log shows one row at a time:
-     ON_PAGE_ASSIGNED → VIEWING_LEAD → ON_CALL (server-side) → AFTER_CALL_FORM
-     (LeadCallNoteModal) → ON_PAGE_ASSIGNED again.
-
-     We track the previous value via a ref so the first paint with null state
-     doesn't double-emit on top of CallerShell's page-level emit. */
-  const prevEditLeadIdRef = useRef(null);
+  /* Break activity sub-tag — BREAK_PICKER while the break-reason picker is
+     open, ON_BREAK once a break is running. Transition-tracked via a ref so
+     that while neither is active we don't clobber the sub-tag the call-note
+     modal owns (ON_CALL / IN_FORM / REASON_CARD). */
+  const prevBreakSubRef = useRef(null);
   useEffect(() => {
     if (!jwt) return;
-    const curId = editLead?.id || null;
-    const prevId = prevEditLeadIdRef.current;
-    if (curId && curId !== prevId) {
-      emitCallerState(jwt, {
-        action: 'replace',
-        tag: 'VIEWING_LEAD',
-        context: { lead_name: editLead.full_name, lead_id: editLead.id },
-      });
-    } else if (!curId && prevId) {
-      // Modal closed — return to the Assigned Leads page row in the timeline.
-      emitCallerState(jwt, { action: 'replace', tag: 'ON_PAGE_ASSIGNED' });
+    let sub = null;
+    if (breakStep === 'choose' || breakStep === 'other') sub = 'BREAK_PICKER';
+    else if (breakInfo) sub = 'ON_BREAK';
+    if (sub !== prevBreakSubRef.current) {
+      if (sub === 'ON_BREAK') {
+        setActivitySub(jwt, 'ON_BREAK', { reason: breakInfo?.reason, minutes: breakInfo?.minutes });
+      } else if (sub === 'BREAK_PICKER') {
+        setActivitySub(jwt, 'BREAK_PICKER', null);
+      } else if (prevBreakSubRef.current) {
+        setActivitySub(jwt, null, null);
+      }
+      prevBreakSubRef.current = sub;
     }
-    prevEditLeadIdRef.current = curId;
-  }, [editLead, jwt]);
+  }, [breakStep, breakInfo, jwt]);
 
-  const prevBreakStepRef = useRef(null);
+  /* Leaving the Assigned page clears any sub-tag this module set so the next
+     page's tag isn't shadowed by a stale ON_BREAK / picker tag. */
+  useEffect(() => () => { if (jwt) setActivitySub(jwt, null, null); }, [jwt]);
+
+  /* ── Daily break budget ──────────────────────────────────────────────────
+     Fetched fresh each time the picker opens (breakStep → 'choose'). Greys
+     Tea after 2/day, Lunch after 1, 2-hr after 1; "Other" draws from a
+     shared 30-min/day pool. Window resets at 08:00 IST (server-computed). */
   useEffect(() => {
-    if (!jwt) return;
-    const prev = prevBreakStepRef.current;
-    if (breakStep === 'choose' && prev !== 'choose') {
-      emitCallerState(jwt, { action: 'replace', tag: 'BREAK_PICKER' });
-    } else if (breakStep === 'other' && prev !== 'other') {
-      emitCallerState(jwt, { action: 'replace', tag: 'BREAK_OTHER_PICKER' });
-    } else if (breakStep === null && (prev === 'choose' || prev === 'other')) {
-      // Picker closed — return to page state. The heartbeat poll will pick
-      // up an actual BREAK if the caller selected a reason. We do NOT emit
-      // BREAK here because BREAK lives outside the modal/page sweep list,
-      // and the heartbeat owns its lifecycle.
-      emitCallerState(jwt, { action: 'replace', tag: 'ON_PAGE_ASSIGNED' });
-    }
-    prevBreakStepRef.current = breakStep;
+    if (breakStep !== 'choose' || !jwt) return undefined;
+    let alive = true;
+    fetch('/api/caller/break-budget', { headers: { Authorization: `Bearer ${jwt}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (alive && d) setBreakBudget(d); })
+      .catch(() => {});
+    return () => { alive = false; };
   }, [breakStep, jwt]);
+
+  /* Derived budget flags — a null budget (not yet loaded) greys nothing. */
+  const teaExhausted   = !!breakBudget && breakBudget.tea_used   >= breakBudget.limits.tea;
+  const lunchExhausted = !!breakBudget && breakBudget.lunch_used >= breakBudget.limits.lunch;
+  const twohrExhausted = !!breakBudget && breakBudget.twohr_used >= breakBudget.limits.twohr;
+  const otherMinutesRemaining = breakBudget
+    ? Math.max(0, breakBudget.limits.other_minutes - breakBudget.other_minutes_used)
+    : 30;
+
+  /* Keep the Custom-break minute field inside the remaining daily pool —
+     re-clamp when the step opens or the budget resolves. */
+  useEffect(() => {
+    if (breakStep !== 'other') return;
+    setOtherMinutes(m => Math.max(1, Math.min(otherMinutesRemaining, m || 30)));
+  }, [breakStep, breakBudget]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Robot speech-bubble auto-fade — every robot line disappears after 10 s
+     (the functional card underneath stays put). The bubble re-shows whenever
+     the line CHANGES: a break-picker strike (breakChooseStrikes) or a
+     Custom-break nudge (otherNudgeCount) bumps the dependency and restarts
+     the 10 s timer with the fresh text. */
+  const [chooseBubbleShown, setChooseBubbleShown] = useState(true);
+  const [otherBubbleShown,  setOtherBubbleShown]  = useState(true);
+  useEffect(() => {
+    if (breakStep !== 'choose') { setChooseBubbleShown(true); return undefined; }
+    setChooseBubbleShown(true);
+    const id = setTimeout(() => setChooseBubbleShown(false), 10000);
+    return () => clearTimeout(id);
+  }, [breakStep, breakChooseStrikes]);
+
+  /* Robot nudge for the Custom-break ("Other") card — if the caller opens it
+     and doesn't act, the robot re-asks "nanba irukkiya" every 30 s and after
+     4 unanswered nudges the account auto-pauses (POST /api/caller/self-pause
+     → CallerShell shows the paused robot). */
+  const { count: otherNudgeCount } = useRobotNudge({
+    active: breakStep === 'other',
+    intervalMs: 30000,
+    maxRepeats: 4,
+    storageKey: breakStorageKey.replace('mhs_break_', 'mhs_nudge_breakother_'),
+    onExhausted: () => {
+      fetch('/api/caller/self-pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ reason: 'Custom-break card ignored' }),
+      }).catch(() => {});
+      setBreakStep(null);
+    },
+  });
+  /* Custom-break bubble fade — re-shows on each "nanba irukkiya" nudge. */
+  useEffect(() => {
+    if (breakStep !== 'other') { setOtherBubbleShown(true); return undefined; }
+    setOtherBubbleShown(true);
+    const id = setTimeout(() => setOtherBubbleShown(false), 10000);
+    return () => clearTimeout(id);
+  }, [breakStep, otherNudgeCount]);
+
+  /* Late-return flow — when a caller resumes MORE than 10 min over their
+     allotted break, they must type why before auto-call restarts. The robot
+     re-asks "nanba irukkiya" every 30 s until they submit. */
+  const [lateReasonStep,   setLateReasonStep]   = useState(null);  // null | 'ask'
+  const [lateReasonText,   setLateReasonText]   = useState('');
+  const [lateOverBySec,    setLateOverBySec]    = useState(0);
+  const [resumeRobotPulse, setResumeRobotPulse] = useState(0);     // resume-msg flash
+  const { count: lateNudgeCount } = useRobotNudge({
+    active: lateReasonStep === 'ask',
+    intervalMs: 30000,
+    maxRepeats: 9999,   // nudge until submit — no auto-pause (caller IS present)
+    storageKey: breakStorageKey.replace('mhs_break_', 'mhs_nudge_late_'),
+  });
+  /* "Why late" bubble fade — text hides after 10 s, re-shows on each nudge. */
+  const [lateBubbleShown, setLateBubbleShown] = useState(true);
+  useEffect(() => {
+    if (lateReasonStep !== 'ask') { setLateBubbleShown(true); return undefined; }
+    setLateBubbleShown(true);
+    const id = setTimeout(() => setLateBubbleShown(false), 10000);
+    return () => clearTimeout(id);
+  }, [lateReasonStep, lateNudgeCount]);
+
+  /* Resume-message robot flash — auto-clears after 7 s. */
+  useEffect(() => {
+    if (resumeRobotPulse === 0) return undefined;
+    const id = setTimeout(() => setResumeRobotPulse(0), 7000);
+    return () => clearTimeout(id);
+  }, [resumeRobotPulse]);
 
   // Queue-end refill modal — pops in two cases:
   //   1. 'auto_finished' — the auto-call queue just drained
@@ -257,6 +347,31 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
   const [queueEndDismissed, setQueueEndDismissed] = useState(false);
   const [reopening, setReopening]       = useState(null); // 'dnp' | 'missed' | 'untouched' | null
   const [reopenToast, setReopenToast]   = useState('');
+
+  /* Idle nudge — the caller is sitting on the Assigned page with leads
+     waiting but auto-call OFF and no modal/break open. The robot re-asks
+     "enna nanba call start pannalaya" every 30 s; 5 unanswered nudges
+     auto-pause the account. */
+  const idleActive = !editLead
+    && autoMode === 'off'
+    && !breakInfo
+    && breakStep === null
+    && lateReasonStep === null
+    && !queueEndOpen
+    && leads.length > 0;
+  const { count: idleNudgeCount } = useRobotNudge({
+    active: idleActive,
+    intervalMs: 30000,
+    maxRepeats: 5,
+    storageKey: breakStorageKey.replace('mhs_break_', 'mhs_nudge_idle_'),
+    onExhausted: () => {
+      fetch('/api/caller/self-pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ reason: 'Idle — auto-call never started' }),
+      }).catch(() => {});
+    },
+  });
 
   async function triggerCall(lead) {
     const res = await fetch('/api/caller/calls/start', {
@@ -358,13 +473,15 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
     setBreakElapsed(0);
     setBreakStep(null);
     setOtherMessage('');
-    setOtherMinutes(10);
+    setOtherMinutes(30);
     try { localStorage.setItem(breakStorageKey, JSON.stringify(info)); } catch { /* quota / sandbox */ }
   }
   /* End the break and (if possible) immediately kick off auto-call. Only
      called from the in-modal "Start Auto-Call" button — there is no
      standalone "End break" anywhere else, by design. */
-  function endBreakAndStartAutoCall() {
+  /* Actually clear the break + restart auto-call. Flashes the resume robot
+     ("enjoy panniya va, call pannalam"). */
+  function doEndBreakAndStart() {
     setBreakInfo(null);
     setBreakTimeLeft(0);
     setBreakElapsed(0);
@@ -373,12 +490,46 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
       breakTimerRef.current = null;
     }
     try { localStorage.removeItem(breakStorageKey); } catch { /* sandbox */ }
+    setResumeRobotPulse(p => p + 1);   // flash the "enjoy panniya va" robot
     if (leads.length) {
       startAutoMode();
     }
     // If no leads loaded yet (e.g., right after a tab restore), the modal
     // closes and the page's Start Auto-Call button takes over once leads
     // arrive — the caller is back in normal manual mode.
+  }
+
+  /* Resume from break. On time (or ≤10 min over) → resume straight away.
+     MORE than 10 min over → open the "why late" reason card first; only
+     after a reason is submitted does auto-call restart. */
+  function endBreakAndStartAutoCall() {
+    const overBy = breakInfo
+      ? Math.max(0, breakElapsed - breakInfo.minutes * 60)
+      : 0;
+    if (overBy > 600) {
+      setLateOverBySec(overBy);
+      setLateReasonText('');
+      setLateReasonStep('ask');
+      return;
+    }
+    doEndBreakAndStart();
+  }
+
+  /* "Why late" card submit — records the reason (admin-visible LATE_RETURN
+     event via POST /api/caller/late-reason), then resumes. */
+  async function submitLateReason() {
+    const reason = lateReasonText.trim();
+    if (!reason) return;
+    try {
+      await fetch('/api/caller/late-reason', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ reason, over_by_sec: lateOverBySec }),
+      });
+    } catch (_) { /* best-effort — never block the caller from resuming */ }
+    setLateReasonStep(null);
+    setLateReasonText('');
+    doEndBreakAndStart();
   }
 
   /* Refill Assigned bucket from DNP / Missed Calls / Untouched. Hits
@@ -465,10 +616,8 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
     } else if (editLead || autoMode === 'calling') {
       status = 'working';
     }
-    const payload = { status, break: breakPayload, updatedAt: Date.now() };
-    try { localStorage.setItem(activityStorageKey, JSON.stringify(payload)); } catch { /* sandbox */ }
-    try { window.dispatchEvent(new CustomEvent('mhs:activity:changed', { detail: payload })); } catch { /* no-op */ }
-  }, [editLead, autoMode, breakInfo, activityStorageKey]);
+    setActivityStatus(jwt, status, breakPayload);
+  }, [editLead, autoMode, breakInfo, jwt]);
 
   function startAutoMode() {
     if (!leads.length) return;
@@ -536,7 +685,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
      5 s have elapsed). Wall-clock duration is now guaranteed. */
   function startCooldown() {
     clearCooldownTimer();
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 10000;
     setAutoMode('cooldown');
     const tick = () => {
       const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
@@ -928,7 +1077,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
               }
               const nextLead = remaining[0];
               clearAdvanceTimer();
-              const deadline = Date.now() + 5000;
+              const deadline = Date.now() + 10000;
               const tick = () => {
                 const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
                 setAdvanceLeft(left);
@@ -1151,11 +1300,40 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
             position: 'fixed', inset: 0, zIndex: 9600,
             background: 'rgba(15,0,40,0.55)',
             backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '0 16px', fontFamily: 'Outfit, sans-serif',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 2, padding: '0 16px', fontFamily: 'Outfit, sans-serif',
           }}
           onClick={() => setBreakStep(null)}
         >
+          {/* Robot guide — invites the break, or switches to the select-nudge
+             line once an inactivity strike fires. Bubble text fades after
+             10 s; re-shows when a strike changes the line. */}
+          <div onClick={e => e.stopPropagation()} style={{
+            position: 'relative', background: '#fff', color: '#3B0764',
+            padding: '12px 20px', borderRadius: 20, maxWidth: 'min(360px, 88vw)',
+            textAlign: 'center', fontWeight: 700, fontSize: '0.92rem', lineHeight: 1.35,
+            boxShadow: '0 12px 32px rgba(15,0,40,0.30)', marginBottom: -6,
+            opacity: chooseBubbleShown ? 1 : 0,
+            transform: chooseBubbleShown ? 'translateY(0)' : 'translateY(-6px)',
+            transition: 'opacity 420ms ease, transform 420ms ease',
+          }}>
+            {breakChooseStrikes > 0
+              ? 'ethathu select pannunga nanba'
+              : 'enna nanba break ah..... enjoy pannu'}
+            <div style={{
+              position: 'absolute', bottom: -9, left: '50%',
+              width: 0, height: 0, transform: 'translateX(-50%)',
+              borderLeft: '11px solid transparent', borderRight: '11px solid transparent',
+              borderTop: '11px solid #fff',
+              filter: 'drop-shadow(0 4px 4px rgba(15,0,40,0.18))',
+            }} />
+          </div>
+          <div onClick={e => e.stopPropagation()} style={{ width: 132, height: 132, pointerEvents: 'none' }}>
+            <Lottie animationData={happyBotData} loop autoplay
+              style={{ width: '100%', height: '100%' }}
+              rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }} />
+          </div>
           <div onClick={e => e.stopPropagation()} style={{
             width: '100%', maxWidth: 380, background: '#fff', borderRadius: 22,
             padding: '26px 22px', boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
@@ -1195,54 +1373,87 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button
-                onClick={() => startBreak('Tea Break', 15)}
+                onClick={() => { if (!teaExhausted) startBreak('Tea Break', 15); }}
+                disabled={teaExhausted}
                 style={{
                   height: '3rem', borderRadius: 12, border: '1px solid rgba(180,83,9,0.20)',
                   background: 'rgba(254,243,199,0.50)', color: '#92400E',
-                  fontWeight: 700, fontSize: '0.92rem', cursor: 'pointer',
+                  fontWeight: 700, fontSize: '0.92rem',
+                  cursor: teaExhausted ? 'not-allowed' : 'pointer',
+                  opacity: teaExhausted ? 0.45 : 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '0 14px',
                 }}
               >
                 <span>☕ Tea Break</span>
-                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(146,64,14,0.75)' }}>15 min</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(146,64,14,0.75)' }}>
+                  {teaExhausted ? 'Used 2/2 today' : '15 min'}
+                </span>
               </button>
               <button
-                onClick={() => startBreak('Lunch Break', 45)}
+                onClick={() => { if (!lunchExhausted) startBreak('Lunch Break', 45); }}
+                disabled={lunchExhausted}
                 style={{
                   height: '3rem', borderRadius: 12, border: '1px solid rgba(5,150,105,0.25)',
                   background: 'rgba(209,250,229,0.50)', color: '#065F46',
-                  fontWeight: 700, fontSize: '0.92rem', cursor: 'pointer',
+                  fontWeight: 700, fontSize: '0.92rem',
+                  cursor: lunchExhausted ? 'not-allowed' : 'pointer',
+                  opacity: lunchExhausted ? 0.45 : 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '0 14px',
                 }}
               >
                 <span>🍱 Lunch Break</span>
-                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(6,95,70,0.75)' }}>45 min</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(6,95,70,0.75)' }}>
+                  {lunchExhausted ? 'Used 1/1 today' : '45 min'}
+                </span>
               </button>
               <button
-                onClick={() => setBreakStep('other')}
+                onClick={() => { if (!twohrExhausted) startBreak('2 Hour Permission', 120); }}
+                disabled={twohrExhausted}
+                style={{
+                  height: '3rem', borderRadius: 12, border: '1px solid rgba(37,99,235,0.25)',
+                  background: 'rgba(219,234,254,0.55)', color: '#1E40AF',
+                  fontWeight: 700, fontSize: '0.92rem',
+                  cursor: twohrExhausted ? 'not-allowed' : 'pointer',
+                  opacity: twohrExhausted ? 0.45 : 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '0 14px',
+                }}
+              >
+                <span>🕑 2-Hour Permission</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(30,64,175,0.75)' }}>
+                  {twohrExhausted ? 'Used 1/1 today' : '120 min'}
+                </span>
+              </button>
+              <button
+                onClick={() => { if (otherMinutesRemaining > 0) setBreakStep('other'); }}
+                disabled={otherMinutesRemaining <= 0}
                 style={{
                   height: '3rem', borderRadius: 12, border: '1px solid rgba(91,33,182,0.25)',
                   background: 'rgba(237,234,248,0.50)', color: '#5B21B6',
-                  fontWeight: 700, fontSize: '0.92rem', cursor: 'pointer',
+                  fontWeight: 700, fontSize: '0.92rem',
+                  cursor: otherMinutesRemaining <= 0 ? 'not-allowed' : 'pointer',
+                  opacity: otherMinutesRemaining <= 0 ? 0.45 : 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '0 14px',
                 }}
               >
                 <span>📝 Other</span>
-                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(91,33,182,0.75)' }}>Custom</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'rgba(91,33,182,0.75)' }}>
+                  {otherMinutesRemaining <= 0 ? 'Used 30/30 today' : `${otherMinutesRemaining} min left`}
+                </span>
               </button>
             </div>
             <button
-              onClick={() => setBreakStep(null)}
+              onClick={() => { setBreakStep(null); advanceAutoCall(); }}
               style={{
                 width: '100%', marginTop: 14, height: '2.4rem', borderRadius: 8,
                 border: 'none', background: 'transparent', color: 'rgba(91,33,182,0.65)',
                 fontWeight: 600, fontSize: '0.84rem', cursor: 'pointer',
               }}
             >
-              Cancel
+              Cancel — keep calling
             </button>
           </div>
         </div>
@@ -1255,11 +1466,39 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
             position: 'fixed', inset: 0, zIndex: 9600,
             background: 'rgba(15,0,40,0.55)',
             backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '0 16px', fontFamily: 'Outfit, sans-serif',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 2, padding: '0 16px', fontFamily: 'Outfit, sans-serif',
           }}
           onClick={() => setBreakStep('choose')}
         >
+          {/* Robot guide — invites the break, switches to the "nanba irukkiya"
+             nudge each 30 s; 4 unanswered nudges auto-pause the account. */}
+          <div onClick={e => e.stopPropagation()} style={{
+            position: 'relative', background: '#fff', color: '#3B0764',
+            padding: '12px 20px', borderRadius: 20, maxWidth: 'min(360px, 88vw)',
+            textAlign: 'center', fontWeight: 700, fontSize: '0.92rem', lineHeight: 1.35,
+            boxShadow: '0 12px 32px rgba(15,0,40,0.30)', marginBottom: -6,
+            opacity: otherBubbleShown ? 1 : 0,
+            transform: otherBubbleShown ? 'translateY(0)' : 'translateY(-6px)',
+            transition: 'opacity 420ms ease, transform 420ms ease',
+          }}>
+            {otherNudgeCount >= 1
+              ? 'nanba irukkiya'
+              : 'enna nanba break ah....'}
+            <div style={{
+              position: 'absolute', bottom: -9, left: '50%',
+              width: 0, height: 0, transform: 'translateX(-50%)',
+              borderLeft: '11px solid transparent', borderRight: '11px solid transparent',
+              borderTop: '11px solid #fff',
+              filter: 'drop-shadow(0 4px 4px rgba(15,0,40,0.18))',
+            }} />
+          </div>
+          <div onClick={e => e.stopPropagation()} style={{ width: 132, height: 132, pointerEvents: 'none' }}>
+            <Lottie animationData={happyBotData} loop autoplay
+              style={{ width: '100%', height: '100%' }}
+              rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }} />
+          </div>
           <div onClick={e => e.stopPropagation()} style={{
             width: '100%', maxWidth: 380, background: '#fff', borderRadius: 22,
             padding: '26px 22px', boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
@@ -1293,16 +1532,19 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
             <input
               type="number"
               min={1}
-              max={240}
+              max={otherMinutesRemaining}
               value={otherMinutes}
-              onChange={e => setOtherMinutes(Math.max(1, Math.min(240, parseInt(e.target.value, 10) || 1)))}
+              onChange={e => setOtherMinutes(Math.max(1, Math.min(otherMinutesRemaining, parseInt(e.target.value, 10) || 1)))}
               style={{
                 width: '100%', height: '2.6rem', padding: '0 12px', borderRadius: 10,
                 border: '1px solid rgba(91,33,182,0.20)',
                 fontFamily: 'Outfit, sans-serif', fontSize: '0.92rem',
-                color: '#3B0764', outline: 'none', marginBottom: 18, boxSizing: 'border-box',
+                color: '#3B0764', outline: 'none', marginBottom: 6, boxSizing: 'border-box',
               }}
             />
+            <p style={{ margin: '0 0 16px', fontSize: '0.74rem', color: 'rgba(91,33,182,0.60)' }}>
+              {otherMinutesRemaining} min left in today&apos;s custom-break pool.
+            </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={() => setBreakStep('choose')}
@@ -1317,13 +1559,13 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
               </button>
               <button
                 onClick={() => startBreak(otherMessage.trim() || 'Other', otherMinutes, otherMessage.trim())}
-                disabled={!otherMinutes || otherMinutes < 1}
+                disabled={!otherMinutes || otherMinutes < 1 || otherMinutes > otherMinutesRemaining}
                 style={{
                   flex: 1, height: '2.6rem', borderRadius: 10, border: 'none',
                   background: '#5B21B6', color: '#fff',
                   fontWeight: 700, fontSize: '0.86rem',
-                  cursor: (otherMinutes >= 1) ? 'pointer' : 'not-allowed',
-                  opacity: (otherMinutes >= 1) ? 1 : 0.5,
+                  cursor: (otherMinutes >= 1 && otherMinutes <= otherMinutesRemaining) ? 'pointer' : 'not-allowed',
+                  opacity: (otherMinutes >= 1 && otherMinutes <= otherMinutesRemaining) ? 1 : 0.5,
                 }}
               >
                 Start Break
@@ -1551,6 +1793,105 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
           </div>
         );
       })()}
+
+      {/* ── "Why late?" reason card — shown when the caller resumes MORE
+         than 10 min over their break. Robot asks why; re-nudges
+         "nanba irukkiya" every 30 s until a reason is submitted. The
+         reason is recorded for the admin (POST /api/caller/late-reason). */}
+      {lateReasonStep === 'ask' && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9750,
+          background: 'rgba(15,0,40,0.65)',
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          gap: 2, padding: '0 16px', fontFamily: 'Outfit, sans-serif',
+        }}>
+          <div style={{
+            position: 'relative', background: '#fff', color: '#3B0764',
+            padding: '12px 20px', borderRadius: 20, maxWidth: 'min(380px, 88vw)',
+            textAlign: 'center', fontWeight: 700, fontSize: '0.92rem', lineHeight: 1.35,
+            boxShadow: '0 12px 32px rgba(15,0,40,0.30)', marginBottom: -6,
+            opacity: lateBubbleShown ? 1 : 0,
+            transform: lateBubbleShown ? 'translateY(0)' : 'translateY(-6px)',
+            transition: 'opacity 420ms ease, transform 420ms ease',
+          }}>
+            {lateNudgeCount >= 1
+              ? 'nanba irukkiya'
+              : 'ennachu nanba why late ethachu problem ah nanba'}
+            <div style={{
+              position: 'absolute', bottom: -9, left: '50%',
+              width: 0, height: 0, transform: 'translateX(-50%)',
+              borderLeft: '11px solid transparent', borderRight: '11px solid transparent',
+              borderTop: '11px solid #fff',
+              filter: 'drop-shadow(0 4px 4px rgba(15,0,40,0.18))',
+            }} />
+          </div>
+          <div style={{ width: 132, height: 132, pointerEvents: 'none' }}>
+            <Lottie animationData={happyBotData} loop autoplay
+              style={{ width: '100%', height: '100%' }}
+              rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }} />
+          </div>
+          <div style={{
+            width: '100%', maxWidth: 400, background: '#fff', borderRadius: 22,
+            padding: '24px 22px', boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
+          }}>
+            <div style={{
+              display: 'inline-block', padding: '4px 11px', borderRadius: 50,
+              background: 'rgba(220,38,38,0.12)', color: '#B91C1C',
+              fontSize: '0.72rem', fontWeight: 800, marginBottom: 10,
+            }}>
+              {Math.floor(lateOverBySec / 60)}m {lateOverBySec % 60}s over break
+            </div>
+            <textarea
+              value={lateReasonText}
+              onChange={e => setLateReasonText(e.target.value)}
+              placeholder="What held you up?"
+              autoFocus rows={3} maxLength={300}
+              style={{
+                width: '100%', padding: '12px 14px', borderRadius: 12,
+                border: '1px solid rgba(91,33,182,0.25)',
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.9rem', color: '#3B0764',
+                outline: 'none', resize: 'vertical', boxSizing: 'border-box', marginBottom: 14,
+              }}
+            />
+            <button
+              onClick={submitLateReason}
+              disabled={!lateReasonText.trim()}
+              style={{
+                width: '100%', height: '2.8rem', borderRadius: 50, border: 'none',
+                background: lateReasonText.trim() ? '#059669' : 'rgba(5,150,105,0.40)',
+                color: '#fff', fontWeight: 800, fontSize: '0.92rem',
+                cursor: lateReasonText.trim() ? 'pointer' : 'not-allowed',
+              }}
+            >
+              Submit &amp; resume calling
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Resume-message robot flash (auto-clears after 7 s) ── */}
+      {resumeRobotPulse > 0 && (
+        <RobotGuide
+          variant="corner"
+          mood="happy"
+          text="enna nanba break ah enjoy panniya va call start pannalam"
+          pulse={resumeRobotPulse}
+          bubbleHideMs={6000}
+        />
+      )}
+
+      {/* ── Idle nudge robot — sits in the corner while the caller is idle,
+         re-asking every 30 s; 5 misses auto-pause the account. ── */}
+      {idleActive && (
+        <RobotGuide
+          variant="corner"
+          text="enna nanba call start pannalaya"
+          pulse={idleNudgeCount}
+          bubbleHideMs={10000}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Lottie from 'lottie-react';
+import useRobotNudge from '../hooks/useRobotNudge';
 
 // Use the SAME robot the corner MascotBot uses (robot-idle.json) — the
 // happy variant + heart-eye overlay didn't land the eyes inside the
@@ -49,13 +50,62 @@ const GREETINGS = [
   { text: 'vanakam nanba ovvoru callum oru oppurtunities ippove start pannunga',                                      audio: v10Audio },
 ];
 
+/* Bubble fade-out duration — also how long to wait before unmounting the
+   faded greeting bubble. Module-scoped so <SpeechBubble> can read it. */
+const BUBBLE_FADE_MS = 420;
+
+/* SpeechBubble — the white bubble (with a downward tail) shown above the
+   center robot. Used both for the daily greeting and the idle nudge.
+   `fading` swaps the entry/float animation for the greeting's one-shot
+   fade-out when its audio ends. */
+function SpeechBubble({ children, fading = false }) {
+  return (
+    <div
+      style={{
+        position: 'relative',
+        background: '#fff',
+        color: '#3B0764',
+        padding: '14px 22px',
+        borderRadius: 22,
+        border: '1px solid rgba(209,196,240,0.55)',
+        boxShadow: '0 10px 26px rgba(91,33,182,0.16)',
+        fontFamily: 'Outfit, sans-serif',
+        fontWeight: 600,
+        fontSize: '0.98rem',
+        maxWidth: 'min(440px, 86vw)',
+        textAlign: 'center',
+        animation: fading
+          ? `cm-bubble-out ${BUBBLE_FADE_MS}ms ease-out forwards`
+          : 'cm-bubble-in 320ms ease-out, cm-bubble-float 4.2s ease-in-out 320ms infinite',
+      }}
+    >
+      {children}
+      {/* Downward tail */}
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          bottom: -8,
+          left: '50%',
+          transform: 'translateX(-50%) rotate(45deg)',
+          width: 14,
+          height: 14,
+          background: '#fff',
+          borderRight: '1px solid rgba(209,196,240,0.55)',
+          borderBottom: '1px solid rgba(209,196,240,0.55)',
+        }}
+      />
+    </div>
+  );
+}
+
 /* Call page — landing page for the caller.
    Renders a happy mascot in the center, a speech bubble above it with a
    short motivational line, and a single Start Call button below. The
    button delegates to CallerShell's `onStartAutoCall` handler which
    navigates to Assigned Leads and kicks off the auto-call sequence. */
 
-export default function CallModule({ onStartAutoCall }) {
+export default function CallModule({ jwt, onStartAutoCall }) {
   useEffect(() => {
     const prevHtml = document.documentElement.style.overflow;
     const prevBody = document.body.style.overflow;
@@ -81,7 +131,6 @@ export default function CallModule({ onStartAutoCall }) {
   // actual unmount (`setGreeting(null)`) until the animation has finished
   // so the user sees a smooth opacity ramp instead of a hard pop.
   const [bubbleFading, setBubbleFading] = useState(false);
-  const BUBBLE_FADE_MS = 420;
 
   /* Play the matching voice clip when the bubble appears.
      Chrome blocks `audio.play()` until the page has received a real user
@@ -144,6 +193,41 @@ export default function CallModule({ onStartAutoCall }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);  // run once — greeting is set in lazy init and never changes during a mount
+
+  /* Idle nudge — the caller is parked on the Call page and hasn't pressed
+     "Start Call". The corner robot re-asks "nanba irukkiya" every 30 s; after
+     5 unanswered nudges (~2.5 min) the account auto-pauses via
+     POST /api/caller/self-pause. Same useRobotNudge engine the Assigned-page
+     idle nudge uses. */
+  const nudgeStorageKey = useMemo(() => {
+    try {
+      const [, payload] = (jwt || '').split('.');
+      const uid = JSON.parse(atob(payload || ''))?.user_id;
+      return `mhs_nudge_callpage_${uid || 'anon'}`;
+    } catch { return 'mhs_nudge_callpage_anon'; }
+  }, [jwt]);
+
+  const { count: idleNudgeCount } = useRobotNudge({
+    active: true,
+    intervalMs: 30000,
+    maxRepeats: 5,
+    storageKey: nudgeStorageKey,
+    onExhausted: () => {
+      fetch('/api/caller/self-pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ reason: 'Idle — never pressed Start Call' }),
+      }).catch(() => {});
+    },
+  });
+
+  /* Leaving the Call page (tab switch or "Start Call") unmounts CallModule —
+     wipe the deadline anchor so a later return starts a fresh 30 s. A hard
+     refresh does NOT run React cleanup, so the anchor survives a reload and a
+     caller can't dodge the auto-pause by refreshing. */
+  useEffect(() => () => {
+    try { localStorage.removeItem(nudgeStorageKey); } catch (_) { /* ignore */ }
+  }, [nudgeStorageKey]);
 
   return (
     <div
@@ -232,51 +316,14 @@ export default function CallModule({ onStartAutoCall }) {
           gap: 18,
         }}
       >
-        {/* Speech bubble — sits above the robot with a small downward
-            tail. Only renders on the user's FIRST visit of the IST day;
-            the greeting useMemo returns null on subsequent reloads
-            (until midnight IST) so the page stays clean. */}
-        {greeting && (
-          <div
-            style={{
-              position: 'relative',
-              background: '#fff',
-              color: '#3B0764',
-              padding: '14px 22px',
-              borderRadius: 22,
-              border: '1px solid rgba(209,196,240,0.55)',
-              boxShadow: '0 10px 26px rgba(91,33,182,0.16)',
-              fontFamily: 'Outfit, sans-serif',
-              fontWeight: 600,
-              fontSize: '0.98rem',
-              maxWidth: 'min(440px, 86vw)',
-              textAlign: 'center',
-              // While fading we OVERRIDE the entry/float animations with a
-              // single one-shot fade-out that ends at opacity 0. `forwards`
-              // makes the final state stick so the bubble doesn't snap back
-              // before the unmount timer fires.
-              animation: bubbleFading
-                ? `cm-bubble-out ${BUBBLE_FADE_MS}ms ease-out forwards`
-                : 'cm-bubble-in 320ms ease-out, cm-bubble-float 4.2s ease-in-out 320ms infinite',
-            }}
-          >
-            {greeting.text}
-            {/* Downward tail */}
-            <span
-              aria-hidden="true"
-              style={{
-                position: 'absolute',
-                bottom: -8,
-                left: '50%',
-                transform: 'translateX(-50%) rotate(45deg)',
-                width: 14,
-                height: 14,
-                background: '#fff',
-                borderRight: '1px solid rgba(209,196,240,0.55)',
-                borderBottom: '1px solid rgba(209,196,240,0.55)',
-              }}
-            />
-          </div>
+        {/* Speech bubble above the robot — shows the daily greeting on the
+            first visit of the day; once the caller has sat idle for 30 s the
+            idle nudge takes over the same slot. */}
+        {greeting && idleNudgeCount < 1 && (
+          <SpeechBubble fading={bubbleFading}>{greeting.text}</SpeechBubble>
+        )}
+        {idleNudgeCount >= 1 && (
+          <SpeechBubble key={idleNudgeCount}>nanba irukkiya</SpeechBubble>
         )}
 
         {/* Robot — happy mascot, larger than the corner one. Wrapped in a
