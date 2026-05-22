@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 const ROLES = [
   { value: 'junior_caller', label: 'Junior Caller' },
@@ -214,6 +214,7 @@ export default function UsersModule({ token }) {
         <UserFormModal
           token={token}
           existing={editingUser}
+          allUsers={users}
           onClose={() => { setShowForm(false); setEditing(null); }}
           onSaved={(u, isEdit) => {
             if (isEdit) {
@@ -273,22 +274,49 @@ function SmartfloCell({ user }) {
 }
 
 /* ── User Form Modal (create + edit) ── */
-function UserFormModal({ token, existing, onClose, onSaved }) {
+function UserFormModal({ token, existing, allUsers = [], onClose, onSaved }) {
   const isEdit = !!existing;
   const [fullName, setFullName] = useState(existing?.full_name || '');
   const [email, setEmail]       = useState(existing?.email || '');
   const [phone, setPhone]       = useState(existing?.phone || '');
   const [role, setRole]         = useState(existing?.role || 'junior_caller');
+  const [department, setDepartment]     = useState(existing?.department || '');
+  const [teamLeaderId, setTeamLeaderId] = useState(existing?.team_leader_id || '');
   const [tataExtension, setTataExtension]     = useState(existing?.tata_extension || '');
   const [tataAccountType, setTataAccountType] = useState(existing?.tata_account_type || '');
   const [tataAgentNumber, setTataAgentNumber] = useState(existing?.tata_agent_number || '');
   const [tataCallerId, setTataCallerId]       = useState(existing?.tata_caller_id || '');
-  const [tataApiKey, setTataApiKey]           = useState(existing?.tata_smartflo_api_key || '');
-  const [tataOutboundRoute, setTataOutboundRoute] = useState(existing?.tata_outbound_route || 'extension');
+  // Outbound Route + API Key override no longer have UI fields — the values
+  // are still carried through on save so existing data is preserved (route
+  // defaults to 'extension', API key falls back to the global env value).
+  const [tataApiKey]       = useState(existing?.tata_smartflo_api_key || '');
+  const [tataOutboundRoute] = useState(existing?.tata_outbound_route || 'extension');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw]     = useState(false);
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
+
+  /* Team leaders pickable for the selected department — only team_leader-role
+     users in that department, excluding the user currently being edited. */
+  const teamLeaders = useMemo(
+    () => allUsers.filter(u =>
+      u.role === 'team_leader' &&
+      u.department === department &&
+      u.id !== existing?.id
+    ),
+    [allUsers, department, existing]
+  );
+
+  function handleDepartmentChange(e) {
+    const d = e.target.value;
+    setDepartment(d);
+    // Drop a team-leader pick that no longer belongs to the new department.
+    if (teamLeaderId && !allUsers.some(u =>
+      u.id === teamLeaderId && u.role === 'team_leader' && u.department === d
+    )) {
+      setTeamLeaderId('');
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -306,6 +334,8 @@ function UserFormModal({ token, existing, onClose, onSaved }) {
         email:     email.trim(),
         phone:     phone.trim() || (isEdit ? '' : undefined),
         role,
+        department:     department || null,
+        team_leader_id: teamLeaderId || null,
       };
       // Smartflo settings only apply to callers; clear them on other roles.
       if (isCaller) {
@@ -359,7 +389,7 @@ function UserFormModal({ token, existing, onClose, onSaved }) {
         padding: '0 16px',
       }}
     >
-      <div style={{
+      <div className="uf-modal" style={{
         width: '100%', maxWidth: 680,
         background: '#fff', borderRadius: 20,
         border: '1px solid rgba(147,51,234,0.15)',
@@ -372,6 +402,9 @@ function UserFormModal({ token, existing, onClose, onSaved }) {
           .uf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
           @media (max-width: 600px) { .uf-grid { grid-template-columns: 1fr !important; } }
           .uf-full { grid-column: 1 / -1; }
+          /* Hide the scroll bar — the modal still scrolls via wheel/trackpad. */
+          .uf-modal { scrollbar-width: none; -ms-overflow-style: none; }
+          .uf-modal::-webkit-scrollbar { width: 0; height: 0; display: none; }
         `}</style>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
@@ -445,6 +478,42 @@ function UserFormModal({ token, existing, onClose, onSaved }) {
               </select>
             </div>
 
+            {/* Department */}
+            <div>
+              <label style={fieldLabelStyle}>Department</label>
+              <select
+                value={department}
+                onChange={handleDepartmentChange}
+                style={{ ...inputStyle, appearance: 'auto' }}
+              >
+                <option value="">Select department…</option>
+                <option value="sales">Sales</option>
+                <option value="marketing">Marketing</option>
+              </select>
+            </div>
+
+            {/* Team Leader — team_leader-role users within the chosen department */}
+            <div>
+              <label style={fieldLabelStyle}>Team Leader</label>
+              <select
+                value={teamLeaderId}
+                onChange={e => setTeamLeaderId(e.target.value)}
+                style={{ ...inputStyle, appearance: 'auto', opacity: department ? 1 : 0.6 }}
+                disabled={!department}
+              >
+                <option value="">
+                  {!department
+                    ? 'Select a department first'
+                    : teamLeaders.length === 0
+                      ? 'No team leaders in this department'
+                      : 'Select team leader…'}
+                </option>
+                {teamLeaders.map(tl => (
+                  <option key={tl.id} value={tl.id}>{tl.full_name}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Smartflo settings — only for caller roles. Spans both columns
                 with its own internal 2-column grid. */}
             {(role === 'junior_caller' || role === 'senior_caller') && (
@@ -459,21 +528,6 @@ function UserFormModal({ token, existing, onClose, onSaved }) {
                   Smartflo Settings <span style={{ fontWeight: 500, fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)' }}>(Tata Tele)</span>
                 </div>
                 <div className="uf-grid">
-                  <div className="uf-full">
-                    <label style={fieldLabelStyle}>Outbound Route</label>
-                    <select
-                      value={tataOutboundRoute}
-                      onChange={e => setTataOutboundRoute(e.target.value)}
-                      style={{ ...inputStyle, appearance: 'auto' }}
-                    >
-                      <option value="extension">Extension (SmartFlow window) — default</option>
-                      <option value="agent">Agent Number (mobile)</option>
-                      <option value="did">DID / Caller ID</option>
-                    </select>
-                    <p style={{ fontSize: '0.72rem', color: 'rgba(91,33,182,0.55)', margin: '6px 2px 0' }}>
-                      Which Smartflo identifier to send as <code>agent_number</code>. Default <em>Extension</em> makes the call ring inside the SmartFlow softphone window (the agent picks up there, then Tata bridges to the customer). Pick <em>Agent Number</em> to ring the agent's mobile, or <em>DID</em> if your Smartflo campaign originates the call directly from the DID.
-                    </p>
-                  </div>
                   <div>
                     <label style={fieldLabelStyle}>Account Type</label>
                     <input
@@ -521,18 +575,6 @@ function UserFormModal({ token, existing, onClose, onSaved }) {
                       inputMode="tel"
                     />
                   </div>
-                </div>
-                <div style={{ marginTop: 12 }}>
-                  <label style={fieldLabelStyle}>API Key <span style={{ color: 'rgba(91,33,182,0.45)', fontWeight: 500 }}>(optional override)</span></label>
-                  <input
-                    type="password"
-                    value={tataApiKey}
-                    onChange={e => setTataApiKey(e.target.value)}
-                    placeholder="Leave blank to use the global TATA_TELE_API_KEY env value"
-                    style={inputStyle}
-                    maxLength={1000}
-                    autoComplete="off"
-                  />
                 </div>
                 <p style={{ fontSize: '0.72rem', color: 'rgba(91,33,182,0.55)', margin: '10px 2px 0' }}>
                   Used by the Call button to route through Smartflo. Leave blank if you don't have these from Tata Tele yet.

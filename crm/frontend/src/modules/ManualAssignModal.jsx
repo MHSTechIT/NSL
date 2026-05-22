@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import DateTimePicker from '../admin/DateTimePicker';
 
 /* Manual Lead Assignment modal — opens from the Sales → Leads toolbar.
@@ -46,6 +47,36 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
   const [submitting, setSubmitting]   = useState(false);
   const [msg, setMsg]           = useState('');
 
+  /* Webinar filter — '' means "all webinars" (no filter). */
+  const [webinars, setWebinars]   = useState([]);
+  const [webinarId, setWebinarId] = useState('');
+
+  /* Load the webinar list once. Failure is non-fatal — the modal still works
+     as a pure date-range assigner without the webinar filter. */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/webinars', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const d = await res.json();
+        if (!cancelled) setWebinars(d.webinars || []);
+      } catch (_) { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  /* Current + past webinars are pickable. "Current" = the active webinar
+     (is_active) — its date_time is in the FUTURE, so it must be kept even
+     though it fails the past-date test. Only non-active future-dated
+     webinars (genuinely "upcoming") are hidden — they have no leads yet. */
+  const availableWebinars = useMemo(() => {
+    const now = Date.now();
+    return webinars.filter(w =>
+      w.is_active || !w.webinar_at || new Date(w.webinar_at).getTime() <= now
+    );
+  }, [webinars]);
+
   /* Fetch pool whenever the date range changes (after a short debounce so
      dragging the picker doesn't spam the API). */
   useEffect(() => {
@@ -57,7 +88,8 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
     setMsg('');
     const t = setTimeout(async () => {
       try {
-        const url = `/api/admin/leads/assignment-pool?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`;
+        const url = `/api/admin/leads/assignment-pool?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`
+          + (webinarId ? `&webinar_id=${encodeURIComponent(webinarId)}` : '');
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || 'Failed to load pool');
@@ -70,7 +102,7 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
     }, 250);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, token]);
+  }, [from, to, token, webinarId]);
 
   const totalRequested = useMemo(() => {
     return Object.values(counts).reduce((s, n) => s + (Number(n) || 0), 0);
@@ -122,6 +154,7 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
         body: JSON.stringify({
           from: toIsoOrEmpty(from),
           to:   toIsoOrEmpty(to),
+          webinar_id: webinarId || null,
           distribution,
         }),
       });
@@ -193,6 +226,13 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
             <span style={{ fontSize: '0.78rem', color: 'rgba(91,33,182,0.45)', fontWeight: 600 }}>to</span>
             <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'rgba(91,33,182,0.65)' }}>TO</span>
             <DateTimePicker value={to} onChange={setTo} placeholder="To date & time" />
+          </div>
+
+          {/* Webinar filter — restricts the pool to one webinar (current/past
+              only; upcoming webinars have no leads yet so they're hidden). */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'rgba(91,33,182,0.65)' }}>WEBINAR</span>
+            <WebinarSelect webinars={availableWebinars} value={webinarId} onChange={setWebinarId} />
           </div>
 
           {/* Availability + Auto button */}
@@ -362,6 +402,155 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* Single-select webinar dropdown for the Manual Assignment modal. Styled to
+   match the CRM's purple-brand controls; the panel is portaled to <body> with
+   fixed positioning — same approach as DateTimePicker — so it isn't clipped by
+   the modal's scrollable body. `value === ''` means "All webinars" (no filter). */
+function WebinarSelect({ webinars, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos]   = useState({ top: 0, left: 0, width: 0, maxH: 300 });
+  const wrapRef    = useRef(null);
+  const triggerRef = useRef(null);
+
+  useEffect(() => {
+    function onDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    function onScroll() { setOpen(false); }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('scroll', onScroll, true);
+    };
+  }, []);
+
+  function toggle() {
+    if (!open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      const width = Math.max(240, r.width);
+      let left = r.left;
+      if (left + width > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - width - 8);
+      }
+      const spaceBelow = window.innerHeight - r.bottom - 8;
+      const maxH = Math.min(300, Math.max(160, spaceBelow));
+      const top  = spaceBelow >= 180 ? r.bottom + 4 : Math.max(8, r.top - maxH - 4);
+      setPos({ top, left, width, maxH });
+    }
+    setOpen(o => !o);
+  }
+
+  function pick(val) {
+    onChange(val);
+    setOpen(false);
+  }
+
+  const selected = webinars.find(w => String(w.id) === String(value));
+  const triggerLabel = value && selected ? selected.name : 'All webinars';
+
+  const rows = [
+    { key: '__all', label: 'All webinars', val: '', inactive: false },
+    ...webinars.map(w => ({
+      key: String(w.id), label: w.name, val: String(w.id), inactive: !w.is_active,
+    })),
+  ];
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={toggle}
+        style={{
+          height: '2.1rem', padding: '0 30px 0 12px', borderRadius: 10,
+          border: open ? '1px solid rgba(91,33,182,0.55)' : '1px solid rgba(139,92,246,0.25)',
+          background: '#fff',
+          fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
+          color: value ? '#3B0764' : 'rgba(91,33,182,0.55)',
+          fontWeight: 600,
+          cursor: 'pointer', outline: 'none', textAlign: 'left',
+          position: 'relative', whiteSpace: 'nowrap',
+          minWidth: 200, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis',
+          boxShadow: open ? '0 0 0 3px rgba(91,33,182,0.08)' : 'none',
+          transition: 'border 200ms, box-shadow 200ms',
+        }}
+      >
+        {triggerLabel}
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="#5B21B6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{
+            position: 'absolute', right: 10, top: '50%',
+            transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
+            transition: 'transform 200ms',
+          }}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && createPortal(
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{
+            position: 'fixed', top: pos.top, left: pos.left, width: pos.width,
+            background: '#fff',
+            border: '1px solid rgba(139,92,246,0.18)',
+            borderRadius: 12,
+            boxShadow: '0 12px 40px rgba(91,33,182,0.18)',
+            zIndex: 9999, overflow: 'hidden',
+            fontFamily: 'Outfit, sans-serif',
+          }}
+        >
+          <div style={{ maxHeight: pos.maxH, overflowY: 'auto' }}>
+            {rows.map(r => {
+              const isSel = String(value) === String(r.val);
+              return (
+                <div
+                  key={r.key}
+                  onClick={() => pick(r.val)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px', cursor: 'pointer',
+                    background: isSel ? 'rgba(91,33,182,0.06)' : 'transparent',
+                    borderBottom: '1px solid rgba(139,92,246,0.08)',
+                    transition: 'background 120ms',
+                  }}
+                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(139,92,246,0.06)'; }}
+                  onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ width: 14, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+                    {isSel && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="#5B21B6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                  </span>
+                  <span style={{
+                    flex: 1, fontSize: '0.82rem', color: '#3B0764',
+                    fontWeight: isSel ? 700 : 600,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {r.label}
+                    {r.inactive && (
+                      <span style={{ marginLeft: 6, fontSize: '0.66rem', color: 'rgba(91,33,182,0.50)', fontWeight: 500 }}>
+                        (inactive)
+                      </span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

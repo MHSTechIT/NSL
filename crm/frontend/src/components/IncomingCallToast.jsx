@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useTimerSettings } from '../context/TimerSettingsContext';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Incoming-call toast popup.
@@ -7,15 +8,13 @@ import { useState, useEffect, useRef, useCallback } from 'react';
    events that the backend emits when Tata's dialplan webhook fires for an
    inbound call matched to one of this caller's assigned leads.
 
-   Stacks up to 3 visible toasts, newest on top. Each toast auto-dismisses
-   after 30s (configurable via AUTO_DISMISS_MS) or when the caller clicks
-   "Open lead" or the close button.
+   Stacks up to N visible toasts, newest on top. Each toast auto-dismisses
+   after the admin-controlled incomingToastDismissMs timer setting, or when
+   the caller clicks "Open lead" or the close button.
    ────────────────────────────────────────────────────────────────────────── */
 
-const AUTO_DISMISS_MS = 30000;
-const MAX_VISIBLE     = 3;
-
 export default function IncomingCallToast({ jwt, onOpenLead }) {
+  const t = useTimerSettings();
   const [calls, setCalls] = useState([]);   // [{ key, leadId, fullName, phone, uuid, at }]
   const sseRef = useRef(null);
   const audioRef = useRef(null);
@@ -48,7 +47,7 @@ export default function IncomingCallToast({ jwt, onOpenLead }) {
             uuid:     msg.uuid || null,
             at:       Date.now(),
           };
-          setCalls(prev => [entry, ...prev].slice(0, MAX_VISIBLE));
+          setCalls(prev => [entry, ...prev].slice(0, t.incomingToastMaxVisible));
           // Soft chime — best-effort, ignored if audio is blocked
           try { audioRef.current && audioRef.current.play().catch(() => {}); } catch (_) {}
         }
@@ -56,14 +55,14 @@ export default function IncomingCallToast({ jwt, onOpenLead }) {
     };
     es.onerror = () => { /* EventSource auto-reconnects */ };
     return () => { es.close(); sseRef.current = null; };
-  }, [jwt]);
+  }, [jwt, t.incomingToastMaxVisible]);
 
   /* Auto-dismiss timer per toast */
   useEffect(() => {
     if (calls.length === 0) return;
-    const timers = calls.map(c => setTimeout(() => dismiss(c.key), Math.max(0, AUTO_DISMISS_MS - (Date.now() - c.at))));
+    const timers = calls.map(c => setTimeout(() => dismiss(c.key), Math.max(0, t.incomingToastDismissMs - (Date.now() - c.at))));
     return () => timers.forEach(clearTimeout);
-  }, [calls, dismiss]);
+  }, [calls, dismiss, t.incomingToastDismissMs]);
 
   if (calls.length === 0) return null;
 
@@ -110,7 +109,7 @@ export default function IncomingCallToast({ jwt, onOpenLead }) {
               border: '1px solid rgba(16,185,129,0.30)',
               padding: '14px 16px',
               fontFamily: 'Outfit, sans-serif',
-              animation: 'incomingSlideIn 220ms ease, incomingPulse 1600ms ease infinite',
+              animation: `incomingSlideIn ${t.incomingSlideInMs}ms ease, incomingPulse ${t.incomingPulseMs}ms ease infinite`,
               display: 'flex',
               flexDirection: 'column',
               gap: 10,

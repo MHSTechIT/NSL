@@ -11,6 +11,9 @@ import IncomingCallToast       from './components/IncomingCallToast';
 import MascotBot               from './components/MascotBot';
 import RobotGuide              from './components/RobotGuide';
 import { deriveCallerTag, readActivity } from './utils/callerActivity';
+import { ROBOT_CLIP, stopRobotClip } from './utils/robotAudio';
+import { TimerSettingsContext } from './context/TimerSettingsContext';
+import { TIMER_DEFAULTS, mergeTimerSettings } from './config/timerSchema';
 
 const PAGES = [
   {
@@ -100,6 +103,12 @@ const PAGE_TITLES = {
   next_batch:   { title: 'Next Batch',       subtitle: "Parked here when Q14 was answered 'Yes' — promoted to Assigned when admin starts a new batch" },
 };
 
+/* Caller pages that have NO idle handling of their own. The Call and Assigned
+   pages run their own idle nudges; these review pages did not — so a caller
+   could dodge auto-pause by parking on one. The shell-level idle watchdog
+   below covers exactly these. */
+const IDLE_WATCH_PAGES = ['completed', 'not_picked', 'missed_calls', 'untouched', 'next_batch'];
+
 export default function CallerShell({ callerName: nameProp, callerRole: roleProp }) {
   const [user, setUser]             = useState(() => {
     const raw = sessionStorage.getItem('mhs_crm_user');
@@ -143,6 +152,11 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
      leaves it null, so the tag becomes PAUSED_BY_ADMIN instead. */
   const [pauseInfo, setPauseInfo] = useState({ autoPausedAt: null, reason: null });
 
+  /* Admin-controlled timing settings — fetched once on mount and kept live
+     via the leads-events SSE (timer.settings.updated). Provided to every
+     caller component through TimerSettingsContext below. */
+  const [timerSettings, setTimerSettings] = useState(TIMER_DEFAULTS);
+
   /* Mascot mood — purely-visual local state owned by the shell.
      `setMood(mood)`              → switch to mood, stays there.
      `setMood(mood, autoRevertMs)` → switch to mood, auto-revert to 'idle' after Nms.
@@ -171,8 +185,8 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
   const handleOpenLead = (leadId) => {
     setActive('assigned');
     setExternalHighlightId(leadId);
-    // Reset the marker after 4s so re-clicking the same lead re-triggers
-    setTimeout(() => setExternalHighlightId(prev => prev === leadId ? null : prev), 4000);
+    // Reset the marker after the configured delay so re-clicking the same lead re-triggers
+    setTimeout(() => setExternalHighlightId(prev => prev === leadId ? null : prev), timerSettings.leadHighlightResetMs);
   };
 
   useEffect(() => {
@@ -223,6 +237,19 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
       } catch { /* network blips don't lock anyone out */ }
     }
     refresh();
+    /* Pull the admin-saved timer settings once on mount. Failures fall back
+       to the schema defaults already held in state. */
+    (async () => {
+      try {
+        const res = await fetch('/api/caller/timer-settings', {
+          headers: { Authorization: `Bearer ${jwtForEffect}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setTimerSettings(mergeTimerSettings(data?.settings));
+      } catch { /* defaults stay in place */ }
+    })();
     const url = `/api/caller/leads/events?token=${encodeURIComponent(jwtForEffect)}`;
     const es  = new EventSource(url);
     // Re-sync the pause state every time the SSE (re)connects. After a backend
@@ -235,6 +262,10 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
         // Flip the overlay instantly, then refresh() to pull the pause reason.
         if (msg?.type === 'caller.paused')  { setIsActive(false); refresh(); }
         if (msg?.type === 'caller.resumed') { setIsActive(true);  refresh(); }
+        // Live timer-settings push — admin saved a new value.
+        if (msg?.type === 'timer.settings.updated') {
+          setTimerSettings(mergeTimerSettings(msg.settings));
+        }
       } catch { /* ignore */ }
     };
     return () => { cancelled = true; es.close(); };
@@ -278,7 +309,7 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
     }
 
     send();  // immediate heartbeat on mount
-    const intervalId = setInterval(send, 30_000);
+    const intervalId = setInterval(send, timerSettings.heartbeatIntervalMs);
     const onChange = () => { send(); };
     // Background tabs get their timers throttled/frozen by the browser, so
     // the heartbeat lags while the caller is on another tab or app. Fire one
@@ -291,7 +322,7 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
       window.removeEventListener('mhs:activity:changed', onChange);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [user, jwtForEffect]);
+  }, [user, jwtForEffect, timerSettings.heartbeatIntervalMs]);
 
   /* Fire an immediate heartbeat when CallerShell-owned state (tab or pause)
      changes so the activity tag updates without waiting for the 30s tick. */
@@ -299,6 +330,12 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
     if (!user || !jwtForEffect) return;
     try { window.dispatchEvent(new Event('mhs:activity:changed')); } catch { /* no-op */ }
   }, [activePage, isActive, pauseInfo, user, jwtForEffect]);
+
+  /* When the caller is paused, cut any page robot clip that may be mid-play
+     so only the paused-overlay voice is heard. */
+  useEffect(() => {
+    if (isActive === false) stopRobotClip();
+  }, [isActive]);
 
   /* Idea #20 — network-recovered reassurance. When the browser drops offline
      and then comes back, flash a corner robot so the caller knows it's safe
@@ -318,9 +355,49 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
   }, []);
   useEffect(() => {
     if (netRecoverPulse === 0) return undefined;
-    const id = setTimeout(() => setNetRecoverPulse(0), 7000);
+    const id = setTimeout(() => setNetRecoverPulse(0), timerSettings.netRecoverPulseMs);
     return () => clearTimeout(id);
-  }, [netRecoverPulse]);
+  }, [netRecoverPulse, timerSettings.netRecoverPulseMs]);
+
+  /* ── Idle watchdog for the review pages ──
+     The Call & Assigned pages nudge an idle caller themselves. The review
+     pages (IDLE_WATCH_PAGES) did not, so a caller could park there and never
+     get auto-paused. This watches for "no action taken" — no click / key
+     press. After `robotNudgeIntervalMs` with no action the robot nudges;
+     after `autoPauseNudgeCount` ignored nudges the account auto-pauses via
+     POST /api/caller/self-pause. Any click or keypress resets the clock. */
+  const [idleNudge, setIdleNudge] = useState(0);
+  const idleActionRef = useRef(Date.now());
+  const idlePausedRef = useRef(false);
+  useEffect(() => {
+    const armed = isActive === true && IDLE_WATCH_PAGES.includes(activePage);
+    if (!armed || !jwtForEffect) { setIdleNudge(0); return undefined; }
+    idleActionRef.current = Date.now();
+    idlePausedRef.current = false;
+    setIdleNudge(0);
+    const onAction = () => { idleActionRef.current = Date.now(); setIdleNudge(0); };
+    window.addEventListener('pointerdown', onAction);
+    window.addEventListener('keydown',     onAction);
+    const interval = timerSettings.robotNudgeIntervalMs;
+    const cap      = timerSettings.autoPauseNudgeCount;
+    const id = setInterval(() => {
+      const n = Math.floor((Date.now() - idleActionRef.current) / interval);
+      setIdleNudge(n);
+      if (n >= cap && !idlePausedRef.current) {
+        idlePausedRef.current = true;
+        fetch('/api/caller/self-pause', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtForEffect}` },
+          body:    JSON.stringify({ reason: `Idle — no action taken on the ${activePage} page` }),
+        }).catch(() => {});
+      }
+    }, 1000);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('pointerdown', onAction);
+      window.removeEventListener('keydown',     onAction);
+    };
+  }, [isActive, activePage, jwtForEffect, timerSettings.robotNudgeIntervalMs, timerSettings.autoPauseNudgeCount]);
 
   function handleLogout() {
     sessionStorage.removeItem('mhs_crm_user');
@@ -346,6 +423,7 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
   );
 
   return (
+    <TimerSettingsContext.Provider value={timerSettings}>
     <div style={{ minHeight: '100vh', background: '#EDEAF8', fontFamily: 'Outfit, sans-serif', padding: 16 }}>
       <style>{`
         @media (max-width: 720px) {
@@ -534,8 +612,8 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
       )}
 
       {/* ── Active page ── */}
-      {activePage === 'call'         && <CallModule           jwt={jwt} onStartAutoCall={requestAutoStart} />}
-      {activePage === 'assigned'     && <AssignedLeadsModule  jwt={jwt} externalHighlightId={externalHighlightId} setMood={setMood} pendingAutoStart={pendingAutoStart} clearPendingAutoStart={clearPendingAutoStart} />}
+      {activePage === 'call'         && <CallModule           jwt={jwt} isActive={isActive} onStartAutoCall={requestAutoStart} />}
+      {activePage === 'assigned'     && <AssignedLeadsModule  jwt={jwt} isActive={isActive} externalHighlightId={externalHighlightId} setMood={setMood} pendingAutoStart={pendingAutoStart} clearPendingAutoStart={clearPendingAutoStart} />}
       {activePage === 'untouched'    && <UntouchedLeadsModule jwt={jwt} />}
       {activePage === 'completed'    && <CompletedLeadsModule jwt={jwt} />}
       {activePage === 'not_picked'   && <NotPickedLeadsModule jwt={jwt} />}
@@ -551,8 +629,21 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
           variant="corner"
           mood="happy"
           text="network vandhuduchu nanba, continue pannu"
+          audioSrc={ROBOT_CLIP[52]}
           pulse={netRecoverPulse}
           bubbleHideMs={6000}
+        />
+      )}
+
+      {/* ── Idle nudge for the review pages — re-asks every nudge interval;
+           the watchdog auto-pauses the account once the cap is reached. ── */}
+      {idleNudge >= 1 && isActive === true && IDLE_WATCH_PAGES.includes(activePage) && (
+        <RobotGuide
+          variant="corner"
+          mood="idle"
+          text="nanba, idle ah irukeenga — lead call panna thodanga"
+          pulse={idleNudge}
+          bubbleHideMs={timerSettings.robotBubbleHideMs}
         />
       )}
 
@@ -574,11 +665,13 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
           <RobotGuide
             variant="overlay"
             mood="sad"
-            text="account pause aaiduchu nanba admin ah contact pannu"
+            text="account pause aaiduchu nanba admin ah contact pannunga"
+            audioSrc={ROBOT_CLIP[53]}
             bubbleHideMs={999999}
           />
         </div>
       )}
     </div>
+    </TimerSettingsContext.Provider>
   );
 }

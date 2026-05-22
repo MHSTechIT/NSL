@@ -10,7 +10,9 @@ import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
 import pickTheCallMp3 from '../assets/audio/pick-the-call.mp3';
 import formFillMp3   from '../assets/audio/form-fill.mp3';
 import { setActivitySub } from '../utils/callerActivity';
+import { playRobotClip } from '../utils/robotAudio';
 import useRobotNudge from '../hooks/useRobotNudge';
+import { useTimerSettings } from '../context/TimerSettingsContext';
 
 /* Robot nudge lines for the reason cards. The primary line is shown on
    entry; if the caller doesn't act, the robot re-asks every 30 s and
@@ -18,7 +20,7 @@ import useRobotNudge from '../hooks/useRobotNudge';
 const AGENT_REASON_PRIMARY = 'enna nanba en call attend pannala';
 const AGENT_REASON_NUDGE   = 'nanba irukkingala answer pannunga';
 const FORM_REASON_PRIMARY  = 'enna nanba en card fill pannala';
-const FORM_REASON_NUDGE    = 'nanba irukiya';
+const FORM_REASON_NUDGE    = 'nanba irukingala form complete pannunga';
 // Patch once at module load — canonical "both arms hanging at sides,
 // anatomically mirrored" pose used everywhere else in the CRM.
 const sadBotData = normalizeLoop(lockArmsDown(sadBotRaw));
@@ -125,6 +127,7 @@ const FORM_WINDOW_SECS = 45;
 const AGENT_RETRY_CAP  = 15;
 
 export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhaseChange }) {
+  const t = useTimerSettings();
   const [fullName, setFullName]                   = useState(lead.full_name || '');
   const [phoneNumber]                             = useState(lead.whatsapp_number || '');
   const [confirmedRange, setConfirmedRange]       = useState('');
@@ -252,25 +255,53 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
      overlay opens. Effect depends on callPhase so re-opening the same card
      replays the clip. */
   useEffect(() => {
-    if (callPhase === 'agent_reason_card') playClipOnce(pickTheCallMp3);
-    else if (callPhase === 'form_reason_card') playClipOnce(formFillMp3);
+    if (callPhase === 'agent_reason_card') playRobotClip(21);
+    else if (callPhase === 'form_reason_card') playRobotClip(22);
+    else if (callPhase === 'dnp_alert') playRobotClip(51);
   }, [callPhase]);
 
-  /* Robot repeat-nudges for the two reason cards. While the card is open and
-     the caller hasn't acted, the robot re-asks every 30 s; after 5 unanswered
-     nudges the lead auto-pauses (same path as the SmartFlow retry cap). */
+  /* Robot repeat-nudges for the two reason cards. While a card is open and the
+     caller hasn't acted, the robot re-asks every 30 s.
+       • agent_reason_card — after 5 unanswered nudges the lead auto-pauses
+         (same path as the SmartFlow retry cap).
+       • form_reason_card  — NEVER gives up. The robot keeps nudging until the
+         caller actually fills the reason and submits; there is no auto-pause /
+         auto-advance escape, so the form always gets completed. */
   const { count: agentNudgeCount } = useRobotNudge({
     active: callPhase === 'agent_reason_card',
-    maxRepeats: 5,
+    intervalMs: t.agentReasonNudgeIntervalMs,
+    maxRepeats: t.agentReasonNudgeCount,
     storageKey: `mhs_nudge_agent_${lead?.id || 'x'}`,
     onExhausted: () => { setCallPhase('auto_paused'); saveAutoPaused(); },
   });
   const { count: formNudgeCount } = useRobotNudge({
     active: callPhase === 'form_reason_card',
-    maxRepeats: 5,
+    intervalMs: t.formReasonNudgeIntervalMs,
+    maxRepeats: t.formReasonNudgeCount,
     storageKey: `mhs_nudge_form_${lead?.id || 'x'}`,
     onExhausted: () => { setCallPhase('auto_paused'); saveAutoPaused(); },
   });
+
+  /* SmartFlow-extension alert ("Is your extension on?") — if the caller never
+     answers it the account auto-pauses after the configured nudges, same idle
+     treatment as the Call / Assigned pages. */
+  useRobotNudge({
+    active: callPhase === 'ext_check',
+    intervalMs: t.extAlertNudgeIntervalMs,
+    maxRepeats: t.extAlertNudgeCount,
+    storageKey: `mhs_nudge_ext_${lead?.id || 'x'}`,
+    onExhausted: () => {
+      fetch('/api/caller/self-pause', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body:    JSON.stringify({ reason: 'SmartFlow extension alert ignored' }),
+      }).catch(() => {});
+    },
+  });
+
+  /* Voice the reason-card repeat-nudges (clips 49 / 50). */
+  useEffect(() => { if (agentNudgeCount >= 1) playRobotClip(49); }, [agentNudgeCount]);
+  useEffect(() => { if (formNudgeCount  >= 1) playRobotClip(50); }, [formNudgeCount]);
 
   /* Activity sub-tag — maps the call phase to the single-tag activity log:
        agent/form reason cards → REASON_CARD
@@ -613,10 +644,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
         }
       } catch (_) {}
     };
-    const id = setInterval(tick, 4000);
+    const id = setInterval(tick, t.recordingPollMs);
     return () => { cancelled = true; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jwt, lead?.id, callPhase]);
+  }, [jwt, lead?.id, callPhase, t.recordingPollMs]);
 
   /* Phase-timeout safety net — synthesize agent.missed / customer.missed
      when a ringing phase runs longer than Tata's typical ring window with
@@ -762,7 +793,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     } catch (e) {
       setCallPhase('ext_check');
       setRecallToast(e.message || 'Call failed — Smartflo extension off?');
-      setTimeout(() => setRecallToast(''), 3500);
+      setTimeout(() => setRecallToast(''), t.recallToastMs);
     } finally {
       setRecalling(false);
     }
@@ -864,7 +895,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
       }
     } catch (e) {
       setRecallToast(e?.message || 'DNP failed');
-      setTimeout(() => setRecallToast(''), 3500);
+      setTimeout(() => setRecallToast(''), t.recallToastMs);
     } finally {
       setCuttingCall(false);
     }
@@ -889,10 +920,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     try {
       await postStartCall();
       setRecallToast('Calling…');
-      setTimeout(() => setRecallToast(''), 2500);
+      setTimeout(() => setRecallToast(''), t.recallProgressToastMs);
     } catch (e) {
       setRecallToast(e.message || 'Recall failed');
-      setTimeout(() => setRecallToast(''), 3500);
+      setTimeout(() => setRecallToast(''), t.recallToastMs);
     } finally {
       setRecalling(false);
     }
@@ -977,7 +1008,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
       method: 'POST', headers: { Authorization: `Bearer ${jwt}` },
     }).catch(() => {});
     // Brief moment to let the user see the alert before advancing
-    setTimeout(() => callOnSaved('not_picked', { autoAdvance: true }), 1500);
+    setTimeout(() => callOnSaved('not_picked', { autoAdvance: true }), t.dnpAutoAdvanceDelayMs);
   }
 
   async function saveAutoPaused() {
@@ -1000,7 +1031,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     fetch(`/api/caller/leads/${lead.id}/hangup`, {
       method: 'POST', headers: { Authorization: `Bearer ${jwt}` },
     }).catch(() => {});
-    setTimeout(() => callOnSaved('auto_paused', { autoAdvance: true }), 1800);
+    setTimeout(() => callOnSaved('auto_paused', { autoAdvance: true }), t.dnpAutoPauseDelayMs);
   }
 
   /* ── Form derived state ───────────────────────────────────────────── */

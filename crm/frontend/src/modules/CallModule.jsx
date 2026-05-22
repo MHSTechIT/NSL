@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Lottie from 'lottie-react';
 import useRobotNudge from '../hooks/useRobotNudge';
+import { useTimerSettings } from '../context/TimerSettingsContext';
 
 // Use the SAME robot the corner MascotBot uses (robot-idle.json) — the
 // happy variant + heart-eye overlay didn't land the eyes inside the
@@ -8,6 +9,7 @@ import useRobotNudge from '../hooks/useRobotNudge';
 // appearance across the whole CRM.
 import idleBotRaw from '../assets/bot/robot-idle.json';
 import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
+import { playRobotClip } from '../utils/robotAudio';
 
 // Voice clips — each v1..v10 mp3 is a Tanglish read-aloud of the matching
 // greeting text. Vite resolves these imports to hashed URLs at build time
@@ -50,15 +52,17 @@ const GREETINGS = [
   { text: 'vanakam nanba ovvoru callum oru oppurtunities ippove start pannunga',                                      audio: v10Audio },
 ];
 
-/* Bubble fade-out duration — also how long to wait before unmounting the
-   faded greeting bubble. Module-scoped so <SpeechBubble> can read it. */
-const BUBBLE_FADE_MS = 420;
+/* Today's date as an IST YYYY-MM-DD string — gates the once-a-day greeting. */
+function todayIstYmd() {
+  return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+}
 
 /* SpeechBubble — the white bubble (with a downward tail) shown above the
    center robot. Used both for the daily greeting and the idle nudge.
    `fading` swaps the entry/float animation for the greeting's one-shot
-   fade-out when its audio ends. */
-function SpeechBubble({ children, fading = false }) {
+   fade-out when its audio ends. Timing values are passed in by the parent
+   (which owns the TimerSettings context). */
+function SpeechBubble({ children, fading = false, fadeMs, inMs, floatMs }) {
   return (
     <div
       style={{
@@ -75,8 +79,8 @@ function SpeechBubble({ children, fading = false }) {
         maxWidth: 'min(440px, 86vw)',
         textAlign: 'center',
         animation: fading
-          ? `cm-bubble-out ${BUBBLE_FADE_MS}ms ease-out forwards`
-          : 'cm-bubble-in 320ms ease-out, cm-bubble-float 4.2s ease-in-out 320ms infinite',
+          ? `cm-bubble-out ${fadeMs}ms ease-out forwards`
+          : `cm-bubble-in ${inMs}ms ease-out, cm-bubble-float ${floatMs}ms ease-in-out ${inMs}ms infinite`,
       }}
     >
       {children}
@@ -105,7 +109,8 @@ function SpeechBubble({ children, fading = false }) {
    button delegates to CallerShell's `onStartAutoCall` handler which
    navigates to Assigned Leads and kicks off the auto-call sequence. */
 
-export default function CallModule({ jwt, onStartAutoCall }) {
+export default function CallModule({ jwt, onStartAutoCall, isActive }) {
+  const t = useTimerSettings();
   useEffect(() => {
     const prevHtml = document.documentElement.style.overflow;
     const prevBody = document.body.style.overflow;
@@ -117,20 +122,34 @@ export default function CallModule({ jwt, onStartAutoCall }) {
     };
   }, []);
 
-  /* Pick a fresh random `{ text, audio }` pair on every mount of the Call
-     page. Using `useState` with a lazy initialiser keeps the selection
-     stable across re-renders within a single mount — so the bubble + the
-     audio effect below always reference the SAME pick. Lazy init is the
-     idiomatic React way to do "run once" work that's safe under StrictMode
-     double-invocation in dev. The bubble is hidden the moment the audio
-     clip finishes (see audio.ended handler below). */
-  const [greeting, setGreeting] = useState(
-    () => GREETINGS[Math.floor(Math.random() * GREETINGS.length)]
-  );
+  /* Daily greeting — shown once per IST day per caller. `mhs_greeting_day_<uid>`
+     in localStorage holds the date the greeting was last shown; if that is
+     today, no greeting is picked (greeting = null) so it never repeats on
+     a re-visit or a re-login. The key naturally resets the next day. */
+  const greetingDayKey = useMemo(() => {
+    try {
+      const [, p] = (jwt || '').split('.');
+      const uid = JSON.parse(atob(p || ''))?.user_id;
+      return uid ? `mhs_greeting_day_${uid}` : 'mhs_greeting_day_anon';
+    } catch { return 'mhs_greeting_day_anon'; }
+  }, [jwt]);
+  const [greeting, setGreeting] = useState(() => {
+    try {
+      if (localStorage.getItem(greetingDayKey) === todayIstYmd()) return null;
+    } catch { /* sandbox / storage disabled */ }
+    return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+  });
   // While true the bubble plays its fade-out animation. We delay the
   // actual unmount (`setGreeting(null)`) until the animation has finished
   // so the user sees a smooth opacity ramp instead of a hard pop.
   const [bubbleFading, setBubbleFading] = useState(false);
+
+  /* Stamp today the moment a greeting is picked, so it is not shown again
+     until tomorrow (survives re-visits and re-logins via localStorage). */
+  useEffect(() => {
+    if (!greeting) return;
+    try { localStorage.setItem(greetingDayKey, todayIstYmd()); } catch { /* sandbox */ }
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Play the matching voice clip when the bubble appears.
      Chrome blocks `audio.play()` until the page has received a real user
@@ -148,7 +167,7 @@ export default function CallModule({ jwt, onStartAutoCall }) {
      On unmount we pause the clip and detach the fallback listeners so
      nothing keeps speaking after the caller leaves the page. */
   useEffect(() => {
-    if (!greeting?.audio) return;
+    if (!greeting?.audio || isActive !== true) return;  // stay silent while paused / still loading
 
     const audio = new Audio(greeting.audio);
     audio.volume = 0.9;
@@ -167,7 +186,7 @@ export default function CallModule({ jwt, onStartAutoCall }) {
     let unmountTimer = null;
     const onEnded = () => {
       setBubbleFading(true);
-      unmountTimer = setTimeout(() => setGreeting(null), BUBBLE_FADE_MS);
+      unmountTimer = setTimeout(() => setGreeting(null), t.greetingBubbleFadeMs);
     };
     const onInteract = () => {
       tryPlay();
@@ -192,7 +211,7 @@ export default function CallModule({ jwt, onStartAutoCall }) {
       try { audio.pause(); audio.currentTime = 0; } catch (_) { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);  // run once — greeting is set in lazy init and never changes during a mount
+  }, [isActive, t.greetingBubbleFadeMs]);  // plays once the caller is confirmed active — never while paused
 
   /* Idle nudge — the caller is parked on the Call page and hasn't pressed
      "Start Call". The corner robot re-asks "nanba irukkiya" every 30 s; after
@@ -208,9 +227,9 @@ export default function CallModule({ jwt, onStartAutoCall }) {
   }, [jwt]);
 
   const { count: idleNudgeCount } = useRobotNudge({
-    active: true,
-    intervalMs: 30000,
-    maxRepeats: 5,
+    active: isActive === true,
+    intervalMs: t.robotNudgeIntervalMs,
+    maxRepeats: t.autoPauseNudgeCount,
     storageKey: nudgeStorageKey,
     onExhausted: () => {
       fetch('/api/caller/self-pause', {
@@ -228,6 +247,11 @@ export default function CallModule({ jwt, onStartAutoCall }) {
   useEffect(() => () => {
     try { localStorage.removeItem(nudgeStorageKey); } catch (_) { /* ignore */ }
   }, [nudgeStorageKey]);
+
+  /* Voice the idle nudge each time it re-asks (clip 40). */
+  useEffect(() => {
+    if (idleNudgeCount >= 1) playRobotClip(40);
+  }, [idleNudgeCount]);
 
   return (
     <div
@@ -286,7 +310,7 @@ export default function CallModule({ jwt, onStartAutoCall }) {
           filter: blur(28px);
           pointer-events: none;
           z-index: 0;
-          animation: cm-glow-breathe 4s ease-in-out infinite;
+          animation: cm-glow-breathe ${t.glowBreatheInnerMs}ms ease-in-out infinite;
         }
         .cm-robot-glow-outer {
           position: absolute;
@@ -301,7 +325,7 @@ export default function CallModule({ jwt, onStartAutoCall }) {
           filter: blur(70px);
           pointer-events: none;
           z-index: 0;
-          animation: cm-glow-breathe 6s ease-in-out infinite;
+          animation: cm-glow-breathe ${t.glowBreatheOuterMs}ms ease-in-out infinite;
         }
         .cm-btn:hover { transform: scale(1.04); }
         .cm-btn:active { transform: scale(0.97); }
@@ -320,10 +344,20 @@ export default function CallModule({ jwt, onStartAutoCall }) {
             first visit of the day; once the caller has sat idle for 30 s the
             idle nudge takes over the same slot. */}
         {greeting && idleNudgeCount < 1 && (
-          <SpeechBubble fading={bubbleFading}>{greeting.text}</SpeechBubble>
+          <SpeechBubble
+            fading={bubbleFading}
+            fadeMs={t.greetingBubbleFadeMs}
+            inMs={t.greetingBubbleInMs}
+            floatMs={t.greetingBubbleFloatMs}
+          >{greeting.text}</SpeechBubble>
         )}
         {idleNudgeCount >= 1 && (
-          <SpeechBubble key={idleNudgeCount}>nanba irukkiya</SpeechBubble>
+          <SpeechBubble
+            key={idleNudgeCount}
+            fadeMs={t.greetingBubbleFadeMs}
+            inMs={t.greetingBubbleInMs}
+            floatMs={t.greetingBubbleFloatMs}
+          >nanba irukkingala start call amukunga</SpeechBubble>
         )}
 
         {/* Robot — happy mascot, larger than the corner one. Wrapped in a
@@ -371,7 +405,7 @@ export default function CallModule({ jwt, onStartAutoCall }) {
             letterSpacing: '0.03em',
             cursor: 'pointer',
             transition: 'transform 180ms ease',
-            animation: 'cm-btn-pulse 2.4s ease-in-out infinite',
+            animation: `cm-btn-pulse ${t.btnPulseMs}ms ease-in-out infinite`,
           }}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"

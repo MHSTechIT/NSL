@@ -1,20 +1,24 @@
 import { useEffect, useState } from 'react';
+import { useTimerSettings } from '../context/TimerSettingsContext';
 
 /**
  * Lightweight toast — call <Toast message="..." kind="success" onDone={...} />
- * Auto-hides after `duration` ms (default 2800).
+ * Auto-hides after `duration` ms (defaults to the admin-controlled
+ * toastDefaultMs timer setting when the prop is not passed).
  */
-export default function Toast({ message, kind = 'success', duration = 2800, onDone }) {
+export default function Toast({ message, kind = 'success', duration, onDone }) {
+  const t = useTimerSettings();
   const [visible, setVisible] = useState(true);
+  const hideMs = duration != null ? duration : t.toastDefaultMs;
 
   useEffect(() => {
     if (!message) return;
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       setVisible(false);
-      setTimeout(() => onDone?.(), 250);
-    }, duration);
-    return () => clearTimeout(t);
-  }, [message, duration, onDone]);
+      setTimeout(() => onDone?.(), t.toastDoneDelayMs);
+    }, hideMs);
+    return () => clearTimeout(timer);
+  }, [message, hideMs, onDone, t.toastDoneDelayMs]);
 
   if (!message) return null;
 

@@ -30,6 +30,8 @@ const wati = require('./watiClient');
 
 const SOURCES = ['meta', 'yt'];
 
+let _timer = null;
+
 /** Window definitions in hours. Order matters — first match wins.
  *  `leads_alert` is the broad "any time before 12h" first-warning window —
  *  fires once per current webinar as soon as the upcoming slot is detected
@@ -276,10 +278,16 @@ function startScheduler({ intervalMs = 5 * 60 * 1000 } = {}) {
     console.log('[leadsAlert] WATI_API_KEY not set; scheduler disabled');
     return;
   }
-  setInterval(() => {
+  // Clear any existing timer first so a live restart never leaves two running.
+  if (_timer) { clearInterval(_timer); _timer = null; }
+  _timer = setInterval(() => {
     runOnce().catch(e => console.error('[leadsAlert] tick error:', e.message));
   }, intervalMs);
   console.log(`[leadsAlert] scheduler started — every ${intervalMs / 1000}s`);
 }
 
-module.exports = { startScheduler, runOnce, checkSource, checkWaLinkAlert };
+function stopScheduler() {
+  if (_timer) { clearInterval(_timer); _timer = null; }
+}
+
+module.exports = { startScheduler, stopScheduler, runOnce, checkSource, checkWaLinkAlert };

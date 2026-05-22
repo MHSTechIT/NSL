@@ -31,13 +31,13 @@ installCrashGuards('crm');
 const app = require('../app');
 
 const cron = require('node-cron');
-const { startLinkSwapScheduler }               = require('../utils/linkSwapScheduler');
+const pool                                      = require('../db');
 const { syncLeadsToSheet }                      = require('../utils/leadsSheetSync');
-const { startScheduler: startTataInboundSync }  = require('../utils/tataInboundSync');
-const { startScheduler: startLeadsAlert }       = require('../utils/leadsAlertScheduler');
-const { startStaleCallReaper }                  = require('../utils/staleCallReaper');
-const { startActivitySpanReaper }               = require('../utils/activitySpanReaper');
 const { startDailyReconciliation }              = require('../utils/dailyReconciliation');
+const schedulerManager                          = require('../utils/schedulerManager');
+const { mergeTimerSettings }                    = require('../utils/timerDefaults');
+const leadsAlertScheduler                       = require('../utils/leadsAlertScheduler');
+const { startLinkSwapScheduler }                = require('../utils/linkSwapScheduler');
 
 const { startListener }                         = require('../utils/pgListener');
 const { handleLeadCreated, sweepUnassignedLeads } = require('../utils/leadCreatedListener');
@@ -66,16 +66,32 @@ app.listen(PORT, () => {
   } else {
     // All schedulers — race-prone if run in more than one process, so CRM owns
     // every one and the funnel services start none.
+    //
+    // The 3 caller-facing watchdogs (activitySpanReaper, staleCallReaper,
+    // tataInboundSync) are admin-tunable via the caller Timer Settings page —
+    // they route through schedulerManager so PUT /timer-settings can restart
+    // them live. Read the saved intervals from timer_settings and hand the
+    // merged values to applyTimerSettings.
+    pool.query('SELECT settings FROM timer_settings WHERE id = 1')
+      .then(({ rows }) => {
+        schedulerManager.applyTimerSettings(mergeTimerSettings(rows[0]?.settings));
+      })
+      .catch(e => {
+        console.error('[crm] timer_settings read failed; starting schedulers with defaults:', e.message);
+        schedulerManager.applyTimerSettings(mergeTimerSettings());
+      });
+
+    // leadsAlert + linkSwap are funnel/marketing schedulers (WhatsApp link
+    // swaps, deadline alerts) — NOT caller-page jobs, so they are deliberately
+    // kept off the caller Timer Settings page and run on fixed intervals.
+    leadsAlertScheduler.startScheduler();
     startLinkSwapScheduler();
-    startTataInboundSync({ intervalMs: 2 * 60 * 1000 });
-    startLeadsAlert({ intervalMs: 5 * 60 * 1000 });
+
     cron.schedule('25 18 * * *', () => {
       console.log('[Sheets Sync] Starting daily sync...');
       syncLeadsToSheet();
     });
     console.log('[Sheets Sync] Daily sync scheduled at 11:55 PM IST');
-    startStaleCallReaper();
-    startActivitySpanReaper();
     startDailyReconciliation();
   }
 

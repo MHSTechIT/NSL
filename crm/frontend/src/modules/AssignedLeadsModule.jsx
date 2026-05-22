@@ -7,22 +7,28 @@ import happyBotRaw     from '../assets/bot/robot-idle.json';
 import confettiData    from '../assets/bot/confetti.json';
 import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
 import { setActivityStatus, setActivitySub } from '../utils/callerActivity';
+import { playRobotClip, ROBOT_CLIP } from '../utils/robotAudio';
 import SourceBadge from '../components/SourceBadge';
 import useRobotNudge from '../hooks/useRobotNudge';
 import RobotGuide from '../components/RobotGuide';
+import { useTimerSettings } from '../context/TimerSettingsContext';
 // Tag-specific celebration audio. Played alongside the speech-bubble line.
 import hotLeadMp3   from '../assets/audio/hot-lead.mp3';
 import warmLeadMp3  from '../assets/audio/warm-lead.mp3';
 import coldLeadMp3  from '../assets/audio/cold-lead.mp3';
 import junkLeadMp3  from '../assets/audio/junk-lead.mp3';
 import noTagMp3     from '../assets/audio/no-tag.mp3';
-// HOT lead has 4 paired voice clips (h1..h4) — each one matches the
+// HOT lead has 2 paired voice clips (h1, h2) — each one matches the
 // matching bubble line in COOLDOWN_LINES.HOT below, so the caller hears
 // the same sentence they read.
 import hotH1Mp3     from '../assets/audio/hot/h1.mp3';
 import hotH2Mp3     from '../assets/audio/hot/h2.mp3';
-import hotH3Mp3     from '../assets/audio/hot/h3.mp3';
-import hotH4Mp3     from '../assets/audio/hot/h4.mp3';
+
+/* Fixed internal display-refresh cadence for the cooldown / auto-advance /
+   break-picker countdowns. This is a technical render rate, not an
+   admin-tunable setting — kept permanently as a code constant. */
+const COUNTDOWN_TICK_MS = 250;
+
 const TAG_AUDIO = {
   HOT:  hotLeadMp3,   // fallback only — HOT now uses per-line clips
   WARM: warmLeadMp3,
@@ -42,54 +48,25 @@ const happyBotData = normalizeLoop(lockArmsDown(happyBotRaw));
    strings (one shared audio clip per tag via TAG_AUDIO). */
 const COOLDOWN_LINES = {
   HOT: [
-    {
-      text:  'hot lead secured nanba! un vibe customer ku direct ah connect aagiduchu va next call ah yum mass ah close pannalam',
-      audio: hotH1Mp3,
-    },
-    {
-      text:  'semma handling nanba! hot lead ready ah hook aagiduchu va next conversational innum mass katalam',
-      audio: hotH2Mp3,
-    },
-    {
-      text:  'nee pesuna vibe vera level nanba leads um intrestku vanthiruchu ippo next call poitu streak continue pannalam',
-      audio: hotH3Mp3,
-    },
-    {
-      text:  'un voice ku customer straight ah connect aagitanga nanba come on next call waiting kalakuvom',
-      audio: hotH4Mp3,
-    },
+    { text: 'hot lead secured nanba! un vibe customer ku direct ah connect aagiduchu va next call ah yum mass ah close pannalam', clip: 11 },
+    { text: 'semma handling nanba! hot lead ready ah hook aagiduchu va next conversational innum mass katalam', clip: 12 },
   ],
   WARM: [
-    "Hey buddy, you got a Warm Lead! Keep the conversation going!",
-    "Warm lead in hand — one more push and it's HOT!",
-    "Nice — warm lead. Follow up sema-a panna, deal close pannalaam!",
-    "Warm one captured! Keep the heat building!",
-    "Patience-um effort-um pay aagum. Nalla warm lead!",
-    "Warm catch boss — followup vechukinga, deal varum!",
+    { text: 'warm lead nanba va next lead ku polam', clip: 13 },
+    { text: 'super nanba ithu warm lead va next call pannlam', clip: 14 },
   ],
   COLD: [
-    "Hey buddy, you got a Cold Lead! Don't worry, every call matters!",
-    "Cold lead's okay — every call is practice for the next big one!",
-    "Adho oru cold lead. Parava illa, motha effort-um count aagum!",
-    "Cold one — move on, hot lead waiting right after!",
-    "Cold lead, no stress. Next call could be the big one!",
-    "Every dial-um experience. Cold today, hot tomorrow!",
+    { text: 'cold lead nu kavaapadatha nanba next lead la pathukalam', clip: 15 },
+    { text: 'cold lead nu strees aagatha nanba next call big win pannalam', clip: 16 },
   ],
   JUNK: [
-    "Hey buddy, this one looks like a Junk Lead! Let's move to the next win!",
-    "Junk lead spotted! Filter pannitu next-ku po!",
-    "Junk! Time pazhakidaadhe — next call ready-a iruga!",
-    "Junk one — adhu pochu pochu. Hot lead waiting up next!",
-    "Junk lead aana parava illa — pure focus, gold-um varum!",
+    { text: 'ithu junk lead mathiri theriyuthu nanba va next lead ku polam', clip: 17 },
+    { text: 'ithu junk lead tha nanba but next hot lead waitingla irukku va call panlam', clip: 18 },
   ],
   // Fallback for outcomes without a tag (not_picked, auto_paused, etc.)
   DEFAULT: [
-    "Great work — call completed!",
-    "Boss work! Mass-a finish pannitu next move!",
-    "Sema effort! Next lead-um waiting for you!",
-    "One down — keep the rhythm going!",
-    "Call complete! On to the next opportunity!",
-    "Nicely handled. Next-ku ready-aagu!",
+    { text: 'super ah call ah finish pannita nanba va next call pannlam', clip: 19 },
+    { text: 'semma nanba va next call pannlam', clip: 20 },
   ],
 };
 
@@ -111,7 +88,8 @@ function fmtPhone(p) {
   return digits.startsWith('91') ? '+' + digits : '+91 ' + digits;
 }
 
-export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood, pendingAutoStart, clearPendingAutoStart }) {
+export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId, setMood, pendingAutoStart, clearPendingAutoStart }) {
+  const t = useTimerSettings();
   const [leads, setLeads]         = useState([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');
@@ -278,9 +256,9 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
   useEffect(() => {
     if (breakStep !== 'choose') { setChooseBubbleShown(true); return undefined; }
     setChooseBubbleShown(true);
-    const id = setTimeout(() => setChooseBubbleShown(false), 10000);
+    const id = setTimeout(() => setChooseBubbleShown(false), t.breakBubbleHideMs);
     return () => clearTimeout(id);
-  }, [breakStep, breakChooseStrikes]);
+  }, [breakStep, breakChooseStrikes, t.breakBubbleHideMs]);
 
   /* Robot nudge for the Custom-break ("Other") card — if the caller opens it
      and doesn't act, the robot re-asks "nanba irukkiya" every 30 s and after
@@ -288,8 +266,8 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
      → CallerShell shows the paused robot). */
   const { count: otherNudgeCount } = useRobotNudge({
     active: breakStep === 'other',
-    intervalMs: 30000,
-    maxRepeats: 4,
+    intervalMs: t.customBreakNudgeIntervalMs,
+    maxRepeats: t.customBreakNudgeCount,
     storageKey: breakStorageKey.replace('mhs_break_', 'mhs_nudge_breakother_'),
     onExhausted: () => {
       fetch('/api/caller/self-pause', {
@@ -304,9 +282,9 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
   useEffect(() => {
     if (breakStep !== 'other') { setOtherBubbleShown(true); return undefined; }
     setOtherBubbleShown(true);
-    const id = setTimeout(() => setOtherBubbleShown(false), 10000);
+    const id = setTimeout(() => setOtherBubbleShown(false), t.breakBubbleHideMs);
     return () => clearTimeout(id);
-  }, [breakStep, otherNudgeCount]);
+  }, [breakStep, otherNudgeCount, t.breakBubbleHideMs]);
 
   /* Late-return flow — when a caller resumes MORE than 10 min over their
      allotted break, they must type why before auto-call restarts. The robot
@@ -317,25 +295,32 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
   const [resumeRobotPulse, setResumeRobotPulse] = useState(0);     // resume-msg flash
   const { count: lateNudgeCount } = useRobotNudge({
     active: lateReasonStep === 'ask',
-    intervalMs: 30000,
-    maxRepeats: 9999,   // nudge until submit — no auto-pause (caller IS present)
+    intervalMs: t.lateReturnNudgeIntervalMs,
+    maxRepeats: t.lateReturnNudgeCount,
     storageKey: breakStorageKey.replace('mhs_break_', 'mhs_nudge_late_'),
+    onExhausted: () => {
+      fetch('/api/caller/self-pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ reason: 'Late-return card ignored' }),
+      }).catch(() => {});
+    },
   });
   /* "Why late" bubble fade — text hides after 10 s, re-shows on each nudge. */
   const [lateBubbleShown, setLateBubbleShown] = useState(true);
   useEffect(() => {
     if (lateReasonStep !== 'ask') { setLateBubbleShown(true); return undefined; }
     setLateBubbleShown(true);
-    const id = setTimeout(() => setLateBubbleShown(false), 10000);
+    const id = setTimeout(() => setLateBubbleShown(false), t.breakBubbleHideMs);
     return () => clearTimeout(id);
-  }, [lateReasonStep, lateNudgeCount]);
+  }, [lateReasonStep, lateNudgeCount, t.breakBubbleHideMs]);
 
-  /* Resume-message robot flash — auto-clears after 7 s. */
+  /* Resume-message robot flash — auto-clears after the configured duration. */
   useEffect(() => {
     if (resumeRobotPulse === 0) return undefined;
-    const id = setTimeout(() => setResumeRobotPulse(0), 7000);
+    const id = setTimeout(() => setResumeRobotPulse(0), t.resumeRobotPulseMs);
     return () => clearTimeout(id);
-  }, [resumeRobotPulse]);
+  }, [resumeRobotPulse, t.resumeRobotPulseMs]);
 
   // Queue-end refill modal — pops in two cases:
   //   1. 'auto_finished' — the auto-call queue just drained
@@ -358,11 +343,12 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
     && breakStep === null
     && lateReasonStep === null
     && !queueEndOpen
-    && leads.length > 0;
+    && leads.length > 0
+    && isActive === true;   // never nudge while paused — the paused overlay owns the screen
   const { count: idleNudgeCount } = useRobotNudge({
     active: idleActive,
-    intervalMs: 30000,
-    maxRepeats: 5,
+    intervalMs: t.robotNudgeIntervalMs,
+    maxRepeats: t.autoPauseNudgeCount,
     storageKey: breakStorageKey.replace('mhs_break_', 'mhs_nudge_idle_'),
     onExhausted: () => {
       fetch('/api/caller/self-pause', {
@@ -416,6 +402,17 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
     }
   }
 
+  /* Voice prompts for the break picker, custom-break and late-return
+     overlays — primary clip on open, nudge clip each time it re-asks. */
+  useEffect(() => {
+    if (breakStep === 'choose') playRobotClip(43);
+    else if (breakStep === 'other') playRobotClip(45);
+  }, [breakStep]);
+  useEffect(() => { if (breakChooseStrikes > 0) playRobotClip(44); }, [breakChooseStrikes]);
+  useEffect(() => { if (otherNudgeCount  >= 1) playRobotClip(46); }, [otherNudgeCount]);
+  useEffect(() => { if (lateReasonStep === 'ask') playRobotClip(47); }, [lateReasonStep]);
+  useEffect(() => { if (lateNudgeCount  >= 1) playRobotClip(48); }, [lateNudgeCount]);
+
   function stopAutoMode() {
     clearCooldownTimer();
     setAutoMode('off');
@@ -426,14 +423,14 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
     setAutoError('');
   }
 
-  /* 10-s inactivity countdown for the break-picker card. Deadline-anchored
-     for the same StrictMode-safety reasons as the cooldown / advance timers.
-     On expiry: increment strike count; if < 3, restart for another 10 s with
-     an inline nudge visible; on the 3rd strike, stop auto-call and close
-     the modal. */
+  /* Inactivity countdown for the break-picker card. Deadline-anchored for the
+     same StrictMode-safety reasons as the cooldown / advance timers.
+     On expiry: increment strike count; below the strike cap, restart for
+     another window with an inline nudge visible; once the cap is reached,
+     stop auto-call, close the modal, and auto-pause the account. */
   function startBreakChooseTimer() {
     clearBreakChooseTimer();
-    const deadline = Date.now() + 10000;
+    const deadline = Date.now() + t.breakPickerCountdownMs;
     const tick = () => {
       const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
       setBreakChooseLeft(left);
@@ -442,16 +439,21 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
         const next = breakChooseStrikesRef.current + 1;
         breakChooseStrikesRef.current = next;
         setBreakChooseStrikes(next);
-        if (next >= 3) {
+        if (next >= t.breakPickerStrikeCount) {
           setBreakStep(null);
           stopAutoMode();
+          fetch('/api/caller/self-pause', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+            body: JSON.stringify({ reason: 'Break-picker card ignored' }),
+          }).catch(() => {});
         } else {
           startBreakChooseTimer();
         }
       }
     };
     tick();  // paint "10" immediately
-    breakChooseTimerRef.current = setInterval(tick, 250);
+    breakChooseTimerRef.current = setInterval(tick, COUNTDOWN_TICK_MS);
   }
 
   /* Stop the auto-call AND start a break with a countdown banner. The
@@ -506,7 +508,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
     const overBy = breakInfo
       ? Math.max(0, breakElapsed - breakInfo.minutes * 60)
       : 0;
-    if (overBy > 600) {
+    if (overBy > t.breakOverrunGraceSec) {
       setLateOverBySec(overBy);
       setLateReasonText('');
       setLateReasonStep('ask');
@@ -569,10 +571,10 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
       }
       setQueueEndOpen(false);
       setQueueEndDismissed(true);   // don't re-pop the modal immediately
-      setTimeout(() => setReopenToast(''), 4000);
+      setTimeout(() => setReopenToast(''), t.reopenToastMs);
     } catch (e) {
       setReopenToast('⚠ ' + (e.message || 'Reopen failed'));
-      setTimeout(() => setReopenToast(''), 4000);
+      setTimeout(() => setReopenToast(''), t.reopenToastMs);
     } finally {
       setReopening(null);
     }
@@ -685,7 +687,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
      5 s have elapsed). Wall-clock duration is now guaranteed. */
   function startCooldown() {
     clearCooldownTimer();
-    const deadline = Date.now() + 10000;
+    const deadline = Date.now() + t.cooldownCountdownMs;
     setAutoMode('cooldown');
     const tick = () => {
       const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
@@ -697,7 +699,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
       }
     };
     tick();  // paint "5" immediately
-    cooldownTimerRef.current = setInterval(tick, 250);
+    cooldownTimerRef.current = setInterval(tick, COUNTDOWN_TICK_MS);
   }
 
   // Clean up timer if module unmounts mid-cooldown
@@ -778,13 +780,13 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  /* Auto-refetch every 60s so leads with `follow_up_at` due appear at the top
-     without a manual refresh. */
+  /* Auto-refetch on the configured interval so leads with `follow_up_at` due
+     appear at the top without a manual refresh. */
   useEffect(() => {
     if (!jwt) return;
-    const t = setInterval(() => fetchLeads(), 60000);
-    return () => clearInterval(t);
-  }, [jwt, fetchLeads]);
+    const id = setInterval(() => fetchLeads(), t.assignedRefetchIntervalMs);
+    return () => clearInterval(id);
+  }, [jwt, fetchLeads, t.assignedRefetchIntervalMs]);
 
   /* Subscribe to SSE for instant lead push */
   useEffect(() => {
@@ -796,15 +798,18 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
       try {
         const msg = JSON.parse(ev.data);
         if (msg?.type === 'lead.assigned' && msg.lead) {
-          // Next-Batch promotions (admin started a new batch — parked leads
-          // come back as overdue follow-ups). The SSE payload only carries
-          // {id, promoted_from:'next_batch'} so we can't optimistically merge.
-          // Do a full refetch — the backend sort places overdue follow-ups
-          // at the very TOP, so the promoted leads land at row 0..N.
-          if (msg.lead.promoted_from === 'next_batch') {
+          // Promotions that must land at the TOP of the list:
+          //  • next_batch  — admin started a new batch; parked leads come back
+          //    as overdue follow-ups.
+          //  • missed_call — a customer gave a missed call; the lead is pinned
+          //    server-side so it bubbles above regular leads.
+          // The SSE payload only carries {id, promoted_from} so we can't
+          // optimistically merge — do a full refetch and let the backend sort
+          // (overdue follow-ups, then pinned_at) place the lead correctly.
+          if (msg.lead.promoted_from === 'next_batch' || msg.lead.promoted_from === 'missed_call') {
             fetchLeads();
             setHighlight(msg.lead.id);
-            setTimeout(() => setHighlight(h => h === msg.lead.id ? null : h), 3000);
+            setTimeout(() => setHighlight(h => h === msg.lead.id ? null : h), t.promoHighlightLongMs);
             return;
           }
           setLeads(prev => {
@@ -817,7 +822,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
             return [...prev, msg.lead];
           });
           setHighlight(msg.lead.id);
-          setTimeout(() => setHighlight(h => h === msg.lead.id ? null : h), 2500);
+          setTimeout(() => setHighlight(h => h === msg.lead.id ? null : h), t.promoHighlightShortMs);
         } else if (msg?.type === 'call.update' && msg.call) {
           // Merge call status/recording into the matching lead row
           setLeads(prev => prev.map(l => l.id === msg.call.lead_id ? {
@@ -837,7 +842,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
     };
     es.onerror = () => { /* auto-reconnect handled by EventSource */ };
     return () => { es.close(); sseRef.current = null; };
-  }, [jwt]);
+  }, [jwt, t.promoHighlightLongMs, t.promoHighlightShortMs]);
 
   /* Auto-pop the refill modal when the Assigned page is empty on load —
      so the caller is prompted to pull leads from DNP / Missed / Untouched
@@ -1036,31 +1041,19 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
             // `{text,audio}[]`; for other tags it's `string[]` and we
             // fall back to TAG_AUDIO[tag] for the voice clip.
             const tag       = meta?.lead_tag;
-            const pool      = COOLDOWN_LINES[tag] || COOLDOWN_LINES.DEFAULT;
-            const pick      = pool[Math.floor(Math.random() * pool.length)];
-            const pickText  = typeof pick === 'string' ? pick : pick.text;
-            const pickAudio = typeof pick === 'string'
-              ? (TAG_AUDIO[tag] || noTagMp3)
-              : pick.audio;
-            setCelebrationLine(pickText);
-            // Play tag-specific celebration audio — only for "real" call
-            // completions (form was actually filled). Skip DNP / auto-paused
-            // since those aren't celebratory moments.
+            const pool = COOLDOWN_LINES[tag] || COOLDOWN_LINES.DEFAULT;
+            const pick = pool[Math.floor(Math.random() * pool.length)];
+            setCelebrationLine(pick.text);
+            // Play the matching celebration voice clip — preloaded, so it
+            // fires instantly. Only for "real" call completions (form was
+            // actually filled); skip DNP / auto-paused (not celebratory).
             const REAL_OUTCOMES = new Set(['completed', 'follow_up', 'not_interested']);
             if (REAL_OUTCOMES.has(outcome)) {
-              try {
-                const audio = new Audio(pickAudio);
-                audio.volume = 0.85;
-                // .play() returns a promise that rejects if autoplay is
-                // blocked (no user gesture). The Complete-Call button IS a
-                // user gesture in the same task, so this almost always
-                // resolves — but swallow errors either way.
-                audio.play().catch(() => {});
-              } catch { /* sandboxed env / no Audio API */ }
+              playRobotClip(pick.clip);
             }
             // Call was successfully completed — full-screen celebration
             // (centred bot + confetti) for ~4.5s, then back to idle corner.
-            if (typeof setMood === 'function') setMood('happy', 4500);
+            if (typeof setMood === 'function') setMood('happy', t.postCallCelebrationMs);
             if (autoMode === 'calling') {
               // Legacy autoMode keeps its own queue
               startCooldown();
@@ -1077,7 +1070,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
               }
               const nextLead = remaining[0];
               clearAdvanceTimer();
-              const deadline = Date.now() + 10000;
+              const deadline = Date.now() + t.autoAdvanceCountdownMs;
               const tick = () => {
                 const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
                 setAdvanceLeft(left);
@@ -1087,7 +1080,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
                 }
               };
               tick();  // paint "5" immediately
-              advanceTimerRef.current = setInterval(tick, 250);
+              advanceTimerRef.current = setInterval(tick, COUNTDOWN_TICK_MS);
             }
           }}
         />
@@ -1320,7 +1313,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
           }}>
             {breakChooseStrikes > 0
               ? 'ethathu select pannunga nanba'
-              : 'enna nanba break ah..... enjoy pannu'}
+              : 'enna nanba break ah..... enjoy pannunga'}
             <div style={{
               position: 'absolute', bottom: -9, left: '50%',
               width: 0, height: 0, transform: 'translateX(-50%)',
@@ -1484,8 +1477,8 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
             transition: 'opacity 420ms ease, transform 420ms ease',
           }}>
             {otherNudgeCount >= 1
-              ? 'nanba irukkiya'
-              : 'enna nanba break ah....'}
+              ? 'nanba irukkukingala reason fill pannunga'
+              : 'enna nanba break ah reason sollitu ponga nanba ....'}
             <div style={{
               position: 'absolute', bottom: -9, left: '50%',
               width: 0, height: 0, transform: 'translateX(-50%)',
@@ -1818,7 +1811,7 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
           }}>
             {lateNudgeCount >= 1
               ? 'nanba irukkiya'
-              : 'ennachu nanba why late ethachu problem ah nanba'}
+              : 'ennachu nanba why late ethachu praachanaya'}
             <div style={{
               position: 'absolute', bottom: -9, left: '50%',
               width: 0, height: 0, transform: 'translateX(-50%)',
@@ -1876,18 +1869,21 @@ export default function AssignedLeadsModule({ jwt, externalHighlightId, setMood,
         <RobotGuide
           variant="corner"
           mood="happy"
-          text="enna nanba break ah enjoy panniya va call start pannalam"
+          text="enna nanba break ah enjoy panningala vaanga call start pannalam"
+          audioSrc={ROBOT_CLIP[42]}
           pulse={resumeRobotPulse}
           bubbleHideMs={6000}
         />
       )}
 
-      {/* ── Idle nudge robot — sits in the corner while the caller is idle,
-         re-asking every 30 s; 5 misses auto-pause the account. ── */}
-      {idleActive && (
+      {/* ── Idle nudge robot — appears only after the first 30 s window
+         (idleNudgeCount >= 1), so it does NOT speak the moment the caller
+         opens the page; then re-asks every 30 s, 5 misses auto-pause. ── */}
+      {idleActive && idleNudgeCount >= 1 && (
         <RobotGuide
           variant="corner"
           text="enna nanba call start pannalaya"
+          audioSrc={ROBOT_CLIP[41]}
           pulse={idleNudgeCount}
           bubbleHideMs={10000}
         />

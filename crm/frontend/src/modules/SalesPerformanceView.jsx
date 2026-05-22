@@ -140,6 +140,8 @@ function PricingPerfTable({
     { label: 'Untouched',   key: 'untouched',      drill: 'untouched' },
     { label: 'Follow-ups',  key: 'followups',      drill: 'follow_up',
       style: v => ({ color: v > 0 ? '#5B21B6' : 'rgba(91,33,182,0.55)', fontWeight: v > 0 ? 700 : 500 }) },
+    { label: 'Incomplete',  key: 'incomplete',
+      style: v => ({ color: v > 0 ? '#C2410C' : 'rgba(91,33,182,0.55)', fontWeight: v > 0 ? 700 : 500 }) },
     { label: 'Total Calls', key: 'total_calls',    drill: 'calls', trend: 'total_calls_prev' },
     { label: 'Incoming',    key: 'incoming',       drill: 'in'        },
     { label: 'Outgoing',    key: 'outgoing',       drill: 'out'       },

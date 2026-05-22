@@ -3,6 +3,7 @@ import SalesLeadsTable        from './SalesLeadsTable';
 import SalesLeadsLogicView    from './SalesLeadsLogicView';
 import SalesPerformanceView   from './SalesPerformanceView';
 import SalesNotificationsView from './SalesNotificationsView';
+import SalesTimerView         from './SalesTimerView';
 
 const TABS = [
   {
@@ -43,6 +44,16 @@ const TABS = [
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'timer',
+    label: 'Timer',
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <polyline points="12 7 12 12 15 14"/>
       </svg>
     ),
   },
@@ -112,6 +123,7 @@ export default function SalesDashboardModule({ token }) {
       {tab === 'leads'         && <SalesLeadsTable        token={token} />}
       {tab === 'logic'         && <SalesLeadsLogicView    token={token} />}
       {tab === 'notifications' && <SalesNotificationsView token={token} />}
+      {tab === 'timer'         && <SalesTimerView         token={token} />}
     </div>
   );
 }

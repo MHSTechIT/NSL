@@ -5,6 +5,10 @@ const { rotateLink } = require('./linkRotation');
 
 const SOURCES = ['meta', 'yt'];
 
+const DEFAULT_INTERVAL_MS = 30_000;
+
+let _timer = null;
+
 async function runSwapsForSource(source) {
   try {
     // ── Legacy slot swaps (kept for backward compat) ──
@@ -141,8 +145,15 @@ async function runSwaps() {
   }
 }
 
-function startLinkSwapScheduler() {
-  setInterval(runSwaps, 30_000);
+function startLinkSwapScheduler({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
+  // Clear any existing timer first so a live restart never leaves two running.
+  if (_timer) { clearInterval(_timer); _timer = null; }
+  _timer = setInterval(runSwaps, intervalMs);
+  console.log(`[linkSwapScheduler] scheduler started — every ${Math.round(intervalMs / 1000)}s`);
 }
 
-module.exports = { startLinkSwapScheduler };
+function stopLinkSwapScheduler() {
+  if (_timer) { clearInterval(_timer); _timer = null; }
+}
+
+module.exports = { startLinkSwapScheduler, stopLinkSwapScheduler };

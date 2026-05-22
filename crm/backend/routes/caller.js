@@ -173,6 +173,20 @@ router.get('/break-budget', async (req, res) => {
   }
 });
 
+/* ── GET /api/caller/timer-settings ──
+   Returns the merged admin-tuned timing values (stored clamped over defaults)
+   so the caller frontend can drive its timers from server config. */
+router.get('/timer-settings', async (_req, res) => {
+  try {
+    const { mergeTimerSettings } = require('../utils/timerDefaults');
+    const { rows } = await pool.query('SELECT settings FROM timer_settings WHERE id = 1');
+    res.json({ settings: mergeTimerSettings(rows[0]?.settings || {}) });
+  } catch (err) {
+    console.error('caller/timer-settings error:', err.message);
+    res.status(500).json({ error: 'timer_settings_failed' });
+  }
+});
+
 /* ── POST /api/caller/late-reason ──
    Caller came back from a break >10 min late and typed why. We record it as
    a LATE_RETURN point event so it surfaces in the admin Activity Log drawer
@@ -428,7 +442,7 @@ router.get('/leads', async (req, res) => {
         ORDER BY
           (l.last_note_outcome = 'follow_up' AND l.follow_up_at <= NOW()) DESC NULLS LAST,
           l.pinned_at  DESC NULLS LAST,
-          l.assigned_at ASC NULLS LAST, l.created_at ASC`,
+          l.assigned_at DESC NULLS LAST, l.created_at DESC`,
       [req.caller.id]
     );
     res.json({ leads: rows, total: rows.length });
@@ -581,7 +595,7 @@ router.get('/leads/completed', async (req, res) => {
         WHERE l.assigned_user_id = $1
           AND l.next_batch_parked = FALSE
           AND (
-            l.last_note_outcome IN ('completed','not_interested')
+            l.last_note_outcome IN ('completed','not_interested','incomplete')
             OR (l.last_note_outcome = 'follow_up' AND l.follow_up_at > NOW())
           )
         ORDER BY l.last_note_at DESC NULLS LAST`,

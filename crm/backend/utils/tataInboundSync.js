@@ -16,7 +16,45 @@ const callerSse = require('./callerSse');
 const { fetchInboundMissedCalls, normalizeCdrRow } = require('./tataClient');
 
 let _running = false;
+let _timer = null;
 let _lastResult = { ranAt: null, fetched: 0, upserted: 0, error: null };
+
+/**
+ * Auto-assign a missed-call lead — the automated equivalent of the "Missed"
+ * refill button (POST /api/caller/leads/reopen, source:'missed'). Clears any
+ * prior outcome so a Completed / Not-Interested customer who calls back is
+ * reopened, unparks Next-Batch leads, and pins the lead to the top of the
+ * owner's Assigned page. Pushes SSE so the page refreshes live.
+ */
+async function autoAssignMissedCallLead(leadId) {
+  if (!leadId) return;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE leads
+          SET last_note_outcome    = NULL,
+              last_note_interested = NULL,
+              last_note_at         = NULL,
+              follow_up_at         = NULL,
+              completed_at         = NULL,
+              next_batch_parked    = FALSE,
+              next_batch_parked_at = NULL,
+              assigned_at          = NOW(),
+              pinned_at            = NOW()
+        WHERE id = $1
+        RETURNING id, assigned_user_id`,
+      [leadId]
+    );
+    const lead = rows[0];
+    if (lead && lead.assigned_user_id) {
+      callerSse.pushTo(lead.assigned_user_id, {
+        type: 'lead.assigned',
+        lead: { id: lead.id, promoted_from: 'missed_call' },
+      });
+    }
+  } catch (e) {
+    console.error('[tataInboundSync] auto-assign missed-call lead error:', e.message);
+  }
+}
 
 async function syncOnce({ lookbackMinutes = 30 } = {}) {
   if (_running) return { skipped: 'already_running' };
@@ -55,12 +93,17 @@ async function syncOnce({ lookbackMinutes = 30 } = {}) {
       // Upsert by provider_call_id. If the row exists, refresh status fields.
       try {
         const existing = await pool.query(
-          'SELECT id FROM calls WHERE provider_call_id = $1 LIMIT 1',
+          'SELECT id, status FROM calls WHERE provider_call_id = $1 LIMIT 1',
           [n.provider_call_id]
         );
         const callerPhone10 = n.phone10 && n.phone10.length === 10 ? n.phone10 : null;
         const didNumber10   = n.to_did   && n.to_did.length   === 10 ? n.to_did   : null;
         if (existing.rows.length > 0) {
+          // Was this row already 'missed' before we touched it? If not, this
+          // poll is the moment it transitions into 'missed' (e.g. the
+          // /tata-tele/dialplan webhook inserted a 'ringing' row first), so
+          // auto-assign exactly once. Re-polls of an already-missed call skip.
+          const wasMissed = existing.rows[0].status === 'missed';
           await pool.query(
             `UPDATE calls
                 SET status        = COALESCE($2, status),
@@ -88,6 +131,9 @@ async function syncOnce({ lookbackMinutes = 30 } = {}) {
               didNumber10,
             ]
           );
+          // Just transitioned into 'missed' — pin the lead to the caller's
+          // Assigned page as their next call.
+          if (!wasMissed && leadId) await autoAssignMissedCallLead(leadId);
         } else {
           await pool.query(
             `INSERT INTO calls
@@ -108,6 +154,10 @@ async function syncOnce({ lookbackMinutes = 30 } = {}) {
             ]
           );
           upserted++;
+
+          // New inbound missed call — pin the lead to the caller's Assigned
+          // page as their next call.
+          if (leadId) await autoAssignMissedCallLead(leadId);
 
           // Push SSE so the Missed Calls page refreshes instantly if it's open
           if (callerUserId) {
@@ -140,7 +190,9 @@ function startScheduler({ intervalMs = 2 * 60 * 1000 } = {}) {
     console.log('[tataInboundSync] TATA_TELE_API_KEY not set; scheduler disabled');
     return;
   }
-  setInterval(() => {
+  // Clear any existing timer first so a live restart never leaves two running.
+  if (_timer) { clearInterval(_timer); _timer = null; }
+  _timer = setInterval(() => {
     syncOnce({ lookbackMinutes: 10 }).then(r => {
       if (r.upserted > 0 || r.error) {
         console.log('[tataInboundSync]', JSON.stringify({
@@ -152,6 +204,10 @@ function startScheduler({ intervalMs = 2 * 60 * 1000 } = {}) {
   console.log(`[tataInboundSync] scheduler started — every ${intervalMs / 1000}s`);
 }
 
+function stopScheduler() {
+  if (_timer) { clearInterval(_timer); _timer = null; }
+}
+
 function getLastResult() { return _lastResult; }
 
-module.exports = { syncOnce, startScheduler, getLastResult };
+module.exports = { syncOnce, startScheduler, stopScheduler, getLastResult };

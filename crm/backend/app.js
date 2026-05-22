@@ -133,6 +133,19 @@ if (_crmUsersMigration && typeof _crmUsersMigration.catch === 'function') {
   _crmUsersMigration.catch(err => console.error('[Migration] crm_users error:', err.message));
 }
 
+// Auto-migrate: create timer_settings table (admin-tunable timing values)
+const _timerSettingsMigration = pool.query(`
+  CREATE TABLE IF NOT EXISTS timer_settings (
+    id          SMALLINT PRIMARY KEY DEFAULT 1,
+    settings    JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  INSERT INTO timer_settings (id, settings) VALUES (1, '{}'::jsonb) ON CONFLICT (id) DO NOTHING;
+`);
+if (_timerSettingsMigration && typeof _timerSettingsMigration.catch === 'function') {
+  _timerSettingsMigration.catch(err => console.error('[Migration] timer_settings error:', err.message));
+}
+
 // Auto-migrate: lead-share-config + round-robin state + leads.assigned_user_id + audit log
 const _shareConfigMigration = pool.query(`
   CREATE TABLE IF NOT EXISTS lead_share_config (
@@ -282,6 +295,18 @@ const _agentExtMigration = pool.query(`
 `);
 if (_agentExtMigration && typeof _agentExtMigration.catch === 'function') {
   _agentExtMigration.catch(err => console.error('[Migration] crm_users smartflo fields error:', err.message));
+}
+
+// Auto-migrate: org-structure fields on crm_users.
+//   department      — 'sales' | 'marketing' (enforced in the API validator).
+//   team_leader_id  — the team_leader user this person reports to. ON DELETE
+//                     SET NULL so removing a team leader doesn't orphan rows.
+const _crmOrgMigration = pool.query(`
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS department     TEXT;
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS team_leader_id UUID REFERENCES crm_users(id) ON DELETE SET NULL;
+`);
+if (_crmOrgMigration && typeof _crmOrgMigration.catch === 'function') {
+  _crmOrgMigration.catch(err => console.error('[Migration] crm_users org fields error:', err.message));
 }
 
 // Auto-migrate: caller_activity_events — append-only audit log of every

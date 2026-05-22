@@ -195,10 +195,10 @@ export default function SalesLeadsTable({ token }) {
   }
 
   // Webinars filtered to only current + previous (no future schedules).
-  // A webinar is "available" when its date_time is now or earlier.
+  // A webinar is "available" when its webinar_at is now or earlier.
   const availableWebinars = useMemo(() => {
     const now = Date.now();
-    return webinars.filter(w => !w.date_time || new Date(w.date_time).getTime() <= now);
+    return webinars.filter(w => !w.webinar_at || new Date(w.webinar_at).getTime() <= now);
   }, [webinars]);
 
   return (

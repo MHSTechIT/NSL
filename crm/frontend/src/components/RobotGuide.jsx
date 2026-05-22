@@ -3,6 +3,7 @@ import Lottie from 'lottie-react';
 
 import idleData from '../assets/bot/robot-idle.json';
 import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
+import { useTimerSettings } from '../context/TimerSettingsContext';
 
 /* ──────────────────────────────────────────────────────────────────────────
    RobotGuide — the shared "robot narrates the caller workflow" component.
@@ -56,10 +57,14 @@ export default function RobotGuide({
   audioSrc,
   variant = 'corner',
   card = null,
-  bubbleHideMs = 10000,
+  bubbleHideMs,
   pulse = 0,            // bump to re-show the bubble + replay audio for the same text
   onClose,
 }) {
+  const t = useTimerSettings();
+  // Default the bubble duration to the admin-controlled setting when the
+  // caller didn't pass an explicit override.
+  const effBubbleHideMs = bubbleHideMs != null ? bubbleHideMs : t.robotBubbleHideMs;
   const [bubbleVisible, setBubbleVisible] = useState(true);
   const animationData = ROBOT;   // same robot for every mood
 
@@ -74,10 +79,15 @@ export default function RobotGuide({
       try { a.currentTime = 0; a.play().catch(() => {}); } catch { /* ignore */ }
     }
 
-    // Fade the bubble text out after bubbleHideMs.
-    const hideId = setTimeout(() => setBubbleVisible(false), bubbleHideMs);
-    return () => clearTimeout(hideId);
-  }, [text, audioSrc, pulse, bubbleHideMs]);
+    // Fade the bubble text out after the effective bubble-hide duration.
+    const hideId = setTimeout(() => setBubbleVisible(false), effBubbleHideMs);
+    return () => {
+      clearTimeout(hideId);
+      // Stop the clip when this robot unmounts (or text/pulse changes) so a
+      // nudge never bleeds over the next robot's voice.
+      try { if (a) a.pause(); } catch { /* ignore */ }
+    };
+  }, [text, audioSrc, pulse, effBubbleHideMs]);
 
   const robotPx = variant === 'overlay' ? 180 : 84;
 
@@ -110,7 +120,7 @@ export default function RobotGuide({
         marginBottom: variant === 'overlay' ? -10 : 0,
         opacity: bubbleVisible ? 1 : 0,
         transform: bubbleVisible ? 'translateY(0)' : 'translateY(-6px)',
-        transition: 'opacity 420ms ease, transform 420ms ease',
+        transition: `opacity ${t.robotBubbleFadeMs}ms ease, transform ${t.robotBubbleFadeMs}ms ease`,
         pointerEvents: 'none',
       }}
     >

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import EditCallNoteModal from './EditCallNoteModal';
 import SourceBadge from '../components/SourceBadge';
+import { useTimerSettings } from '../context/TimerSettingsContext';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Completed Leads — leads the caller has marked done OR follow-up-scheduled
@@ -85,6 +86,7 @@ function fmtDuration(sec) {
 }
 
 export default function CompletedLeadsModule({ jwt }) {
+  const t = useTimerSettings();
   const [leads, setLeads]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
@@ -126,12 +128,13 @@ export default function CompletedLeadsModule({ jwt }) {
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  /* Auto-refetch every 60 s — follow-ups whose time arrives leave this list. */
+  /* Auto-refetch on the configured interval — follow-ups whose time arrives
+     leave this list. */
   useEffect(() => {
     if (!jwt) return;
-    const t = setInterval(() => fetchLeads(), 60000);
-    return () => clearInterval(t);
-  }, [jwt, fetchLeads]);
+    const id = setInterval(() => fetchLeads(), t.completedRefetchIntervalMs);
+    return () => clearInterval(id);
+  }, [jwt, fetchLeads, t.completedRefetchIntervalMs]);
 
   /* SSE — refresh when this caller's notes change */
   useEffect(() => {
@@ -295,13 +298,16 @@ function LeadRow({ lead, jwt, expanded, onToggle, onSaved }) {
   const isFollowUp     = lead.last_note_outcome === 'follow_up';
   const isNotInterested = lead.last_note_outcome === 'not_interested';
   const isNotPicked    = lead.last_note_outcome === 'not_picked';
+  const isIncomplete   = lead.last_note_outcome === 'incomplete';
   const tag = isFollowUp
     ? { bg: 'rgba(245,158,11,0.15)', fg: '#B45309', label: `Follow-up · ${fmtDate(lead.follow_up_at)}` }
     : isNotInterested
       ? { bg: 'rgba(220,38,38,0.12)',  fg: '#B91C1C', label: `Not Interested · ${fmtDate(lead.last_note_at)}` }
       : isNotPicked
         ? { bg: 'rgba(147,51,234,0.12)', fg: '#7E22CE', label: `DNP · ${fmtDate(lead.last_note_at)}` }
-        : { bg: 'rgba(5,150,105,0.12)',  fg: '#047857', label: `Completed · ${fmtDate(lead.last_note_at)}` };
+        : isIncomplete
+          ? { bg: 'rgba(234,88,12,0.15)',  fg: '#C2410C', label: `Incomplete · ${fmtDate(lead.last_note_at)}` }
+          : { bg: 'rgba(5,150,105,0.12)',  fg: '#047857', label: `Completed · ${fmtDate(lead.last_note_at)}` };
 
   const quality  = classifyLead(lead);
   const qBadge   = quality ? QUALITY_BADGE[quality] : null;

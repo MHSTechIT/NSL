@@ -3,8 +3,9 @@
  *
  * assignNewLead(leadId, sugarLevel, webinarId)
  *   • Finds eligible callers for the given webinar:
- *       enabled in lead_share_config + crm_users.is_active = true
- *       + allowed_lead_types contains 'all' OR matches the lead's sugar_level
+ *       enabled in lead_share_config (paused callers ARE included — leads
+ *       queue up for them to work on resume) + allowed_lead_types contains
+ *       'all' OR matches the lead's sugar_level
  *   • Advances round_robin_state.last_position with FOR UPDATE locking so
  *     concurrent inserts can't double-assign.
  *   • Stamps leads.assigned_user_id + assigned_at, writes a lead_assignments row.
@@ -54,14 +55,18 @@ async function assignNewLead(leadId, sugarLevel, webinarId) {
       return null;
     }
 
-    // 1. Eligible callers for this webinar
+    // 1. Eligible callers for this webinar.
+    //    A caller "in the leads logic" = an enabled lead_share_config row.
+    //    Paused callers (crm_users.is_active = FALSE) are intentionally NOT
+    //    excluded: round-robin keeps assigning to them so leads queue up for
+    //    when they resume, instead of being skipped and handed to others.
+    //    To stop a caller getting leads, disable them in the leads-logic page.
     const { rows: eligible } = await client.query(`
       SELECT lsc.caller_id
         FROM lead_share_config lsc
         JOIN crm_users u ON u.id = lsc.caller_id
        WHERE lsc.webinar_id = $1
          AND lsc.enabled    = TRUE
-         AND u.is_active    = TRUE
          AND ('all' = ANY(lsc.allowed_lead_types) OR $2 = ANY(lsc.allowed_lead_types))
        ORDER BY lsc.position ASC, lsc.created_at ASC
     `, [webinarId, sugarLevel]);

@@ -38,4 +38,19 @@ function pushTo(callerId, payload) {
   return delivered;
 }
 
-module.exports = { add, remove, pushTo };
+/* Broadcast a payload to every open socket across ALL callers. Used for
+   global signals (e.g. timer-settings updates) that aren't caller-scoped. */
+function broadcastAll(payload) {
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
+  let delivered = 0;
+  for (const [callerId, set] of channels) {
+    for (const res of set) {
+      try { res.write(data); delivered++; }
+      catch { set.delete(res); }
+    }
+    if (set.size === 0) channels.delete(callerId);
+  }
+  return delivered;
+}
+
+module.exports = { add, remove, pushTo, broadcastAll };

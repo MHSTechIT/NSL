@@ -234,6 +234,39 @@ router.put('/webinar-config', configValidators, async (req, res) => {
   }
 });
 
+/* ── GET /api/admin/timer-settings ──
+   Returns the merged timer settings (stored values clamped over defaults). */
+router.get('/timer-settings', async (req, res) => {
+  try {
+    const { mergeTimerSettings } = require('../utils/timerDefaults');
+    const { rows } = await pool.query('SELECT settings FROM timer_settings WHERE id = 1');
+    res.json({ settings: mergeTimerSettings(rows[0]?.settings || {}) });
+  } catch (err) {
+    console.error('Get timer-settings error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch timer settings' });
+  }
+});
+
+/* ── PUT /api/admin/timer-settings ──
+   Clamps every value to BOUNDS, persists, restarts backend schedulers live,
+   and broadcasts the change to every connected caller browser via SSE. */
+router.put('/timer-settings', async (req, res) => {
+  try {
+    const { mergeTimerSettings } = require('../utils/timerDefaults');
+    const merged = mergeTimerSettings(req.body && req.body.settings);
+    await pool.query(
+      'UPDATE timer_settings SET settings = $1::jsonb, updated_at = NOW() WHERE id = 1',
+      [JSON.stringify(merged)]
+    );
+    require('../utils/schedulerManager').applyTimerSettings(merged);
+    callerSse.broadcastAll({ type: 'timer.settings.updated', settings: merged });
+    res.json({ settings: merged });
+  } catch (err) {
+    console.error('Update timer-settings error:', err.message);
+    res.status(500).json({ error: 'Failed to update timer settings' });
+  }
+});
+
 /* ── GET /api/admin/webinars ── */
 router.get('/webinars', async (req, res) => {
   const source = getSource(req);
@@ -819,6 +852,7 @@ router.get('/crm-users', async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, full_name, email, phone, role, is_active,
+              department, team_leader_id,
               tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
               tata_smartflo_api_key, tata_outbound_route,
               created_at
@@ -857,6 +891,8 @@ const crmUserValidators = [
   body('phone').optional({ checkFalsy: true }).trim().isLength({ max: 30 }),
   body('role').isIn(ALLOWED_ROLES).withMessage('Role must be one of the 6 allowed values.'),
   body('password').isLength({ min: 6, max: 128 }).withMessage('Password must be 6–128 characters.'),
+  body('department').optional({ nullable: true, checkFalsy: true }).isIn(['sales','marketing']).withMessage('Department must be "sales" or "marketing".'),
+  body('team_leader_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Team leader must be a valid user.'),
   body('tata_extension').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 60 }),
   body('tata_account_type').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 60 }),
   body('tata_agent_number').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 30 }),
@@ -892,6 +928,7 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
 
   const {
     full_name, email, phone, role, password,
+    department, team_leader_id,
     tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
     tata_smartflo_api_key, tata_outbound_route,
   } = req.body;
@@ -900,10 +937,12 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO crm_users
          (full_name, email, phone, role, password_hash,
+          department, team_leader_id,
           tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
           tata_smartflo_api_key, tata_outbound_route)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id, full_name, email, phone, role, is_active,
+                 department, team_leader_id,
                  tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
                  tata_smartflo_api_key, tata_outbound_route,
                  created_at`,
@@ -913,6 +952,8 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
         phone?.trim() || null,
         role,
         password_hash,
+        department ? String(department).trim() : null,
+        team_leader_id || null,
         tata_extension?.trim() || null,
         tata_account_type?.trim() || null,
         tata_agent_number?.trim() || null,
@@ -949,6 +990,8 @@ const crmUserPatchValidators = [
   body('phone').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 30 }),
   body('role').optional().isIn(ALLOWED_ROLES).withMessage('Role must be one of the 6 allowed values.'),
   body('password').optional({ checkFalsy: true }).isLength({ min: 6, max: 128 }).withMessage('Password must be 6–128 characters.'),
+  body('department').optional({ nullable: true, checkFalsy: true }).isIn(['sales','marketing']).withMessage('Department must be "sales" or "marketing".'),
+  body('team_leader_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Team leader must be a valid user.'),
   body('tata_extension').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 60 }),
   body('tata_account_type').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 60 }),
   body('tata_agent_number').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 30 }),
@@ -976,6 +1019,7 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
   const { id } = req.params;
   const allowed = [
     'full_name', 'email', 'phone', 'role',
+    'department', 'team_leader_id',
     'tata_extension', 'tata_account_type', 'tata_agent_number', 'tata_caller_id',
     'tata_smartflo_api_key', 'tata_outbound_route',
     // is_active doubles as the "paused" flag — leadAssigner.js already skips
@@ -1009,6 +1053,11 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
         }
       } else if (key === 'is_active') {
         updates[key] = !!raw;
+      } else if (key === 'department' || key === 'team_leader_id') {
+        // Both are nullable — an empty string must become NULL (team_leader_id
+        // is a UUID column; '' would trip a type error).
+        const v = typeof raw === 'string' ? raw.trim() : raw;
+        updates[key] = v ? v : null;
       } else if (typeof raw === 'string') {
         updates[key] = raw.trim();
       } else {
@@ -1048,6 +1097,7 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
        WHERE id = $${values.length}
        RETURNING id, full_name, email, phone, role, is_active,
                  auto_paused_at, auto_pause_reason,
+                 department, team_leader_id,
                  tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
                  tata_smartflo_api_key, tata_outbound_route,
                  created_at`,
@@ -1861,7 +1911,9 @@ router.get('/sales-performance', async (req, res) => {
                -- regardless of when the follow_up was scheduled. Reflects
                -- "how many follow-ups is this caller still on the hook for".
                COUNT(*) FILTER (WHERE l.last_note_outcome = 'follow_up')::int AS followups,
-               COUNT(*) FILTER (WHERE l.last_note_outcome = 'completed' AND l.completed_at >= w.d_start AND l.completed_at <= w.d_end)::int AS enrolled
+               COUNT(*) FILTER (WHERE l.last_note_outcome = 'completed' AND l.completed_at >= w.d_start AND l.completed_at <= w.d_end)::int AS enrolled,
+               -- Leads left Incomplete by a caller disconnect (tab close / network drop).
+               COUNT(*) FILTER (WHERE l.last_note_outcome = 'incomplete' AND l.last_note_at >= w.d_start AND l.last_note_at <= w.d_end)::int AS incomplete
           FROM leads l CROSS JOIN w
          WHERE l.assigned_user_id IS NOT NULL
            AND ($${webinarParamIdx}::text IS NULL OR l.webinar_id::text = $${webinarParamIdx}::text)
@@ -1916,6 +1968,7 @@ router.get('/sales-performance', async (req, res) => {
              GREATEST(COALESCE(la.assigned, 0) - COALESCE(la.touched, 0), 0) AS untouched,
              COALESCE(la.untouched_aged, 0)      AS untouched_aged,
              COALESCE(la.followups, 0)           AS followups,
+             COALESCE(la.incomplete, 0)          AS incomplete,
              COALESCE(ca.total_calls, 0)         AS total_calls,
              COALESCE(ca.incoming, 0)            AS incoming,
              COALESCE(ca.outgoing, 0)            AS outgoing,
@@ -1960,6 +2013,7 @@ router.get('/sales-performance', async (req, res) => {
       untouched:           sum('untouched'),
       untouched_aged:      sum('untouched_aged'),
       followups:           sum('followups'),
+      incomplete:          sum('incomplete'),
       total_calls:         teamCalls,
       incoming:            sum('incoming'),
       outgoing:            sum('outgoing'),
@@ -2014,15 +2068,17 @@ router.get('/calls', async (req, res) => {
   }
 });
 
-/* ── GET /api/admin/leads/assignment-pool?from=ISO&to=ISO ──
+/* ── GET /api/admin/leads/assignment-pool?from=ISO&to=ISO&webinar_id=UUID ──
    Used by the "Manual Assign Leads" modal in Sales → Leads.
+   `webinar_id` is optional — when supplied the pool is restricted to leads
+   tied to that webinar.
    Returns:
      - available:   count of unassigned leads whose created_at falls in the
                     given datetime range.
      - callers:     active junior/senior callers (id, full_name, role)
                     with their current open-lead count for context. */
 router.get('/leads/assignment-pool', async (req, res) => {
-  const { from, to } = req.query;
+  const { from, to, webinar_id } = req.query;
   if (!from || !to) {
     return res.status(400).json({ error: 'from and to ISO datetime params are required' });
   }
@@ -2032,8 +2088,9 @@ router.get('/leads/assignment-pool', async (req, res) => {
          FROM leads
         WHERE assigned_user_id IS NULL
           AND created_at >= $1::timestamptz
-          AND created_at <= $2::timestamptz`,
-      [from, to]
+          AND created_at <= $2::timestamptz
+          AND ($3::text IS NULL OR webinar_id::text = $3::text)`,
+      [from, to, webinar_id || null]
     );
     const { rows: callers } = await pool.query(
       `SELECT u.id, u.full_name, u.role, u.is_active,
@@ -2064,6 +2121,7 @@ router.get('/leads/assignment-pool', async (req, res) => {
      {
        from:         ISO datetime (created_at >=),
        to:           ISO datetime (created_at <=),
+       webinar_id:   UUID (optional — restrict the pool to one webinar),
        distribution: [{ user_id: UUID, count: integer ≥ 1 }, …]
      }
 
@@ -2075,7 +2133,7 @@ router.get('/leads/assignment-pool', async (req, res) => {
    Wrapped in a transaction with row-level locks so a concurrent manual /
    auto assign cannot grab the same leads. */
 router.post('/leads/manual-assign', async (req, res) => {
-  const { from, to } = req.body || {};
+  const { from, to, webinar_id } = req.body || {};
   const distribution = Array.isArray(req.body?.distribution) ? req.body.distribution : null;
 
   if (!from || !to) {
@@ -2129,10 +2187,11 @@ router.post('/leads/manual-assign', async (req, res) => {
         WHERE assigned_user_id IS NULL
           AND created_at >= $1::timestamptz
           AND created_at <= $2::timestamptz
+          AND ($4::text IS NULL OR webinar_id::text = $4::text)
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT $3`,
-      [from, to, totalRequested]
+      [from, to, totalRequested, webinar_id || null]
     );
     const available = pool_.length;
 
