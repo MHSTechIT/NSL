@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 const ROLES = [
   { value: 'junior_caller', label: 'Junior Caller' },
@@ -27,7 +28,7 @@ function fmtDate(iso) {
   } catch { return '—'; }
 }
 
-export default function UsersModule({ token }) {
+export default function UsersModule({ token, lockedDepartment = null, lockedManagerId = null, actionsSlotEl = null }) {
   const [users, setUsers]           = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState('');
@@ -69,49 +70,32 @@ export default function UsersModule({ token }) {
     }
   }
 
+  /* Create User button — portaled into the dashboard tab-bar action slot when
+     one is provided (manager dashboard, so it sits in line with the logo);
+     otherwise a plain right-aligned button above the table. */
+  const createUserBtn = (
+    <button
+      onClick={() => setShowForm(true)}
+      style={{
+        padding: '8px 16px', borderRadius: 50, border: 'none',
+        background: '#5B21B6', color: '#fff',
+        fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.86rem',
+        cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,33,182,0.30)',
+        display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      Create User
+    </button>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {/* Toolbar */}
-      <div className="bg-white rounded-card shadow-card" style={{ padding: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.05rem', color: '#3B0764', margin: 0 }}>
-            Team Members
-          </h2>
-          <p style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)', margin: '2px 0 0' }}>
-            {loading ? 'Loading…' : `${users.length} user${users.length === 1 ? '' : 's'}`}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={fetchUsers}
-            disabled={loading}
-            style={{
-              padding: '8px 14px', borderRadius: 50, border: '1px solid rgba(91,33,182,0.20)',
-              background: '#fff', color: '#5B21B6',
-              fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.82rem',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.6 : 1,
-            }}
-          >
-            ↻ Refresh
-          </button>
-          <button
-            onClick={() => setShowForm(true)}
-            style={{
-              padding: '8px 16px', borderRadius: 50, border: 'none',
-              background: '#5B21B6', color: '#fff',
-              fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.86rem',
-              cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,33,182,0.30)',
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            Create User
-          </button>
-        </div>
-      </div>
+      {actionsSlotEl
+        ? createPortal(createUserBtn, actionsSlotEl)
+        : <div style={{ display: 'flex', justifyContent: 'flex-end' }}>{createUserBtn}</div>}
 
       {/* Error banner */}
       {error && (
@@ -215,6 +199,8 @@ export default function UsersModule({ token }) {
           token={token}
           existing={editingUser}
           allUsers={users}
+          lockedDepartment={lockedDepartment}
+          lockedManagerId={lockedManagerId}
           onClose={() => { setShowForm(false); setEditing(null); }}
           onSaved={(u, isEdit) => {
             if (isEdit) {
@@ -274,13 +260,14 @@ function SmartfloCell({ user }) {
 }
 
 /* ── User Form Modal (create + edit) ── */
-function UserFormModal({ token, existing, allUsers = [], onClose, onSaved }) {
+function UserFormModal({ token, existing, allUsers = [], lockedDepartment = null, lockedManagerId = null, onClose, onSaved }) {
   const isEdit = !!existing;
   const [fullName, setFullName] = useState(existing?.full_name || '');
   const [email, setEmail]       = useState(existing?.email || '');
   const [phone, setPhone]       = useState(existing?.phone || '');
   const [role, setRole]         = useState(existing?.role || 'junior_caller');
-  const [department, setDepartment]     = useState(existing?.department || '');
+  const [department, setDepartment]     = useState(existing?.department || lockedDepartment || '');
+  const [managerId, setManagerId]       = useState(existing?.manager_id || lockedManagerId || '');
   const [teamLeaderId, setTeamLeaderId] = useState(existing?.team_leader_id || '');
   const [tataExtension, setTataExtension]     = useState(existing?.tata_extension || '');
   const [tataAccountType, setTataAccountType] = useState(existing?.tata_account_type || '');
@@ -291,8 +278,8 @@ function UserFormModal({ token, existing, allUsers = [], onClose, onSaved }) {
   // defaults to 'extension', API key falls back to the global env value).
   const [tataApiKey]       = useState(existing?.tata_smartflo_api_key || '');
   const [tataOutboundRoute] = useState(existing?.tata_outbound_route || 'extension');
-  const [password, setPassword] = useState('');
-  const [showPw, setShowPw]     = useState(false);
+  const [password, setPassword]               = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
 
@@ -307,14 +294,37 @@ function UserFormModal({ token, existing, allUsers = [], onClose, onSaved }) {
     [allUsers, department, existing]
   );
 
-  function handleDepartmentChange(e) {
-    const d = e.target.value;
+  /* Managers pickable for the selected department — only manager-role users
+     in that department, excluding the user being edited. */
+  const managers = useMemo(
+    () => allUsers.filter(u =>
+      u.role === 'manager' &&
+      u.department === department &&
+      u.id !== existing?.id
+    ),
+    [allUsers, department, existing]
+  );
+
+  /* Field visibility by role:
+       Manager field     — shown for every role EXCEPT manager / admin
+                           (they sit at the top — no manager above them).
+       Team Leader field — shown ONLY for caller roles (jr/sr caller). */
+  const showTeamLeader = role === 'junior_caller' || role === 'senior_caller';
+  const showManager    = role !== 'manager' && role !== 'admin';
+
+  function handleDepartmentChange(d) {
     setDepartment(d);
     // Drop a team-leader pick that no longer belongs to the new department.
     if (teamLeaderId && !allUsers.some(u =>
       u.id === teamLeaderId && u.role === 'team_leader' && u.department === d
     )) {
       setTeamLeaderId('');
+    }
+    // Drop a manager pick that no longer belongs to the new department.
+    if (managerId && !allUsers.some(u =>
+      u.id === managerId && u.role === 'manager' && u.department === d
+    )) {
+      setManagerId('');
     }
   }
 
@@ -323,8 +333,11 @@ function UserFormModal({ token, existing, allUsers = [], onClose, onSaved }) {
     setError('');
     if (!fullName.trim()) { setError('Full name is required.'); return; }
     if (!email.trim()) { setError('Email is required.'); return; }
-    if (!isEdit && password.length < 6) { setError('Password must be at least 6 characters.'); return; }
-    if (isEdit && password.length > 0 && password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    // Create always needs a password; Edit needs one only if changing it.
+    if (!isEdit || password.length > 0) {
+      if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+      if (password !== confirmPassword) { setError('New password and confirm password do not match.'); return; }
+    }
 
     setLoading(true);
     try {
@@ -335,7 +348,8 @@ function UserFormModal({ token, existing, allUsers = [], onClose, onSaved }) {
         phone:     phone.trim() || (isEdit ? '' : undefined),
         role,
         department:     department || null,
-        team_leader_id: teamLeaderId || null,
+        manager_id:     showManager ? (managerId || null) : null,
+        team_leader_id: showTeamLeader ? (teamLeaderId || null) : null,
       };
       // Smartflo settings only apply to callers; clear them on other roles.
       if (isCaller) {
@@ -467,52 +481,65 @@ function UserFormModal({ token, existing, allUsers = [], onClose, onSaved }) {
             {/* Role */}
             <div>
               <label style={fieldLabelStyle}>Role</label>
-              <select
-                value={role}
-                onChange={e => setRole(e.target.value)}
-                style={{ ...inputStyle, appearance: 'auto' }}
-              >
-                {ROLES.map(r => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
+              <BrandSelect value={role} onChange={setRole} options={ROLES} />
             </div>
 
             {/* Department */}
             <div>
               <label style={fieldLabelStyle}>Department</label>
-              <select
+              <BrandSelect
                 value={department}
                 onChange={handleDepartmentChange}
-                style={{ ...inputStyle, appearance: 'auto' }}
-              >
-                <option value="">Select department…</option>
-                <option value="sales">Sales</option>
-                <option value="marketing">Marketing</option>
-              </select>
+                disabled={!!lockedDepartment}
+                options={[
+                  { value: '',          label: 'Select department…' },
+                  { value: 'sales',     label: 'Sales' },
+                  { value: 'marketing', label: 'Marketing' },
+                ]}
+              />
             </div>
 
-            {/* Team Leader — team_leader-role users within the chosen department */}
-            <div>
-              <label style={fieldLabelStyle}>Team Leader</label>
-              <select
-                value={teamLeaderId}
-                onChange={e => setTeamLeaderId(e.target.value)}
-                style={{ ...inputStyle, appearance: 'auto', opacity: department ? 1 : 0.6 }}
-                disabled={!department}
-              >
-                <option value="">
-                  {!department
-                    ? 'Select a department first'
-                    : teamLeaders.length === 0
-                      ? 'No team leaders in this department'
-                      : 'Select team leader…'}
-                </option>
-                {teamLeaders.map(tl => (
-                  <option key={tl.id} value={tl.id}>{tl.full_name}</option>
-                ))}
-              </select>
-            </div>
+            {/* Manager — manager-role users within the chosen department.
+                Hidden for manager / admin roles (top of the hierarchy). */}
+            {showManager && (
+              <div>
+                <label style={fieldLabelStyle}>Manager</label>
+                <BrandSelect
+                  value={managerId}
+                  onChange={setManagerId}
+                  disabled={!department || !!lockedManagerId}
+                  options={[
+                    { value: '', label: !department
+                        ? 'Select a department first'
+                        : managers.length === 0
+                          ? 'No managers in this department'
+                          : 'Select manager…' },
+                    ...managers.map(m => ({ value: m.id, label: m.full_name })),
+                  ]}
+                />
+              </div>
+            )}
+
+            {/* Team Leader — team_leader-role users within the chosen
+                department. Shown only for caller roles. */}
+            {showTeamLeader && (
+              <div>
+                <label style={fieldLabelStyle}>Team Leader</label>
+                <BrandSelect
+                  value={teamLeaderId}
+                  onChange={setTeamLeaderId}
+                  disabled={!department}
+                  options={[
+                    { value: '', label: !department
+                        ? 'Select a department first'
+                        : teamLeaders.length === 0
+                          ? 'No team leaders in this department'
+                          : 'Select team leader…' },
+                    ...teamLeaders.map(tl => ({ value: tl.id, label: tl.full_name })),
+                  ]}
+                />
+              </div>
+            )}
 
             {/* Smartflo settings — only for caller roles. Spans both columns
                 with its own internal 2-column grid. */}
@@ -582,35 +609,30 @@ function UserFormModal({ token, existing, allUsers = [], onClose, onSaved }) {
               </div>
             )}
 
-            {/* Password */}
-            <div>
-              <label style={fieldLabelStyle}>
-                Password
-                {isEdit && <span style={{ color: 'rgba(91,33,182,0.40)', fontWeight: 500 }}> (optional)</span>}
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder={isEdit ? 'Leave blank to keep current' : 'Min. 6 characters'}
-                  style={{ ...inputStyle, paddingRight: '2.8rem' }}
-                  maxLength={128}
-                  autoComplete="new-password"
-                />
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onClick={() => setShowPw(v => !v)}
-                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(91,33,182,0.45)', padding: 4 }}
-                  aria-label={showPw ? 'Hide password' : 'Show password'}
-                >
-                  {showPw
-                    ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}
-                </button>
-              </div>
-            </div>
+            {/* Password — Edit shows the current password (view-only) plus
+                New + Confirm; Create shows Password + Confirm. */}
+            {isEdit && (
+              <PasswordField
+                label="Current Password"
+                value={existing?.password_plain || ''}
+                readOnly
+                placeholder={existing?.password_plain ? '' : 'Not recorded — set a new one below'}
+              />
+            )}
+            <PasswordField
+              label={isEdit ? 'New Password' : 'Password'}
+              hint={isEdit ? '(optional)' : ''}
+              value={password}
+              onChange={setPassword}
+              placeholder={isEdit ? 'Leave blank to keep current' : 'Min. 6 characters'}
+            />
+            <PasswordField
+              label="Confirm Password"
+              hint={isEdit ? '(optional)' : ''}
+              value={confirmPassword}
+              onChange={setConfirmPassword}
+              placeholder={isEdit ? 'Re-type new password' : 'Re-type password'}
+            />
           </div>
 
           {error && (
@@ -662,3 +684,168 @@ const inputStyle = {
   outline: 'none',
   boxSizing: 'border-box',
 };
+
+/* Password input with a show/hide eye toggle. `readOnly` mode powers the
+   "Current Password" field — the admin can reveal a user's stored password. */
+function PasswordField({ label, hint, value, onChange, placeholder, readOnly = false }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div>
+      <label style={fieldLabelStyle}>
+        {label}
+        {hint && <span style={{ color: 'rgba(91,33,182,0.40)', fontWeight: 500 }}> {hint}</span>}
+      </label>
+      <div style={{ position: 'relative' }}>
+        <input
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={readOnly || !onChange ? undefined : (e => onChange(e.target.value))}
+          readOnly={readOnly}
+          placeholder={placeholder}
+          maxLength={128}
+          autoComplete="new-password"
+          style={{
+            ...inputStyle,
+            paddingRight: '2.8rem',
+            ...(readOnly ? { background: 'rgba(237,234,248,0.65)', cursor: 'default' } : {}),
+          }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setShow(v => !v)}
+          style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(91,33,182,0.45)', padding: 4 }}
+          aria-label={show ? 'Hide password' : 'Show password'}
+        >
+          {show
+            ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* Brand-styled single-select dropdown — a drop-in replacement for a native
+   <select> so the Create User form's dropdowns match the rest of the CRM UI.
+   The option panel is portaled to <body> with fixed positioning so the
+   modal's scroll container can't clip it.
+   Props: value, onChange(value), options:[{value,label}], disabled. */
+function BrandSelect({ value, onChange, options = [], disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos]   = useState({ top: 0, left: 0, width: 0, maxH: 280 });
+  const wrapRef    = useRef(null);
+  const triggerRef = useRef(null);
+
+  useEffect(() => {
+    function onDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    function onScroll() { setOpen(false); }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('scroll', onScroll, true);
+    };
+  }, []);
+
+  function toggle() {
+    if (disabled) return;
+    if (!open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - r.bottom - 8;
+      const maxH = Math.min(280, Math.max(140, spaceBelow));
+      const top  = spaceBelow >= 160 ? r.bottom + 4 : Math.max(8, r.top - maxH - 4);
+      setPos({ top, left: r.left, width: r.width, maxH });
+    }
+    setOpen(o => !o);
+  }
+
+  function pick(v) { onChange(v); setOpen(false); }
+
+  const selected = options.find(o => String(o.value) === String(value));
+  const label    = selected ? selected.label : '';
+  const isPlaceholder = !value;
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={toggle}
+        disabled={disabled}
+        style={{
+          ...inputStyle,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          textAlign: 'left',
+          opacity: disabled ? 0.6 : 1,
+          fontWeight: isPlaceholder ? 400 : 600,
+          color: isPlaceholder ? 'rgba(91,33,182,0.50)' : '#3B0764',
+          border: open ? '1px solid rgba(91,33,182,0.55)' : inputStyle.border,
+          boxShadow: open ? '0 0 0 3px rgba(91,33,182,0.10)' : 'none',
+          transition: 'border 160ms, box-shadow 160ms',
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B21B6"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{ flexShrink: 0, transform: `rotate(${open ? 180 : 0}deg)`, transition: 'transform 180ms' }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && createPortal(
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{
+            position: 'fixed', top: pos.top, left: pos.left, width: pos.width,
+            background: '#fff',
+            border: '1px solid rgba(139,92,246,0.18)',
+            borderRadius: 10,
+            boxShadow: '0 14px 44px rgba(91,33,182,0.20)',
+            zIndex: 10000, overflow: 'hidden',
+            fontFamily: 'Outfit, sans-serif',
+          }}
+        >
+          <div style={{ maxHeight: pos.maxH, overflowY: 'auto' }}>
+            {options.map(o => {
+              const isSel = String(o.value) === String(value);
+              return (
+                <div
+                  key={String(o.value)}
+                  onClick={() => pick(o.value)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '9px 12px', cursor: 'pointer',
+                    fontSize: '0.88rem', color: '#3B0764',
+                    fontWeight: isSel ? 700 : 500,
+                    background: isSel ? 'rgba(91,33,182,0.07)' : 'transparent',
+                    borderBottom: '1px solid rgba(139,92,246,0.07)',
+                    transition: 'background 120ms',
+                  }}
+                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(139,92,246,0.06)'; }}
+                  onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ width: 14, flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+                    {isSel && (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5B21B6"
+                        strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                  </span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {o.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}

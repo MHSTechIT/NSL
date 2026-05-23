@@ -73,8 +73,12 @@ export default function SalesLeadsLogicView({ token }) {
   }, [activeTab, config, token]);
 
   const tabConfig = config[activeTab] || [];
-  const enabled   = tabConfig.filter(c => c.enabled && c.is_active);
-  const disabled  = tabConfig.filter(c => !c.enabled || !c.is_active);
+  /* In rotation = enabled in the lead-share config. A paused (inactive)
+     caller still stays in the round-robin — leads queue up for them to work
+     on resume — so is_active does NOT affect rotation membership. Only an
+     explicitly-disabled config row drops a caller out of rotation. */
+  const enabled   = tabConfig.filter(c => c.enabled);
+  const disabled  = tabConfig.filter(c => !c.enabled);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -244,13 +248,13 @@ export default function SalesLeadsLogicView({ token }) {
               Not in rotation
             </h3>
             <p style={{ margin: '2px 0 0', fontSize: '0.74rem', color: 'rgba(91,33,182,0.55)' }}>
-              These callers won't receive new leads until they're re-enabled and active.
+              These callers won't receive new leads until they're re-enabled in the rotation.
             </p>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {disabled.map(c => {
               const role = ROLE_BADGE[c.role] || { bg: '#F3F4F6', fg: '#4B5563', label: c.role };
-              const reason = !c.is_active ? 'inactive account' : 'disabled in rotation';
+              const reason = 'disabled in rotation';
               return (
                 <div key={c.caller_id} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',

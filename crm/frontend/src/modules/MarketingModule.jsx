@@ -67,7 +67,7 @@ export default function MarketingModule({ token, source = 'meta' }) {
       `}</style>
 
       {/* Tab bar */}
-      <div className="marketing-tabs-bar" style={{ display: 'flex', gap: 4, background: '#fff', borderRadius: 16, padding: 6, boxShadow: '0 2px 12px rgba(91,33,182,0.08)', minWidth: 0 }}>
+      <div className="marketing-tabs-bar" style={{ display: 'inline-flex', alignSelf: 'flex-start', maxWidth: '100%', gap: 4, background: '#fff', borderRadius: 16, padding: 6, boxShadow: '0 2px 12px rgba(91,33,182,0.08)', minWidth: 0 }}>
         {TABS.map(t => (
           <button
             key={t.id}

@@ -848,16 +848,20 @@ router.get('/dashboard', async (req, res) => {
    show the masked value as a placeholder; if the admin submits the
    masked value unchanged, the PATCH endpoint treats it as a no-op and
    keeps the real key in the DB. */
-router.get('/crm-users', async (_req, res) => {
+router.get('/crm-users', async (req, res) => {
   try {
+    // A manager only sees users in their own department; super-admin sees all.
+    const mgr = req.adminUser && req.adminUser.kind === 'manager';
     const { rows } = await pool.query(
       `SELECT id, full_name, email, phone, role, is_active,
-              department, team_leader_id,
+              department, team_leader_id, manager_id, password_plain,
               tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
               tata_smartflo_api_key, tata_outbound_route,
               created_at
          FROM crm_users
-        ORDER BY created_at DESC`
+        ${mgr ? 'WHERE department = $1' : ''}
+        ORDER BY created_at DESC`,
+      mgr ? [req.adminUser.department] : []
     );
     const tata = require('../utils/tataClient');
     const users = rows.map(u => ({
@@ -893,6 +897,7 @@ const crmUserValidators = [
   body('password').isLength({ min: 6, max: 128 }).withMessage('Password must be 6–128 characters.'),
   body('department').optional({ nullable: true, checkFalsy: true }).isIn(['sales','marketing']).withMessage('Department must be "sales" or "marketing".'),
   body('team_leader_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Team leader must be a valid user.'),
+  body('manager_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Manager must be a valid user.'),
   body('tata_extension').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 60 }),
   body('tata_account_type').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 60 }),
   body('tata_agent_number').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 30 }),
@@ -928,10 +933,20 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
 
   const {
     full_name, email, phone, role, password,
-    department, team_leader_id,
+    department, team_leader_id, manager_id,
     tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
     tata_smartflo_api_key, tata_outbound_route,
   } = req.body;
+  // A manager can only create users in their OWN department — override
+  // whatever the body sent. Super-admin uses the submitted department.
+  const effectiveDept = (req.adminUser && req.adminUser.kind === 'manager')
+    ? req.adminUser.department
+    : (department ? String(department).trim() : null);
+  // A manager-created user always reports to that manager; only super-admin
+  // may assign a different manager.
+  const effectiveManagerId = (req.adminUser && req.adminUser.kind === 'manager')
+    ? req.adminUser.id
+    : (manager_id || null);
   try {
     const password_hash = await hashPassword(password);
     const { rows } = await pool.query(
@@ -939,10 +954,10 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
          (full_name, email, phone, role, password_hash,
           department, team_leader_id,
           tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
-          tata_smartflo_api_key, tata_outbound_route)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          tata_smartflo_api_key, tata_outbound_route, manager_id, password_plain)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING id, full_name, email, phone, role, is_active,
-                 department, team_leader_id,
+                 department, team_leader_id, manager_id, password_plain,
                  tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
                  tata_smartflo_api_key, tata_outbound_route,
                  created_at`,
@@ -952,7 +967,7 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
         phone?.trim() || null,
         role,
         password_hash,
-        department ? String(department).trim() : null,
+        effectiveDept,
         team_leader_id || null,
         tata_extension?.trim() || null,
         tata_account_type?.trim() || null,
@@ -962,6 +977,8 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
         tata_outbound_route === 'agent' || tata_outbound_route === 'did'
           ? tata_outbound_route
           : 'extension',
+        effectiveManagerId,
+        password,
       ]
     );
     // Mask the API key in the response so the freshly-created secret
@@ -992,6 +1009,7 @@ const crmUserPatchValidators = [
   body('password').optional({ checkFalsy: true }).isLength({ min: 6, max: 128 }).withMessage('Password must be 6–128 characters.'),
   body('department').optional({ nullable: true, checkFalsy: true }).isIn(['sales','marketing']).withMessage('Department must be "sales" or "marketing".'),
   body('team_leader_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Team leader must be a valid user.'),
+  body('manager_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Manager must be a valid user.'),
   body('tata_extension').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 60 }),
   body('tata_account_type').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 60 }),
   body('tata_agent_number').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 30 }),
@@ -1019,7 +1037,7 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
   const { id } = req.params;
   const allowed = [
     'full_name', 'email', 'phone', 'role',
-    'department', 'team_leader_id',
+    'department', 'team_leader_id', 'manager_id',
     'tata_extension', 'tata_account_type', 'tata_agent_number', 'tata_caller_id',
     'tata_smartflo_api_key', 'tata_outbound_route',
     // is_active doubles as the "paused" flag — leadAssigner.js already skips
@@ -1053,9 +1071,9 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
         }
       } else if (key === 'is_active') {
         updates[key] = !!raw;
-      } else if (key === 'department' || key === 'team_leader_id') {
-        // Both are nullable — an empty string must become NULL (team_leader_id
-        // is a UUID column; '' would trip a type error).
+      } else if (key === 'department' || key === 'team_leader_id' || key === 'manager_id') {
+        // All nullable — an empty string must become NULL (team_leader_id /
+        // manager_id are UUID columns; '' would trip a type error).
         const v = typeof raw === 'string' ? raw.trim() : raw;
         updates[key] = v ? v : null;
       } else if (typeof raw === 'string') {
@@ -1066,10 +1084,12 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
     }
   }
 
-  // Optional password update — hash before storing
+  // Optional password update — hash for login verification, and keep the
+  // plain text so the admin can view the user's current password.
   if (req.body.password) {
     try {
-      updates.password_hash = await hashPassword(req.body.password);
+      updates.password_hash  = await hashPassword(req.body.password);
+      updates.password_plain = String(req.body.password);
     } catch (e) {
       return res.status(500).json({ error: 'Failed to hash password.' });
     }
@@ -1077,6 +1097,25 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
 
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: 'No fields to update.' });
+  }
+
+  // Manager scope: can only edit users in their own department, and can never
+  // move a user to a different department.
+  if (req.adminUser && req.adminUser.kind === 'manager') {
+    try {
+      const { rows: tgt } = await pool.query('SELECT department FROM crm_users WHERE id = $1', [id]);
+      if (tgt.length === 0) return res.status(404).json({ error: 'User not found.' });
+      if (tgt[0].department !== req.adminUser.department) {
+        return res.status(403).json({ error: 'You can only manage users in your own department.' });
+      }
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to verify user.' });
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, 'department')) {
+      updates.department = req.adminUser.department;
+    }
+    // A manager cannot reassign who a user reports to — only super-admin can.
+    delete updates.manager_id;
   }
 
   // When the admin flips is_active back to TRUE, also clear the SmartFlow
@@ -1097,7 +1136,7 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
        WHERE id = $${values.length}
        RETURNING id, full_name, email, phone, role, is_active,
                  auto_paused_at, auto_pause_reason,
-                 department, team_leader_id,
+                 department, team_leader_id, manager_id, password_plain,
                  tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
                  tata_smartflo_api_key, tata_outbound_route,
                  created_at`,
@@ -1291,6 +1330,14 @@ router.delete('/crm-users/:id', async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: 'id required' });
   try {
+    // Manager scope: can only delete users in their own department.
+    if (req.adminUser && req.adminUser.kind === 'manager') {
+      const { rows: tgt } = await pool.query('SELECT department FROM crm_users WHERE id = $1', [id]);
+      if (tgt.length === 0) return res.status(404).json({ error: 'User not found.' });
+      if (tgt[0].department !== req.adminUser.department) {
+        return res.status(403).json({ error: 'You can only manage users in your own department.' });
+      }
+    }
     const result = await pool.query('DELETE FROM crm_users WHERE id = $1', [id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'User not found.' });
     res.json({ success: true });

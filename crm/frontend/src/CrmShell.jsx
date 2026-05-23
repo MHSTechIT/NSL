@@ -353,12 +353,12 @@ export default function CrmShell() {
               <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
           </button>
-          {workspace === 'yt' && activeModule !== 'marketing' ? (
+          {workspace === 'yt' && activeModule !== 'marketing' && activeModule !== 'users' ? (
             <div style={{ flex: 1, minWidth: 0 }}>
               <h1 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#3B0764' }}>YT · {MODULE_TITLES[activeModule]?.title || 'Dashboard'}</h1>
               <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)' }}>YouTube workspace</p>
             </div>
-          ) : (activeModule !== 'marketing' && activeModule !== 'sales') && (
+          ) : (activeModule !== 'marketing' && activeModule !== 'sales' && activeModule !== 'users') && (
             <div style={{ flex: 1, minWidth: 0 }}>
               <h1 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#3B0764' }}>
                 {MODULE_TITLES[activeModule]?.title || 'Dashboard'}

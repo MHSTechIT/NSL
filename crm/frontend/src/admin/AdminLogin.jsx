@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 const ROLE_ROUTE = {
   junior_caller: '/caller/junior',
   senior_caller: '/caller/senior',
-  manager:       '/caller/senior',  // placeholder until manager dashboard exists
+  manager:       '/manager',        // dedicated 2-module manager dashboard
   trainer:       '/caller/senior',  // placeholder
   admin:         '/caller/senior',  // placeholder
   team_leader:   '/caller/senior',  // placeholder

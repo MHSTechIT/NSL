@@ -12,6 +12,7 @@ const callerSse = require('../utils/callerSse');
 const { callerAuth } = require('../middleware/callerAuth');
 const tataInboundSync = require('../utils/tataInboundSync');
 const activityLogger = require('../utils/activityLogger');
+const { notifyAutoPause } = require('../utils/telegramNotifier');
 
 router.use(callerAuth);
 
@@ -99,6 +100,7 @@ router.post('/heartbeat', async (req, res) => {
           );
           try { callerSse.pushTo(callerId, { type: 'caller.paused' }); } catch (_) {}
           await activityLogger.switchTag(callerId, 'BLOCKED', { reason: 'break_overrun' });
+          notifyAutoPause(callerId, 'break_overrun').catch(() => {});
           autoPaused = true;
         }
       }
@@ -230,6 +232,7 @@ router.post('/self-pause', async (req, res) => {
     );
     await activityLogger.logPointEvent(req.caller.id, 'PAUSED_BY_SMARTFLOW', { reason });
     try { callerSse.pushTo(req.caller.id, { type: 'caller.paused' }); } catch (_) {}
+    notifyAutoPause(req.caller.id, reason).catch(() => {});
     console.log(JSON.stringify({
       type: 'caller.self_pause', caller_id: req.caller.id, reason,
       at: new Date().toISOString(),
@@ -775,6 +778,12 @@ router.post('/leads/:id/note', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    // Fire the Telegram alert AFTER the transaction commits, so subscribers
+    // never see a "paused" alert that we later rolled back.
+    if (autoPausedThisRequest) {
+      notifyAutoPause(req.caller.id, 'smartflow_cap_exceeded').catch(() => {});
+    }
 
     // Structured log — one JSON line per note save. Grep on Render with
     // e.g. `lead_id=<uuid>` to trace a lead's lifecycle across callers.

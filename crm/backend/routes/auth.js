@@ -48,7 +48,7 @@ router.post('/crm-login',
     const { username, password } = req.body;
     try {
       const { rows } = await pool.query(
-        `SELECT id, full_name, email, phone, role, password_hash, is_active
+        `SELECT id, full_name, email, phone, role, password_hash, is_active, department
          FROM crm_users WHERE LOWER(email) = $1`,
         [String(username).trim().toLowerCase()]
       );
@@ -60,14 +60,20 @@ router.post('/crm-login',
       const ok = await verifyScryptHash(password, u.password_hash);
       if (!ok) return res.status(401).json({ error: 'Invalid credentials.' });
 
-      const token = jwtUtil.sign({ user_id: u.id, role: u.role, full_name: u.full_name });
+      const token = jwtUtil.sign({
+        user_id:    u.id,
+        role:       u.role,
+        full_name:  u.full_name,
+        department: u.department || null,
+      });
       res.json({
         user: {
-          id:        u.id,
-          full_name: u.full_name,
-          email:     u.email,
-          phone:     u.phone,
-          role:      u.role,
+          id:         u.id,
+          full_name:  u.full_name,
+          email:      u.email,
+          phone:      u.phone,
+          role:       u.role,
+          department: u.department || null,
         },
         token,
       });

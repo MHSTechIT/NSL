@@ -13,6 +13,7 @@ const callerRouter        = require('./routes/caller');
 const callsRouter         = require('./routes/calls');
 const webhooksRouter      = require('./routes/webhooks');
 const recordingsRouter    = require('./routes/recordings');
+const telegramAlertsRouter = require('./routes/telegramAlerts');
 
 const app = express();
 
@@ -299,11 +300,19 @@ if (_agentExtMigration && typeof _agentExtMigration.catch === 'function') {
 
 // Auto-migrate: org-structure fields on crm_users.
 //   department      — 'sales' | 'marketing' (enforced in the API validator).
-//   team_leader_id  — the team_leader user this person reports to. ON DELETE
-//                     SET NULL so removing a team leader doesn't orphan rows.
+//   team_leader_id  — the team_leader user this person reports to.
+//   manager_id      — the manager user this person reports to.
+//                     Both FKs are ON DELETE SET NULL so removing a manager
+//                     or team leader doesn't orphan rows.
 const _crmOrgMigration = pool.query(`
   ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS department     TEXT;
   ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS team_leader_id UUID REFERENCES crm_users(id) ON DELETE SET NULL;
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS manager_id     UUID REFERENCES crm_users(id) ON DELETE SET NULL;
+  -- password_plain: the plain-text password, kept alongside the scrypt hash
+  -- so the admin can view a user's current password on the Users page.
+  -- (Admin-explicit choice — the hash in password_hash is still what login
+  -- verifies against.)
+  ALTER TABLE crm_users ADD COLUMN IF NOT EXISTS password_plain TEXT;
 `);
 if (_crmOrgMigration && typeof _crmOrgMigration.catch === 'function') {
   _crmOrgMigration.catch(err => console.error('[Migration] crm_users org fields error:', err.message));
@@ -477,6 +486,32 @@ const _callNotesMigration = pool.query(`
 `);
 if (_callNotesMigration && typeof _callNotesMigration.catch === 'function') {
   _callNotesMigration.catch(err => console.error('[Migration] lead_call_notes error:', err.message));
+}
+
+// Auto-migrate: telegram_alert_recipients — recipients of Telegram push alerts.
+//   target_type = 'team_leader' → notifications about callers reporting to
+//                 team_leader_id are forwarded to telegram_chat_id.
+//   target_type = 'manager'     → notifications about callers in `department`
+//                 (or all departments if NULL) are forwarded.
+const _telegramAlertsMigration = pool.query(`
+  CREATE TABLE IF NOT EXISTS telegram_alert_recipients (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    telegram_chat_id TEXT        NOT NULL,
+    target_type      TEXT        NOT NULL CHECK (target_type IN ('team_leader','manager')),
+    team_leader_id   UUID        REFERENCES crm_users(id) ON DELETE CASCADE,
+    department       TEXT,
+    label            TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (
+      (target_type = 'team_leader' AND team_leader_id IS NOT NULL) OR
+      (target_type = 'manager')
+    )
+  );
+  CREATE INDEX IF NOT EXISTS idx_tg_alerts_tl   ON telegram_alert_recipients (team_leader_id);
+  CREATE INDEX IF NOT EXISTS idx_tg_alerts_dept ON telegram_alert_recipients (department);
+`);
+if (_telegramAlertsMigration && typeof _telegramAlertsMigration.catch === 'function') {
+  _telegramAlertsMigration.catch(err => console.error('[Migration] telegram_alert_recipients error:', err.message));
 }
 
 // Auto-migrate: create click_events table for button analytics
@@ -661,6 +696,7 @@ app.use('/api/events', publicLimiter);
 app.use('/api',        leadsRouter);
 app.use('/api',        eventsRouter);
 app.use('/api/auth',   authLimiter, authRouter);
+app.use('/api/admin/telegram-alerts', telegramAlertsRouter);
 app.use('/api/admin',  adminRouter);
 app.use('/api/caller', callerRouter);
 app.use('/api/caller', callsRouter);
