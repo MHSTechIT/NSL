@@ -415,7 +415,19 @@ export default function TimerConfig({ token, source = 'meta' }) {
                 </p>
               </div>
             ) : (
-              webinars.map(w => <WebinarCard key={w.id} webinar={w} />)
+              /* Sort by the numeric suffix in the webinar name, DESCENDING —
+                 highest number on top (YT-105), lowest at the bottom (YT-101).
+                 Falls back to alphabetic compare on the raw name when there's
+                 no number to parse, so unnamed rows still sort deterministically. */
+              [...webinars].sort((a, b) => {
+                const numOf = (w) => {
+                  const m = /(\d+)\s*$/.exec(w.name || '');
+                  return m ? parseInt(m[1], 10) : -Infinity;
+                };
+                const na = numOf(a), nb = numOf(b);
+                if (na !== nb) return nb - na;
+                return String(b.name || '').localeCompare(String(a.name || ''));
+              }).map(w => <WebinarCard key={w.id} webinar={w} />)
             )}
           </div>
         </div>

@@ -30,8 +30,10 @@ const STATUS_BADGE = {
   ended:   { bg: 'rgba(91,33,182,0.10)',  fg: '#5B21B6', label: 'Ended (not answered)' },
 };
 
-export default function MissedCallsModule({ jwt }) {
+export default function MissedCallsModule({ jwt, onCount }) {
   const [calls, setCalls]         = useState([]);
+  // Bubble the count up to CallerShell for the header chip.
+  useEffect(() => { if (typeof onCount === 'function') onCount(calls.length); }, [calls.length, onCount]);
   const [filteredDids, setDids]   = useState([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');

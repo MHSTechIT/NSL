@@ -56,6 +56,79 @@ router.get('/leads', async (req, res) => {
   }
 });
 
+/* ── GET /api/admin/completed-calls ──
+   Powers the Sales → Completed Calls tab. Returns every lead whose
+   latest call note has outcome = 'completed' or 'not_interested', joined
+   with:
+     • the most recent lead_call_notes row (so the caller's answers to
+       every form question are returned as last_note_* columns)
+     • the most recent calls row that holds a recording_url (so the
+       admin can play it back via /api/caller/recordings/:id?token=ADMIN)
+     • crm_users (so we can label which caller handled the lead).
+
+   Limit defaults to 500 to keep the payload reasonable; the caller can
+   pass ?limit=N to override (capped at 2000). */
+router.get('/completed-calls', async (req, res) => {
+  const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit, 10) || 500));
+  try {
+    const { rows } = await pool.query(`
+      SELECT l.id, l.full_name, l.whatsapp_number, l.email, l.source,
+             l.sugar_level, l.diabetes_duration, l.language_pref,
+             l.lead_score, l.lead_tag,
+             l.last_note_outcome, l.last_note_at, l.completed_at,
+             l.last_note_interested, l.last_note_outcome_subtag,
+             l.created_at,
+             w.name AS webinar_name,
+             u.id   AS caller_id,
+             u.full_name AS caller_name,
+             u.role      AS caller_role,
+             latest_note.confirmed_range          AS last_note_confirmed_range,
+             latest_note.range_for                AS last_note_range_for,
+             latest_note.patient_age              AS last_note_patient_age,
+             latest_note.takes_medicine           AS last_note_takes_medicine,
+             latest_note.hba1c                    AS last_note_hba1c,
+             latest_note.working_professional     AS last_note_working_professional,
+             latest_note.location                 AS last_note_location,
+             latest_note.webinar_attended         AS last_note_webinar_attended,
+             latest_note.available_for_webinar    AS last_note_available_for_webinar,
+             latest_note.next_batch_joining       AS last_note_next_batch_joining,
+             latest_note.note                     AS last_note_text,
+             latest_note.follow_up_at             AS last_note_follow_up_at,
+             latest_call.id                       AS last_call_id,
+             latest_call.duration_sec             AS last_call_duration,
+             latest_call.recording_url            AS last_call_recording_url,
+             latest_call.started_at               AS last_call_started_at
+        FROM leads l
+        LEFT JOIN webinars w  ON w.id = l.webinar_id
+        LEFT JOIN crm_users u ON u.id = l.assigned_user_id
+        LEFT JOIN LATERAL (
+          SELECT id, confirmed_range, range_for, patient_age, takes_medicine,
+                 hba1c, working_professional, location, webinar_attended,
+                 available_for_webinar, next_batch_joining, note, follow_up_at
+            FROM lead_call_notes n
+           WHERE n.lead_id = l.id
+           ORDER BY n.created_at DESC
+           LIMIT 1
+        ) latest_note ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT id, duration_sec, recording_url, started_at
+            FROM calls c
+           WHERE c.lead_id = l.id
+             AND c.recording_url IS NOT NULL
+           ORDER BY c.started_at DESC
+           LIMIT 1
+        ) latest_call ON TRUE
+       WHERE l.last_note_outcome IN ('completed', 'not_interested')
+       ORDER BY l.last_note_at DESC NULLS LAST
+       LIMIT $1
+    `, [limit]);
+    res.json({ leads: rows, total: rows.length });
+  } catch (err) {
+    console.error('admin/completed-calls error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch completed calls.' });
+  }
+});
+
 /* ── PUT /api/admin/webinar-config ── */
 const configValidators = [
   body('next_webinar_at').optional().isISO8601(),

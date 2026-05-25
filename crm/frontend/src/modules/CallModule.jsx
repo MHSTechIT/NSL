@@ -9,7 +9,7 @@ import { useTimerSettings } from '../context/TimerSettingsContext';
 // appearance across the whole CRM.
 import idleBotRaw from '../assets/bot/robot-idle.json';
 import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
-import { playRobotClip } from '../utils/robotAudio';
+import { playRobotClip, bindAudioToRobotVolume } from '../utils/robotAudio';
 
 // Voice clips — each v1..v10 mp3 is a Tanglish read-aloud of the matching
 // greeting text. Vite resolves these imports to hashed URLs at build time
@@ -170,7 +170,11 @@ export default function CallModule({ jwt, onStartAutoCall, isActive }) {
     if (!greeting?.audio || isActive !== true) return;  // stay silent while paused / still loading
 
     const audio = new Audio(greeting.audio);
-    audio.volume = 0.9;
+    // Read the persisted Robot Voice slider AND subscribe to live
+    // changes so dragging the volume mid-greeting updates this clip in
+    // real time. teardown() runs in the cleanup at the bottom of this
+    // effect to detach the listener on unmount.
+    const teardownVolBind = bindAudioToRobotVolume(audio);
 
     let played = false;
     const tryPlay = () => {
@@ -209,6 +213,7 @@ export default function CallModule({ jwt, onStartAutoCall, isActive }) {
       audio.removeEventListener('ended', onEnded);
       if (unmountTimer) clearTimeout(unmountTimer);
       try { audio.pause(); audio.currentTime = 0; } catch (_) { /* ignore */ }
+      try { teardownVolBind(); } catch (_) { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, t.greetingBubbleFadeMs]);  // plays once the caller is confirmed active — never while paused

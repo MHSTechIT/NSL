@@ -6,6 +6,7 @@ import SalesPerformanceView   from './SalesPerformanceView';
 import SalesNotificationsView from './SalesNotificationsView';
 import SalesTimerView         from './SalesTimerView';
 import SalesAlertsView        from './SalesAlertsView';
+import SalesCompletedCallsView from './SalesCompletedCallsView';
 import UsersModule            from './UsersModule';
 
 const TABS = [
@@ -47,6 +48,19 @@ const TABS = [
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+    ),
+  },
+  {
+    // New tab — functionality to be wired in a follow-up. For now it
+    // renders a placeholder card so the tab is reachable and the layout
+    // is settled.
+    id: 'completed_calls',
+    label: 'Completed Calls',
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+        <polyline points="9 12 11 14 15 10"/>
       </svg>
     ),
   },
@@ -274,9 +288,11 @@ export default function SalesDashboardModule({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <style>{`
+        /* Always-on horizontal scrollbar hide so the tab pill stays
+           inside its white card at every viewport. Overflow itself is
+           always-on (set inline below). */
+        .sales-tabs-bar::-webkit-scrollbar { width: 0; height: 0; display: none; }
         @media (max-width: 640px) {
-          .sales-tabs-bar { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-          .sales-tabs-bar::-webkit-scrollbar { display: none; }
           .sales-tab-btn  { padding: 8px 10px !important; font-size: 0.75rem !important; gap: 5px !important; }
         }
       `}</style>
@@ -288,7 +304,13 @@ export default function SalesDashboardModule({
         position: 'sticky', top: 0, zIndex: 30,
         background: '#EDEAF8', padding: '6px 0',
       }}>
-        <div className="sales-tabs-bar" style={{ display: 'flex', gap: 4, background: '#fff', borderRadius: 16, padding: 6, boxShadow: '0 2px 12px rgba(91,33,182,0.08)', minWidth: 0 }}>
+        <div className="sales-tabs-bar" style={{
+          display: 'flex', gap: 4, background: '#fff', borderRadius: 16, padding: 6,
+          boxShadow: '0 2px 12px rgba(91,33,182,0.08)',
+          minWidth: 0, flexShrink: 1,
+          overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none', msOverflowStyle: 'none',
+        }}>
           {tabs.map(t => {
             const isActive = tab === t.id;
             return (
@@ -341,6 +363,7 @@ export default function SalesDashboardModule({
       {tab === 'logic'         && <SalesLeadsLogicView    token={token} />}
       {tab === 'notifications' && <SalesNotificationsView token={token} />}
       {tab === 'user'          && <UsersModule token={token} lockedDepartment={lockedDepartment} lockedManagerId={lockedManagerId} actionsSlotEl={slotEl} />}
+      {tab === 'completed_calls' && <SalesCompletedCallsView token={token} />}
       {tab === 'timer'         && <SalesTimerView         token={token} />}
       {tab === 'alerts'        && <SalesAlertsView        token={token} />}
     </div>

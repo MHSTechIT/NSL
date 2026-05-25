@@ -10,7 +10,8 @@ import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
 import pickTheCallMp3 from '../assets/audio/pick-the-call.mp3';
 import formFillMp3   from '../assets/audio/form-fill.mp3';
 import { setActivitySub } from '../utils/callerActivity';
-import { playRobotClip } from '../utils/robotAudio';
+import { playRobotClip, stopRobotClip, getRobotVolume } from '../utils/robotAudio';
+import { stopAllRobotGuideAudio } from '../components/RobotGuide';
 import useRobotNudge from '../hooks/useRobotNudge';
 import { useTimerSettings } from '../context/TimerSettingsContext';
 
@@ -21,17 +22,54 @@ const AGENT_REASON_PRIMARY = 'enna nanba en call attend pannala';
 const AGENT_REASON_NUDGE   = 'nanba irukkingala answer pannunga';
 const FORM_REASON_PRIMARY  = 'enna nanba en card fill pannala';
 const FORM_REASON_NUDGE    = 'nanba irukingala form complete pannunga';
+// Robot-bubble copy for the SmartFlow extension prompt. PRIMARY shows on
+// first open; NUDGE replaces it once the robot starts repeating the cue
+// (after extAlertNudgeIntervalMs of inaction).
+// Single short Tanglish line shown in the amber speech bubble on the
+// SmartFlow extension overlay. Same text for first open and every
+// subsequent nudge — no reminder counter, no logo, just the question.
+const EXT_CHECK_PRIMARY    = 'nanba irukkingala?';
+const EXT_CHECK_NUDGE      = 'nanba irukkingala?';
+
+// Subtag options for the "Reason for not interested" dropdown. value is
+// what gets persisted (snake_case), label is what the caller sees. Order
+// matches the most common call-decline patterns first. Must stay in sync
+// with ALLOWED_OUTCOME_SUBTAGS in backend/routes/caller.js.
+export const INTERESTED_SUBTAGS = [
+  { value: 'wrong_number',              label: 'Wrong number' },
+  { value: 'call_disconnected',         label: 'Call disconnected' },
+  { value: 'other_languages',           label: 'Other languages' },
+  { value: 'no_diabetes',               label: 'No diabetes' },
+  { value: 'no_sugar_interested',       label: 'No sugar — interested' },
+  { value: 'no_sugar_not_interested',   label: 'No sugar — not interested' },
+  { value: 'already_paid',              label: 'Already paid' },
+  { value: 'already_attended',          label: 'Already attended webinar' },
+  { value: 'not_available_for_webinar', label: 'Not available for webinar' },
+  { value: 'not_register',              label: 'Not registered' },
+  { value: 'just_for_knowledge',        label: 'Just for knowledge' },
+];
+
+// Subtag options for the second-DNP choice card. The fourth option (DNP)
+// is rendered separately so it can route through the original triggerDnp()
+// path instead of the JUNK-tagged not_interested path the other three use.
+export const DNP_JUNK_SUBTAGS = [
+  { value: 'switch_off',     label: 'Switch Off' },
+  { value: 'out_of_service', label: 'Out of Service' },
+  { value: 'no_ring',        label: 'No Ring' },
+];
 // Patch once at module load — canonical "both arms hanging at sides,
 // anatomically mirrored" pose used everywhere else in the CRM.
 const sadBotData = normalizeLoop(lockArmsDown(sadBotRaw));
 
 /* One-shot audio helper. Each reason card plays its prompt once when it
    opens. .play() may reject if the browser blocks autoplay; we swallow
-   the error rather than crashing. */
+   the error rather than crashing. Volume now reads from the persisted
+   Robot Voice slider in the account dropdown — was hardcoded 0.9 before. */
 function playClipOnce(src) {
   try {
     const audio = new Audio(src);
-    audio.volume = 0.9;
+    audio.volume = getRobotVolume();
+    if (audio.volume <= 0) return;
     audio.play().catch(() => {});
   } catch { /* no Audio API */ }
 }
@@ -126,7 +164,27 @@ const FORM_WINDOW_SECS = 45;
 // crm_users.is_active=FALSE). Only a super admin can resume the caller.
 const AGENT_RETRY_CAP  = 15;
 
-export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhaseChange }) {
+// Tata's webhooks are noisy: they routinely fire `customer.missed` and
+// sometimes `call.hangup` mid-call even while the audio is still bridged.
+// The legacy 8-second phantom filter only catches the immediate post-
+// answer ghost; it doesn't help on 3-minute calls where Tata sends a
+// stray miss event because of a CDR hiccup.
+//
+// This helper is the stricter gate: only believe the call actually
+// ended when at least ONE of these corroborating signals is present on
+// the merged `calls` row. The webhook handler updates these together,
+// so any genuine hangup will produce at least one of them.
+const TERMINAL_CALL_STATUS = new Set(['ended', 'failed', 'missed']);
+function callDefinitelyEnded(call) {
+  if (!call) return false;
+  if (call.ended_at)  return true;
+  if (call.hangup_by) return true;
+  if (call.duration_sec != null && Number(call.duration_sec) > 0) return true;
+  if (TERMINAL_CALL_STATUS.has(call.status)) return true;
+  return false;
+}
+
+export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhaseChange, restoreState, onStateChange }) {
   const t = useTimerSettings();
   const [fullName, setFullName]                   = useState(lead.full_name || '');
   const [phoneNumber]                             = useState(lead.whatsapp_number || '');
@@ -136,10 +194,13 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
   const [takesMedicine, setTakesMedicine]         = useState('');
   const [note, setNote]                           = useState('');
   const [hba1c, setHba1c]                             = useState('');
-  const [otherLanguages, setOtherLanguages]           = useState('');
+  /* Subtag picked from the "Reason for not interested" dropdown OR from
+     the second-DNP choice card. Backed by the lead_call_notes.outcome_subtag
+     column. When non-empty, forces the lead_tag to JUNK (override of the
+     classifier) and is shown as a secondary chip in Completed Calls. */
+  const [interestedSubtag, setInterestedSubtag]       = useState('');
   const [workingProfessional, setWorkingProfessional] = useState('');
   const [location, setLocation]                       = useState('');
-  const [alreadyPaid, setAlreadyPaid]                 = useState('');
   const [webinarAttended, setWebinarAttended]         = useState('');
   const [availableForWebinar, setAvailableForWebinar] = useState('');
   const [nextBatchJoining, setNextBatchJoining]       = useState('');
@@ -155,9 +216,69 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
   //       triggered" banner (treated as another customer-no-answer attempt,
   //       NOT a caller hangup).
   //   1 → second press saves the lead as not_picked and advances.
-  const [cutCount, setCutCount]                   = useState(0);
-  const [dnpRetry, setDnpRetry]                   = useState(false);
+  const [cutCount, setCutCount]                   = useState(() => restoreState?.cutCount ?? 0);
+  const [dnpRetry, setDnpRetry]                   = useState(() => restoreState?.dnpRetry ?? false);
   const [cuttingCall, setCuttingCall]             = useState(false);
+
+  /* ── Form-draft persistence ───────────────────────────────────────────
+     Browser refreshes during a call would otherwise wipe every value
+     the caller has typed. We snapshot every form field to localStorage
+     keyed by the lead id, restore on mount, and clear once the note is
+     successfully saved (in callOnSaved below) so re-opening a finished
+     lead from Completed Calls starts blank.
+
+     localStorage (not session) — survives a browser crash too. */
+  const draftKey = `mhs_form_draft_${lead?.id || 'x'}`;
+
+  // Restore — runs once when the lead changes.
+  useEffect(() => {
+    if (!lead?.id) return;
+    let draft = null;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) draft = JSON.parse(raw);
+    } catch { /* corrupt JSON → just skip */ }
+    if (!draft) return;
+    // Only set fields that have a non-empty saved value so we don't
+    // accidentally clobber a value the parent prefilled (e.g. fullName
+    // from the lead row).
+    if (draft.fullName            != null) setFullName(draft.fullName);
+    if (draft.confirmedRange      != null) setConfirmedRange(draft.confirmedRange);
+    if (draft.rangeFor            != null) setRangeFor(draft.rangeFor);
+    if (draft.patientAge          != null) setPatientAge(draft.patientAge);
+    if (draft.takesMedicine       != null) setTakesMedicine(draft.takesMedicine);
+    if (draft.note                != null) setNote(draft.note);
+    if (draft.hba1c               != null) setHba1c(draft.hba1c);
+    if (draft.workingProfessional != null) setWorkingProfessional(draft.workingProfessional);
+    if (draft.location            != null) setLocation(draft.location);
+    if (draft.webinarAttended     != null) setWebinarAttended(draft.webinarAttended);
+    if (draft.availableForWebinar != null) setAvailableForWebinar(draft.availableForWebinar);
+    if (draft.nextBatchJoining    != null) setNextBatchJoining(draft.nextBatchJoining);
+    if (draft.interested          != null) setInterested(draft.interested);
+    if (draft.interestedSubtag    != null) setInterestedSubtag(draft.interestedSubtag);
+    if (draft.wantsFollowUp       != null) setWantsFollowUp(draft.wantsFollowUp);
+    if (draft.followUpAtLocal     != null) setFollowUpAtLocal(draft.followUpAtLocal);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead?.id]);
+
+  // Save — runs whenever any tracked form field changes.
+  useEffect(() => {
+    if (!lead?.id) return;
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({
+        fullName, confirmedRange, rangeFor, patientAge, takesMedicine,
+        note, hba1c, workingProfessional, location,
+        webinarAttended, availableForWebinar, nextBatchJoining,
+        interested, interestedSubtag, wantsFollowUp, followUpAtLocal,
+      }));
+    } catch { /* localStorage full → drop the save silently */ }
+  }, [
+    draftKey,
+    fullName, confirmedRange, rangeFor, patientAge, takesMedicine,
+    note, hba1c, workingProfessional, location,
+    webinarAttended, availableForWebinar, nextBatchJoining,
+    interested, interestedSubtag, wantsFollowUp, followUpAtLocal,
+  ]);
 
   /* ── Auto-call state machine ──────────────────────────────────────────
      States:
@@ -174,34 +295,122 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
        dnp_alert         — centered overlay "Lead moved to DNP", auto-saves
        auto_paused       — centered overlay "5 attempts hit, moving on", auto-saves
   */
-  // Initial phase decided by whether the parent already kicked off a call:
-  //   – No last_call_id → fresh start. Land directly on ext_check overlay
-  //     ("Is your SmartFlow extension turned on?"). The legacy idle banner
-  //     with its own Start Auto Call button is never shown.
-  //   – last_call_id present → auto-advance flow (post-DNP/Complete). Skip
-  //     ext_check entirely and reflect the in-flight call as agent_ringing_1.
-  const [callPhase, setCallPhase] = useState(() =>
-    lead?.last_call_id ? 'agent_ringing_1' : 'ext_check'
-  );
+  // Initial phase decided in priority order:
+  //   1. restoreState.phase   — the snapshot saved before a browser
+  //      refresh. Highest priority so a refresh during ext_check /
+  //      form_window / dnp_choice / etc. drops the caller back on the
+  //      exact same card.
+  //   2. lead.last_call_id    — no snapshot, but a call is already
+  //      in flight (auto-advance post-DNP/Complete). Reflect as
+  //      agent_ringing_1.
+  //   3. ext_check            — fresh start.
+  // Whitelist guard: only accept restored phases the modal actually
+  // knows how to render — otherwise fall through to the lead-based
+  // default. Without this, a stale snapshot from a previous build
+  // (e.g. a removed phase) would blank the modal.
+  const _VALID_PHASES = new Set([
+    'idle','ext_check','agent_ringing_1','agent_ringing_2','agent_reason_card',
+    'customer_ringing','customer_on_call','recall_ringing',
+    'form_window','form_reason_card','dnp_alert','dnp_choice','auto_paused',
+  ]);
+  const [callPhase, setCallPhase] = useState(() => {
+    const p = restoreState?.phase;
+    if (p && _VALID_PHASES.has(p)) return p;
+    return lead?.last_call_id ? 'agent_ringing_1' : 'ext_check';
+  });
   // Sticky flag: true once the customer has answered AT LEAST ONCE during
   // this lead's modal session. Used to gate the Complete Call button — the
   // caller can't submit until the customer actually attends the call.
   // Survives recall flows (resetCallSignalForNewAttempt does NOT clear it),
   // resets only when the modal remounts (i.e. a new lead).
-  const [customerAnsweredOnce, setCustomerAnsweredOnce] = useState(false);
-  const [agentAttempts, setAgentAttempts]     = useState(0);   // SmartFlow misses this session (0..5)
-  const [customerAttempt, setCustomerAttempt] = useState(1);   // 1 or 2 (whole-call retry)
+  // Restored from snapshot on browser-refresh so DNP visibility +
+  // Complete-button enablement stay correct after reload.
+  const [customerAnsweredOnce, setCustomerAnsweredOnce] = useState(() => !!restoreState?.customerAnsweredOnce);
+  // agentAttempts PRESERVES across refresh — it's the missed-ring
+  // retry counter that drives the agent_ringing_1 → agent_ringing_2
+  // → reason_card progression. Resetting it on refresh would cause
+  // the post-refresh 35s synthetic timeout to fire handleAgentMissed
+  // with attempts=0, jumping back to agent_ringing_2 AND placing a
+  // duplicate Tata call (the "Triggering first call again" double-dial
+  // bug). The phase + counters must move together so the state machine
+  // continues from where it was, not from scratch.
+  const [agentAttempts, setAgentAttempts]     = useState(() => {
+    const v = Number(restoreState?.agentAttempts);
+    return Number.isFinite(v) && v >= 0 ? v : 0;
+  });
+  // customerAttempt PRESERVES across refresh — it's a PROGRESS counter
+  // (which whole-call retry we're on). retryCallToCustomer bumps this
+  // to 2 when the customer misses the first attempt; resetting on
+  // refresh would silently demote it to 1, mis-label the retry banner
+  // as "first call", and could re-fire the retry path.
+  const [customerAttempt, setCustomerAttempt] = useState(() => restoreState?.customerAttempt ?? 1);
   const [agentReasons, setAgentReasons]       = useState([]);  // appended every reason submit
   const [agentReason, setAgentReason]         = useState('');
   const [delayReasons, setDelayReasons]       = useState([]);
   const [delayReason, setDelayReason]         = useState('');
-  const [formTimerSecs, setFormTimerSecs]     = useState(0);
+  // Form-window timer — restores from the saved deadline (epoch ms) so a
+  // refresh resumes the countdown from the right second instead of
+  // restarting at FORM_WINDOW_SECS. Already-expired deadlines collapse
+  // to 0 and the modal's expiry effect will fire normally.
+  const [formTimerSecs, setFormTimerSecs]     = useState(() => {
+    const dl = restoreState?.formTimerDeadline;
+    if (!dl) return 0;
+    return Math.max(0, Math.floor((dl - Date.now()) / 1000));
+  });
   const [activeCallId, setActiveCallId]       = useState(lead?.last_call_id || null);
+  // Phase-timer deadline (epoch ms) for the synthetic 35s / 50s
+  // ring-timeout safety net. Persists across refresh so the timer
+  // resumes from its ORIGINAL deadline instead of restarting at 35s
+  // every reload — without this, a refresh during agent_ringing_1
+  // grants the call a fresh 35s window before auto-redial, which then
+  // fires handleAgentMissed → setCallPhase('agent_ringing_2') +
+  // postStartCall (the spurious duplicate Tata call the user saw as
+  // "Triggering the first call again" right after refresh). Scoped
+  // to its owning phase so a leftover deadline from agent_ringing_1
+  // doesn't fire stale on the agent_ringing_2 useEffect re-run.
+  const [phaseDeadline, setPhaseDeadline]     = useState(() => {
+    const dl = Number(restoreState?.phaseDeadline);
+    const ph = restoreState?.phase;
+    if (Number.isFinite(dl) && dl > 0 && ph) return { phase: ph, when: dl };
+    return null;
+  });
 
-  // Refs mirror state for closures inside SSE/poll callbacks
+  /* Modal-state snapshot — bubbles every state change up to the parent
+     (AssignedLeadsModule) which writes it to sessionStorage. Captures
+     every piece of state needed to redraw the same card after a
+     refresh: phase, DNP counter, retry counters, dnpRetry flag, and
+     the form-window deadline (epoch ms so the countdown resumes from
+     the right second).
+
+     Placed AFTER every state it reads is declared — earlier placement
+     hits a temporal-dead-zone ReferenceError because the dep array
+     evaluates `callPhase` / `formTimerSecs` etc. before their useState
+     lines have executed on the first render. */
+  useEffect(() => {
+    if (typeof onStateChange !== 'function') return;
+    onStateChange({
+      phase:               callPhase,
+      cutCount,
+      customerAttempt,
+      agentAttempts,
+      dnpRetry,
+      customerAnsweredOnce,
+      formTimerDeadline:   formTimerSecs > 0 ? Date.now() + formTimerSecs * 1000 : null,
+      phaseDeadline:       (phaseDeadline && phaseDeadline.phase === callPhase) ? phaseDeadline.when : null,
+    });
+  }, [callPhase, cutCount, customerAttempt, agentAttempts, dnpRetry, customerAnsweredOnce, formTimerSecs, phaseDeadline, onStateChange]);
+
+  // Refs mirror state for closures inside SSE/poll callbacks.
+  //   agentAttemptsRef preserves the restored value so the post-refresh
+  //   synthetic ring-timeout in handleAgentMissed reads the correct
+  //   attempt and advances to reason-card or auto-paused, not back to
+  //   agent_ringing_2 + duplicate postStartCall.
+  //   customerAttemptRef preserves the restored value so post-refresh
+  //   SSE handlers see attempt=2 if the retry had already kicked off,
+  //   instead of falsely reverting to 1.
   const callPhaseRef       = useRef(callPhase);
-  const agentAttemptsRef   = useRef(0);
-  const customerAttemptRef = useRef(1);
+  const agentAttemptsRef   = useRef(Number(restoreState?.agentAttempts) || 0);
+  const customerAttemptRef = useRef(restoreState?.customerAttempt ?? 1);
   const wasAgentAnsweredRef = useRef(false);
   const wasCustomerAnsweredRef = useRef(false);
   // Mirror of dnpRetry state for closures inside SSE/poll callbacks. Tells
@@ -211,6 +420,12 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
   const dnpRetryRef = useRef(false);
   const lastSeenSigsRef    = useRef(new Set());
   const customerMissedTimerRef = useRef(null);
+  /* Latest call object seen by handleCallEvent. Lets long-lived
+     callbacks (e.g. the 3-second customer.missed deferred retry) read
+     the freshest call state instead of the stale `call` they captured
+     at register time — so a customer who's still ringing isn't
+     retried just because Tata fired a phantom customer.missed earlier. */
+  const latestCallRef          = useRef(null);
   // Earliest started_at we accept signals from in the polling fallback.
   // Set every time we kick off a fresh /calls/start so old completed calls'
   // end-signals don't leak into the current attempt's aggregation. When the
@@ -258,6 +473,9 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     if (callPhase === 'agent_reason_card') playRobotClip(21);
     else if (callPhase === 'form_reason_card') playRobotClip(22);
     else if (callPhase === 'dnp_alert') playRobotClip(51);
+    // ext_check intentionally silent on first open per request — only the
+    // robot nudge ticks (after extAlertNudgeIntervalMs) speak via the
+    // extNudgeCount effect below, which keeps the auto-pause guard intact.
   }, [callPhase]);
 
   /* Robot repeat-nudges for the two reason cards. While a card is open and the
@@ -282,10 +500,12 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     onExhausted: () => { setCallPhase('auto_paused'); saveAutoPaused(); },
   });
 
-  /* SmartFlow-extension alert ("Is your extension on?") — if the caller never
-     answers it the account auto-pauses after the configured nudges, same idle
-     treatment as the Call / Assigned pages. */
-  useRobotNudge({
+  /* SmartFlow-extension alert ("Is your extension on?") — if the caller
+     never answers it the account auto-pauses after the configured nudges,
+     same idle treatment as the Call / Assigned pages. We now also EXPOSE
+     the tick count so the overlay can show a visible robot bubble + audio
+     cue on each repeat (matching the agent/form reason-card UX). */
+  const { count: extNudgeCount } = useRobotNudge({
     active: callPhase === 'ext_check',
     intervalMs: t.extAlertNudgeIntervalMs,
     maxRepeats: t.extAlertNudgeCount,
@@ -299,9 +519,12 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     },
   });
 
-  /* Voice the reason-card repeat-nudges (clips 49 / 50). */
+  /* Voice the reason-card repeat-nudges (clips 49 / 50) and the
+     SmartFlow-extension nudge (clip 40, reused from CallModule's idle
+     nudge — generic "do something" prompt). */
   useEffect(() => { if (agentNudgeCount >= 1) playRobotClip(49); }, [agentNudgeCount]);
   useEffect(() => { if (formNudgeCount  >= 1) playRobotClip(50); }, [formNudgeCount]);
+  useEffect(() => { if (extNudgeCount   >= 1) playRobotClip(40); }, [extNudgeCount]);
 
   /* Activity sub-tag — maps the call phase to the single-tag activity log:
        agent/form reason cards → REASON_CARD
@@ -372,6 +595,13 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     if (call?.id) {
       setActiveCallId(call.id);
       activeCallIdRef.current = call.id;
+    }
+    // Track latest real call object so deferred callbacks (like the
+    // 3-second customer.missed retry timer) can re-check the truth
+    // when they fire. Skip synthetic events — they carry no real
+    // timestamp columns and would clobber the last valid snapshot.
+    if (call && !(typeof call.id === 'string' && call.id.startsWith('synthetic-'))) {
+      latestCallRef.current = call;
     }
 
     const phase = callPhaseRef.current;
@@ -444,15 +674,25 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
       //       → defer the retry decision 3 s; if customer.answered arrives
       //          during the wait, cancel the retry entirely.
       if (customerAnswered) {
-        // Phantom filter: Tata fires a spurious customer.missed within ~1 s
-        // of customer.answered on click-to-call. If BOTH timestamps are
-        // present on this row AND the gap is short, it's the phantom →
-        // ignore. Otherwise (gap ≥ 8 s, OR customer_answered_at missing
-        // because this row is a recall that only carries agent.answered)
-        // treat as a real customer disconnect → fire form_window.
+        // Phantom filter (legacy, narrow): Tata fires a spurious
+        // customer.missed within ~1 s of customer.answered on click-to-
+        // call. If BOTH timestamps are present AND the gap is short,
+        // it's the immediate-post-answer ghost → ignore.
         const ans  = call?.customer_answered_at ? new Date(call.customer_answered_at).getTime() : null;
         const miss = call?.customer_missed_at   ? new Date(call.customer_missed_at).getTime()   : null;
         if (ans != null && miss != null && (miss - ans) < 8000) return;
+
+        // Stricter mid-call filter: Tata also fires stray customer.missed
+        // events MINUTES into long calls (CDR hiccups, brief audio drops,
+        // re-bridging). The 8-second guard above doesn't catch those.
+        // Refuse to treat this as a real customer disconnect unless the
+        // calls row carries corroborating evidence the call actually
+        // terminated (ended_at, hangup_by, duration_sec, or terminal
+        // status). The next poll will re-check, so a genuine hangup that
+        // briefly arrives missed-only will land form_window on the very
+        // next tick once ended_at lands too.
+        if (!callDefinitelyEnded(call)) return;
+
         if (phase !== 'form_window' && phase !== 'form_reason_card') {
           setCallPhase('form_window');
           setFormTimerSecs(prev => (prev > 0 ? prev : FORM_WINDOW_SECS));
@@ -477,12 +717,25 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
       if (PRE_CUSTOMER.includes(phase) || POST_DECISION.includes(phase)) return;
       // Race protection: defer the retry. If customer.answered arrives
       // within 3 s OR phase moves into a non-retryable state, abort.
+      // Capture whether the originating event was synthetic (the 50 s
+      // phase-timeout safety net) — synthetic events ARE the "ring time
+      // exhausted, assume miss" trigger, so they should retry even
+      // without a corroborating ended_at on the calls row.
+      const cameFromSynthetic = typeof call?.id === 'string' && call.id.startsWith('synthetic-');
       if (customerMissedTimerRef.current) clearTimeout(customerMissedTimerRef.current);
       customerMissedTimerRef.current = setTimeout(() => {
         customerMissedTimerRef.current = null;
         if (wasCustomerAnsweredRef.current) return;
         const p = callPhaseRef.current;
         if (PRE_CUSTOMER.includes(p) || POST_DECISION.includes(p)) return;
+        // The fix for "second call triggers while customer is still
+        // ringing": a REAL customer.missed during ringing is Tata's
+        // known phantom (fires before the customer actually picks up).
+        // Refuse to retry unless the call has truly ended — ended_at,
+        // hangup_by, duration_sec, or a terminal status on the latest
+        // call row. Synthetic events (phase timeout) bypass this since
+        // they're the "Tata never fired anything, assume miss" signal.
+        if (!cameFromSynthetic && !callDefinitelyEnded(latestCallRef.current)) return;
         if (customerAttemptRef.current < 2) {
           retryCallToCustomer();
         } else {
@@ -510,6 +763,15 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
 
     if (eventType === 'call.hangup') {
       if (customerAnswered) {
+        // Tata's call.hangup can also fire spuriously mid-call (brief
+        // bridge resets, leg blips, late-arriving CDR events). Require
+        // the same corroborating evidence as customer.missed — at least
+        // one of ended_at / hangup_by / duration_sec / terminal status —
+        // before treating it as a real terminal hangup. Otherwise this
+        // turns a healthy 3-minute conversation into a 45-second form
+        // dash for the caller.
+        if (!callDefinitelyEnded(call)) return;
+
         if (phase !== 'form_window' && phase !== 'form_reason_card') {
           setCallPhase('form_window');
           setFormTimerSecs(prev => (prev > 0 ? prev : FORM_WINDOW_SECS));
@@ -671,10 +933,45 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
       customer_ringing: 50000,
     };
     const ms = TIMEOUTS[callPhase];
-    if (!ms) return;
+    if (!ms) {
+      // Non-ringing phase — clear any stale deadline so it doesn't
+      // leak into the snapshot for an unrelated phase.
+      if (phaseDeadline != null) setPhaseDeadline(null);
+      return;
+    }
+    // Pick (or seed) the deadline. Scoped by phase: a leftover deadline
+    // from a previous ring phase (e.g. agent_ringing_1) is ignored when
+    // a new ring phase starts (agent_ringing_2) so the new timer gets
+    // a fresh 35s. On a restored mount where the deadline matches the
+    // restored phase, we reuse it so the timer fires at the ORIGINAL
+    // moment, not 35s later — preventing the post-refresh duplicate-
+    // call bug.
+    let deadline = (phaseDeadline && phaseDeadline.phase === callPhase)
+      ? phaseDeadline.when
+      : null;
+    if (!deadline) {
+      deadline = Date.now() + ms;
+      setPhaseDeadline({ phase: callPhase, when: deadline });
+    }
+    const remaining = Math.max(0, deadline - Date.now());
     phaseTimeoutRef.current = setTimeout(() => {
       phaseTimeoutRef.current = null;
       const p = callPhaseRef.current;
+      // Diagnostic: spell out exactly when/why we synthesize a missed
+      // event. Pairs with the backend [webhook→sse] log so an empty
+      // backend log + this line = "no Tata webhook arrived, safety
+      // net fired", while a backend [webhook→sse] line + this absent
+      // = "real webhook drove the transition".
+      try {
+        // eslint-disable-next-line no-console
+        console.warn('[caller] synthetic phase-timeout fired', {
+          phase: p,
+          leadId: lead?.id,
+          deadlineMs: deadline,
+          plannedMs: ms,
+          actualRemainingMs: remaining,
+        });
+      } catch { /* console may be stripped */ }
       // Build a synthetic call object with a unique id so the dedup signature
       // doesn't collide with any real event for the same call.
       const synthetic = {
@@ -693,7 +990,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
         // signal so handleAgentMissed runs (auto-redial / reason card).
         handleCallEvent('agent.missed', synthetic);
       }
-    }, ms);
+    }, remaining);
     return () => {
       if (phaseTimeoutRef.current) {
         clearTimeout(phaseTimeoutRef.current);
@@ -891,7 +1188,13 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
         await postStartCall();
         setCutCount(1);
       } else {
-        await triggerDnp();
+        // Second DNP press: show the 4-option choice card instead of
+        // immediately saving 'not_picked'. The caller picks one of
+        // Switch Off / Out of Service / No Ring / DNP — the first three
+        // route to triggerDnpJunk() (saves not_interested + JUNK tag +
+        // subtag, lands in Completed Calls); DNP routes to the original
+        // triggerDnp() (saves not_picked, lands in Do Not Picked).
+        setCallPhase('dnp_choice');
       }
     } catch (e) {
       setRecallToast(e?.message || 'DNP failed');
@@ -939,12 +1242,21 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
   function callOnSaved(outcome, opts) {
     if (savedRef.current) return;
     savedRef.current = true;
-    const leadTag = classifyLeadTag({
-      confirmedRange, otherLanguages, hba1c, takesMedicine, alreadyPaid,
+    // Drop the localStorage form draft now that the note is committed —
+    // we don't want yesterday's saved-and-done lead to repopulate if
+    // someone reopens it from the Completed Calls list later.
+    try { localStorage.removeItem(`mhs_form_draft_${lead?.id || 'x'}`); } catch { /* ignore */ }
+    // Classifier output for the "happy path" — otherwise overridden to
+    // JUNK whenever a subtag is present (either picked from the Not
+    // Interested dropdown OR forced by the second-DNP card via opts).
+    const classifierTag = classifyLeadTag({
+      confirmedRange, hba1c, takesMedicine,
       webinarAttended, availableForWebinar, nextBatchJoining, patientAge,
       workingProfessional,
     });
-    onSaved?.(outcome, { ...(opts || {}), lead_tag: leadTag });
+    const subtag = (opts && opts.outcome_subtag) || interestedSubtag || null;
+    const leadTag = subtag ? 'JUNK' : classifierTag;
+    onSaved?.(outcome, { ...(opts || {}), lead_tag: leadTag, outcome_subtag: subtag });
   }
 
   /* Guarded close handler — if the customer was on the call at any point,
@@ -1011,6 +1323,53 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     setTimeout(() => callOnSaved('not_picked', { autoAdvance: true }), t.dnpAutoAdvanceDelayMs);
   }
 
+  /* JUNK route for the second-DNP card. The three non-DNP options
+     (Switch Off / Out of Service / No Ring) save as outcome=not_interested
+     with lead_tag=JUNK and the picked subtag, so the lead lands in
+     Completed Calls (NOT Do Not Picked) carrying a "JUNK · <reason>" chip
+     that the team can later analyse. */
+  async function triggerDnpJunk(subtag) {
+    if (!subtag) return;
+    // Per spec: skip every intermediate overlay (no Tanglish bubble, no
+    // robot voice, no countdown card) and hand off DIRECTLY to the
+    // parent's celebration overlay — that screen already owns the 10 s
+    // ring + Skip wait / Stop buttons, so reproducing them here would
+    // double up.
+    try { stopRobotClip();          } catch { /* ignore */ }
+    try { stopAllRobotGuideAudio(); } catch { /* ignore */ }
+    if (customerMissedTimerRef.current) {
+      clearTimeout(customerMissedTimerRef.current);
+      customerMissedTimerRef.current = null;
+    }
+    const attempts = Math.max(1, customerAttemptRef.current);
+    try {
+      await fetch(`/api/caller/leads/${lead.id}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({
+          full_name: (fullName || lead.full_name || '').trim() || null,
+          outcome:   'not_interested',
+          note:      buildNoteWithDelays(
+            `Auto-marked: ${subtag.replace(/_/g, ' ')} after ${attempts} attempt${attempts !== 1 ? 's' : ''}.`,
+            delayReasons,
+            agentReasons,
+          ),
+          call_id:        activeCallIdRef.current || lead.last_call_id || null,
+          outcome_subtag: subtag,
+          lead_tag:       'JUNK',
+          interested:     'no',
+        }),
+      });
+    } catch (_) {}
+    fetch(`/api/caller/leads/${lead.id}/hangup`, {
+      method: 'POST', headers: { Authorization: `Bearer ${jwt}` },
+    }).catch(() => {});
+    // No setTimeout — advance immediately. AssignedLeadsModule will
+    // render its celebration overlay (with the 10 s cooldown) on top of
+    // the next lead, picking up lead_tag=JUNK from opts.
+    callOnSaved('not_interested', { autoAdvance: true, outcome_subtag: subtag, lead_tag: 'JUNK' });
+  }
+
   async function saveAutoPaused() {
     try {
       await fetch(`/api/caller/leads/${lead.id}/note`, {
@@ -1053,7 +1412,9 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
       return 'Pick Interested — Yes or No.';
     }
     if (noOverride) {
-      if (!note.trim())  return 'Add a brief note about the not-interested reason.';
+      // Not Interested path: subtag is the ONLY mandatory field.
+      // Everything above (range / age / medicine / etc.) is optional.
+      if (!interestedSubtag) return 'Pick a reason for "Not interested".';
       return null;
     }
     if (followUpOnly) {
@@ -1065,10 +1426,8 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     if (!rangeFor)              return 'Pick whether the value is for personal or family use.';
     if (!patientAge)            return 'Pick the patient age range.';
     if (!takesMedicine)         return 'Pick whether the patient takes medicine.';
-    if (!otherLanguages)        return 'Pick whether the patient speaks other languages.';
     if (!workingProfessional)   return 'Pick the patient’s occupation.';
     if (!location)              return 'Pick the patient’s location.';
-    if (!alreadyPaid)           return 'Pick whether the patient has already paid.';
     if (!webinarAttended)       return 'Pick whether the patient attended the webinar.';
     if (!availableForWebinar)   return 'Pick whether the patient is available for the next webinar.';
     if (!nextBatchJoining)      return 'Pick whether the patient is joining the next batch.';
@@ -1138,10 +1497,8 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
           patient_age:           patientAge,
           takes_medicine:        takesMedicine || null,
           hba1c:                 hba1c || null,
-          other_languages:       otherLanguages || null,
           working_professional:  workingProfessional || null,
           location:              location || null,
-          already_paid:          alreadyPaid || null,
           webinar_attended:      webinarAttended || null,
           available_for_webinar: availableForWebinar || null,
           next_batch_joining:    nextBatchJoining || null,
@@ -1150,6 +1507,13 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
           follow_up_at:          followUpAt,
           call_id:               activeCallIdRef.current || lead.last_call_id || null,
           interested:            interested || null,
+          // Subtag persists the specific decline reason picked from the
+          // Not Interested dropdown. JUNK is forced server-side when set.
+          outcome_subtag:        interestedSubtag || null,
+          // The classifier override mirrors what callOnSaved computes so
+          // the leads.lead_tag column reflects the same JUNK badge the
+          // caller saw on screen before saving.
+          lead_tag:              interestedSubtag ? 'JUNK' : null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1169,7 +1533,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
   }
 
   /* ── Render ────────────────────────────────────────────────────────── */
-  const overlayPhase = ['ext_check', 'agent_reason_card', 'form_reason_card', 'dnp_alert', 'auto_paused']
+  const overlayPhase = ['ext_check', 'agent_reason_card', 'form_reason_card', 'dnp_alert', 'dnp_choice', 'auto_paused']
     .includes(callPhase) ? callPhase : null;
 
   return (
@@ -1218,25 +1582,49 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
             <LeadTagBadge
               fields={{
                 confirmedRange,
-                otherLanguages,
                 hba1c,
                 takesMedicine,
-                alreadyPaid,
                 webinarAttended,
                 availableForWebinar,
                 nextBatchJoining,
                 patientAge,
                 workingProfessional,
               }}
+              forceTag={interestedSubtag ? 'JUNK' : null}
             />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {/* DNP ("Did Not Pick") makes no sense while the customer is
-                actually on the call — hide it during `customer_on_call`
-                so the caller can't accidentally hang up a live call. The
-                button comes back the moment the customer disconnects or
-                we move to the form_window / ringing phases. */}
-            {callPhase !== 'customer_on_call' && (
+            {/* DNP button visibility — single allowlist of phases where
+                the button makes sense:
+                  • customer_ringing — agent is bridged, customer not yet
+                    answered; DNP fast-forwards the wait.
+                  • form_window / form_reason_card — call ended; DNP here
+                    is the second-press path that opens the JUNK choice
+                    card (Switch Off / Out of Service / No Ring / DNP).
+                Every other phase HIDES the button entirely:
+                  • idle / ext_check / agent_ringing_* / agent_reason_card
+                    / recall_ringing — agent hasn't picked up for this
+                    attempt yet, so DNP is meaningless.
+                  • customer_on_call — live call; we can't let the caller
+                    accidentally hang up.
+                  • dnp_alert / dnp_choice / auto_paused — overlay covers
+                    the form anyway. */}
+            {(() => {
+              const DNP_VISIBLE_PHASES = new Set([
+                'customer_ringing',
+                'form_window',
+                'form_reason_card',
+              ]);
+              if (!DNP_VISIBLE_PHASES.has(callPhase)) return null;
+              // Once the customer has connected on this lead, DNP no
+              // longer makes sense — the call WAS picked up at some
+              // point, so "Did Not Pick" is the wrong label. Caller
+              // should finish the form (or hit Recall for a callback)
+              // instead. customerAnsweredOnce stays true for the whole
+              // lifecycle of the lead modal so the button stays hidden
+              // even on the form_window after the customer hangs up.
+              if (customerAnsweredOnce) return null;
+              return (
             <button
               onClick={handleCutCall}
               disabled={cuttingCall}
@@ -1262,7 +1650,8 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
               </svg>
               {cuttingCall ? 'DNP…' : 'DNP'}
             </button>
-            )}
+              );
+            })()}
             {/* Recall is only actionable during the 30-s form_window — i.e.,
                 customer disconnected and the caller has the timer running.
                 During ringing / on-call phases, recalling would interrupt a
@@ -1379,7 +1768,10 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
             <RadioRow options={RANGE_FOR} value={rangeFor} onChange={setRangeFor} />
           </FieldRow>
 
-          <FieldRow label="5. Patient Age" mandatory={detailsMandatory}>
+          <FieldRow
+            label={<>5. Patient Age <RegisteredAs value={lead.age_group} /></>}
+            mandatory={detailsMandatory}
+          >
             <RadioRow options={AGE_BUCKETS} value={patientAge} onChange={setPatientAge} wrap />
           </FieldRow>
 
@@ -1387,40 +1779,40 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
             <RadioRow options={HBA1C} value={hba1c} onChange={setHba1c} wrap />
           </FieldRow>
 
-          <FieldRow label="7. Medicine" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
+          <FieldRow
+            label={<>7. Medicine <RegisteredAs value={lead.on_medication} /></>}
+            mandatory={detailsMandatory}
+            hint={detailsMandatory ? null : '(optional)'}
+          >
             <RadioRow options={MEDICINE} value={takesMedicine} onChange={setTakesMedicine} />
           </FieldRow>
 
-          <FieldRow label="8. Other Languages" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
-            <RadioRow options={YES_NO} value={otherLanguages} onChange={setOtherLanguages} />
-          </FieldRow>
-
-          <FieldRow label="9. Working Professional" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
+          <FieldRow
+            label={<>8. Working Professional <RegisteredAs value={lead.occupation} /></>}
+            mandatory={detailsMandatory}
+            hint={detailsMandatory ? null : '(optional)'}
+          >
             <SelectField value={workingProfessional} onChange={setWorkingProfessional}
               options={WORKING_PROFESSIONAL} placeholder="Select occupation…" />
           </FieldRow>
 
-          <FieldRow label="10. Location" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
+          <FieldRow label="9. Location" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
             <SelectField value={location} onChange={setLocation} options={LOCATIONS} placeholder="Select location…" />
           </FieldRow>
 
-          <FieldRow label="11. Already Paid" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
-            <RadioRow options={YES_NO} value={alreadyPaid} onChange={setAlreadyPaid} />
-          </FieldRow>
-
-          <FieldRow label="12. Webinar Attended" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
+          <FieldRow label="10. Webinar Attended" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
             <RadioRow options={YES_NO} value={webinarAttended} onChange={setWebinarAttended} />
           </FieldRow>
 
-          <FieldRow label="13. Available for Webinar" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
+          <FieldRow label="11. Available for Webinar" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
             <RadioRow options={YES_NO} value={availableForWebinar} onChange={setAvailableForWebinar} />
           </FieldRow>
 
-          <FieldRow label="14. Next Batch Joining" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
+          <FieldRow label="12. Next Batch Joining" mandatory={detailsMandatory} hint={detailsMandatory ? null : '(optional)'}>
             <RadioRow options={YES_NO} value={nextBatchJoining} onChange={setNextBatchJoining} />
           </FieldRow>
 
-          <FieldRow label="15. Note" mandatory={followUpOnly || noOverride} hint={(followUpOnly || noOverride) ? null : '(optional)'} wide>
+          <FieldRow label="13. Note" mandatory={followUpOnly || noOverride} hint={(followUpOnly || noOverride) ? null : '(optional)'} wide>
             <textarea value={note} onChange={e => setNote(e.target.value)}
               placeholder="Anything noteworthy from the conversation…" rows={3}
               style={{
@@ -1433,7 +1825,7 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
           </FieldRow>
 
           {wantsFollowUp && (
-            <FieldRow label="16. Follow-up schedule" mandatory wide>
+            <FieldRow label="14. Follow-up schedule" mandatory wide>
               <DateTimePicker value={followUpAtLocal} onChange={setFollowUpAtLocal}
                 placeholder="Pick the callback date & time" />
             </FieldRow>
@@ -1506,6 +1898,24 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
               Follow Up
             </button>
           </div>
+
+          {/* Reason for "Not interested" — only visible when the caller
+              toggled NO. Mandatory in that case (validate() blocks save
+              when missing). Picking a reason forces lead_tag=JUNK via
+              the override path in callOnSaved, and the lead lands in
+              Completed Calls with a "JUNK · <reason>" chip. */}
+          {interested === 'no' && (
+            <div className="lcn-wide" style={{ marginTop: 14 }}>
+              <FieldRow label="Reason for not interested" mandatory wide>
+                <SelectField
+                  value={interestedSubtag}
+                  onChange={setInterestedSubtag}
+                  options={INTERESTED_SUBTAGS}
+                  placeholder="Pick a reason…"
+                />
+              </FieldRow>
+            </div>
+          )}
         </div>
 
         {/* Submit */}
@@ -1563,6 +1973,15 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
           formBubbleText={formNudgeCount >= 1 ? FORM_REASON_NUDGE : FORM_REASON_PRIMARY}
           agentBubblePulse={agentNudgeCount}
           formBubblePulse={formNudgeCount}
+          extBubbleText={extNudgeCount >= 1 ? EXT_CHECK_NUDGE : EXT_CHECK_PRIMARY}
+          extBubblePulse={extNudgeCount}
+          /* Second-DNP choice card props. onChoose receives the picked
+             subtag or the literal 'dnp' (the legacy path). */
+          onDnpChoose={(value) => {
+            if (value === 'dnp') triggerDnp();
+            else triggerDnpJunk(value);
+          }}
+          dnpJunkSubtags={DNP_JUNK_SUBTAGS}
         />
       )}
     </div>
@@ -1711,6 +2130,8 @@ function CenteredOverlay({
   delayReason, onDelayReasonChange, onDelayReasonSubmit, totalWindow,
   agentAttempts, retryCap,
   agentBubbleText, formBubbleText, agentBubblePulse = 0, formBubblePulse = 0,
+  extBubbleText, extBubblePulse = 0,
+  onDnpChoose, dnpJunkSubtags = [],
 }) {
   /* Robot speech-bubble text auto-hides 10 s after it (re)appears — the
      functional card stays. `bubbleShown` flips back true whenever the phase
@@ -1720,7 +2141,7 @@ function CenteredOverlay({
     setBubbleShown(true);
     const id = setTimeout(() => setBubbleShown(false), 10000);
     return () => clearTimeout(id);
-  }, [phase, agentBubblePulse, formBubblePulse]);
+  }, [phase, agentBubblePulse, formBubblePulse, extBubblePulse]);
 
   const cardStyle = {
     width: '100%', maxWidth: 440,
@@ -1750,6 +2171,46 @@ function CenteredOverlay({
   if (phase === 'ext_check') {
     return wrap(
       <div style={cardStyle}>
+        {/* Robot speech bubble — surfaces a friendly nudge above the title
+            when the caller has been sitting on the prompt without acting.
+            Visible from the first nudge tick onward (extBubblePulse >= 1),
+            re-pops each repeat thanks to the keyed bubbleShown effect, and
+            never auto-presses Yes & Proceed — the only paths out remain
+            the two manual buttons or the silent self-pause once the nudge
+            count exhausts. */}
+        {extBubblePulse >= 1 && extBubbleText && (
+          <div
+            key={`ext-bubble-${extBubblePulse}`}
+            style={{
+              position: 'relative',
+              background: 'linear-gradient(135deg, #FEF3C7, #FDE68A)',
+              color: '#78350F',
+              padding: '12px 16px',
+              borderRadius: 14,
+              marginBottom: 18,
+              fontFamily: 'Outfit, sans-serif',
+              fontSize: '0.86rem',
+              fontWeight: 700,
+              lineHeight: 1.35,
+              textAlign: 'center',
+              border: '1px solid rgba(245,158,11,0.45)',
+              boxShadow: '0 6px 18px rgba(245,158,11,0.25)',
+              opacity: bubbleShown ? 1 : 0.65,
+              transition: 'opacity 420ms ease',
+              animation: 'extBubblePop 480ms cubic-bezier(0.34,1.56,0.64,1) both',
+            }}
+          >
+            <style>{`
+              @keyframes extBubblePop {
+                0%   { transform: scale(0.85) translateY(-6px); opacity: 0; }
+                60%  { transform: scale(1.03) translateY(0);    opacity: 1; }
+                100% { transform: scale(1)    translateY(0);    opacity: 1; }
+              }
+            `}</style>
+            {extBubbleText}
+          </div>
+        )}
+
         <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#3B0764', textAlign: 'center' }}>
           Is your SmartFlow extension turned on?
         </h3>
@@ -1986,6 +2447,66 @@ function CenteredOverlay({
     );
   }
 
+  if (phase === 'dnp_choice') {
+    /* Second-DNP choice card. Renders four pill buttons stacked in a
+       2x2 grid: the three JUNK reasons (Switch Off / Out of Service /
+       No Ring → outcome=not_interested + JUNK + subtag, lands in
+       Completed Calls) and the legacy DNP button (outcome=not_picked,
+       lands in Do Not Picked). No timer / nudge here yet — the caller
+       has clicked DNP twice, so they're actively engaged. */
+    return wrap(
+      <div style={{ ...cardStyle, padding: '28px 26px' }}>
+        <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1.05rem', color: '#3B0764', textAlign: 'center' }}>
+          Why didn't the customer pick up?
+        </h3>
+        <p style={{ margin: '8px 0 22px', fontSize: '0.84rem', color: 'rgba(91,33,182,0.65)', textAlign: 'center' }}>
+          The first three move the lead to <b>Completed</b> with a <b>JUNK</b> tag.
+          DNP moves it to the <b>Do Not Picked</b> bucket.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {dnpJunkSubtags.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onDnpChoose && onDnpChoose(opt.value)}
+              style={{
+                padding: '14px 12px', borderRadius: 10,
+                border: '1px solid rgba(245,158,11,0.45)',
+                background: 'linear-gradient(135deg, #FEF3C7, #FDE68A)',
+                color: '#78350F',
+                fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '0.88rem',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(245,158,11,0.20)',
+                transition: 'transform 120ms, box-shadow 120ms',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 18px rgba(245,158,11,0.30)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)';   e.currentTarget.style.boxShadow = '0 4px 14px rgba(245,158,11,0.20)'; }}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => onDnpChoose && onDnpChoose('dnp')}
+            style={{
+              padding: '14px 12px', borderRadius: 10,
+              border: 'none',
+              background: '#DC2626', color: '#fff',
+              fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '0.88rem',
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(220,38,38,0.35)',
+              transition: 'transform 120ms',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
+          >
+            DNP
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (phase === 'dnp_alert') {
     return wrap(
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, fontFamily: 'Outfit, sans-serif' }}>
@@ -2037,23 +2558,235 @@ function CenteredOverlay({
   return null;
 }
 
-function SelectField({ value, onChange, options, placeholder }) {
+/* Custom searchable dropdown — replaces the native <select> so it
+   matches the rest of the CRM (no blue OS highlight, no system font,
+   per-row hover + selected pills). Built-in search box auto-focuses
+   on open so the caller can type to filter the ~150 location options
+   or the 11 occupation options instantly.
+
+   Same API as the old SelectField — { value, onChange, options,
+   placeholder } — so every existing call site picks it up unchanged. */
+/* Inline "(registered as X)" annotation for form question labels — the
+   funnel pre-collects sugar level, age group, medication and occupation
+   so the caller can verify each answer against what the lead originally
+   registered with. Mirrors the Q3 Confirm Range label pattern that was
+   already in place. Renders nothing when the field is empty so brand-
+   new leads (or leads that skipped a funnel step) don't show a stray
+   "registered as —" line. */
+function RegisteredAs({ value, transform }) {
+  const raw = value == null ? '' : String(value).trim();
+  if (!raw) return null;
+  const display = typeof transform === 'function' ? transform(raw) : raw;
   return (
-    <select value={value} onChange={e => onChange(e.target.value)}
+    <span style={{ fontWeight: 500, color: 'rgba(91,33,182,0.65)', fontStyle: 'italic' }}>
+      (registered as <span style={{ fontWeight: 700, color: '#3B0764', fontStyle: 'normal' }}>{display}</span>)
+    </span>
+  );
+}
+
+function SelectField({ value, onChange, options, placeholder }) {
+  const [open, setOpen]     = useState(false);
+  const [query, setQuery]   = useState('');
+  const wrapRef             = useRef(null);
+  const inputRef            = useRef(null);
+
+  // Close on outside click + Escape so the panel feels like a real
+  // dropdown and never gets stuck behind other UI.
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDocDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    function onKey(e) { if (e.key === 'Escape') setOpen(false); }
+    document.addEventListener('mousedown', onDocDown);
+    document.addEventListener('keydown',   onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocDown);
+      document.removeEventListener('keydown',   onKey);
+    };
+  }, [open]);
+
+  // Auto-focus the search box the moment the panel opens, and clear
+  // any leftover query from a previous opening.
+  useEffect(() => {
+    if (open) {
+      setQuery('');
+      setTimeout(() => { try { inputRef.current?.focus(); } catch {} }, 0);
+    }
+  }, [open]);
+
+  const selected   = options.find(o => o.value === value);
+  const triggerLbl = selected ? selected.label : (placeholder || 'Select…');
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? options.filter(o => String(o.label || '').toLowerCase().includes(q)
+                       || String(o.value || '').toLowerCase().includes(q))
+    : options;
+
+  function pick(v) {
+    onChange(v);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      {/* Trigger button — visually mirrors the inputStyle used for the
+         text/textarea fields elsewhere in this modal. */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', height: '2.6rem', padding: '0 36px 0 12px',
+          borderRadius: 6,
+          border: open ? '1.5px solid rgba(91,33,182,0.50)' : '1px solid rgba(209,196,240,0.8)',
+          background: open ? '#fff' : 'rgba(237,234,248,0.30)',
+          color: selected ? '#3B0764' : 'rgba(91,33,182,0.50)',
+          fontFamily: 'Outfit,sans-serif', fontSize: '0.88rem',
+          fontWeight: selected ? 600 : 500,
+          textAlign: 'left',
+          cursor: 'pointer', outline: 'none', boxSizing: 'border-box',
+          position: 'relative',
+          transition: 'border-color 200ms, background 200ms',
+        }}
+      >
+        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {triggerLbl}
+        </span>
+        <svg
+          width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="#5B21B6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{
+            position: 'absolute', right: 12, top: '50%',
+            transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
+            transition: 'transform 200ms', pointerEvents: 'none',
+          }}
+        >
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      {/* Popover panel */}
+      {open && (
+        <div
+          role="listbox"
+          style={{
+            position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
+            background: '#fff',
+            borderRadius: 12,
+            border: '1px solid rgba(209,196,240,0.60)',
+            boxShadow: '0 12px 36px rgba(91,33,182,0.18)',
+            padding: 6,
+            zIndex: 50,
+            maxHeight: 320,
+            display: 'flex', flexDirection: 'column',
+            fontFamily: 'Outfit, sans-serif',
+          }}
+        >
+          {/* Search box — sticky-top inside the panel. The list below
+             scrolls; the search stays put. */}
+          <div style={{ position: 'relative', padding: '2px 2px 6px' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.50)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+              style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-30%)', pointerEvents: 'none' }}>
+              <circle cx="11" cy="11" r="7"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input
+              ref={inputRef}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search…"
+              style={{
+                width: '100%', height: '2.1rem',
+                padding: '0 12px 0 32px',
+                borderRadius: 8,
+                border: '1px solid rgba(209,196,240,0.6)',
+                background: 'rgba(237,234,248,0.40)',
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
+                color: '#3B0764', outline: 'none', boxSizing: 'border-box',
+              }}
+              onKeyDown={(e) => {
+                // Enter on a single-match list picks it instantly — handy
+                // for the location dropdown ("type 'chen' + Enter").
+                if (e.key === 'Enter' && filtered.length === 1) {
+                  e.preventDefault();
+                  pick(filtered[0].value);
+                }
+              }}
+            />
+          </div>
+
+          {/* Scrollable options list */}
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {filtered.length === 0 ? (
+              <div style={{
+                padding: '14px 10px', textAlign: 'center',
+                fontSize: '0.80rem', color: 'rgba(91,33,182,0.55)',
+                fontStyle: 'italic',
+              }}>
+                No matches for "{query}"
+              </div>
+            ) : filtered.map(opt => {
+              const isSel = opt.value === value;
+              return (
+                <DropdownOption
+                  key={opt.value}
+                  label={opt.label}
+                  selected={isSel}
+                  onClick={() => pick(opt.value)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* One option row — hover wash, purple-tinted selected state, check
+   mark when picked. Extracted so the row can manage its own hover state
+   without re-rendering the whole list. */
+function DropdownOption({ label, selected, onClick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
-        width: '100%', height: '2.6rem', padding: '0 12px',
-        borderRadius: 6,
-        border: '1px solid rgba(209,196,240,0.8)',
-        background: 'rgba(237,234,248,0.30)',
-        fontFamily: 'Outfit,sans-serif', fontSize: '0.88rem',
-        color: value ? '#3B0764' : 'rgba(91,33,182,0.50)',
-        outline: 'none', boxSizing: 'border-box', cursor: 'pointer',
-      }}>
-      <option value="">{placeholder || 'Select…'}</option>
-      {options.map(opt => (
-        <option key={opt.value} value={opt.value}>{opt.label}</option>
-      ))}
-    </select>
+        width: '100%',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        padding: '8px 12px',
+        borderRadius: 8,
+        border: 'none',
+        textAlign: 'left',
+        cursor: 'pointer',
+        fontFamily: 'Outfit, sans-serif',
+        fontSize: '0.85rem',
+        fontWeight: selected ? 700 : 500,
+        color: '#3B0764',
+        background: selected
+          ? 'rgba(91,33,182,0.10)'
+          : hover
+            ? 'rgba(237,234,248,0.60)'
+            : 'transparent',
+        transition: 'background 120ms',
+      }}
+    >
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      {selected && (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      )}
+    </button>
   );
 }
 

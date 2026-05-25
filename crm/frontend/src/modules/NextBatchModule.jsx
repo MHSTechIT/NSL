@@ -34,8 +34,10 @@ function fmtRelative(iso) {
   return `${Math.floor(secs / 86400)}d ago`;
 }
 
-export default function NextBatchModule({ jwt }) {
+export default function NextBatchModule({ jwt, onCount }) {
   const [leads, setLeads]     = useState([]);
+  // Bubble the count up to CallerShell for the header chip.
+  useEffect(() => { if (typeof onCount === 'function') onCount(leads.length); }, [leads.length, onCount]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [search, setSearch]   = useState('');

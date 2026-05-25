@@ -11,7 +11,8 @@ import IncomingCallToast       from './components/IncomingCallToast';
 import MascotBot               from './components/MascotBot';
 import RobotGuide              from './components/RobotGuide';
 import { deriveCallerTag, readActivity } from './utils/callerActivity';
-import { ROBOT_CLIP, stopRobotClip } from './utils/robotAudio';
+import { ROBOT_CLIP, stopRobotClip, getRobotVolume, setRobotVolume, playRobotClip, ROBOT_VOLUME_EVENT, setAccountPaused } from './utils/robotAudio';
+import { stopAllRobotGuideAudio } from './components/RobotGuide';
 import { TimerSettingsContext } from './context/TimerSettingsContext';
 import { TIMER_DEFAULTS, mergeTimerSettings } from './config/timerSchema';
 
@@ -126,6 +127,13 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
     } catch { /* sandbox / storage disabled */ }
     return 'call';
   });
+
+  /* Lead count for the active page — each list module reports its count
+     via the onCount prop, and we render it under the page subtitle.
+     Reset to null whenever the active page changes so the previous
+     page's stale number doesn't flash. */
+  const [leadCount, setLeadCount] = useState(null);
+  useEffect(() => { setLeadCount(null); }, [activePage]);
   /* When the Call page's big start button is pressed, we navigate to the
      Assigned tab and flag a one-shot "auto-start me when leads are ready".
      AssignedLeadsModule consumes the flag and clears it on first trigger. */
@@ -331,10 +339,28 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
     try { window.dispatchEvent(new Event('mhs:activity:changed')); } catch { /* no-op */ }
   }, [activePage, isActive, pauseInfo, user, jwtForEffect]);
 
-  /* When the caller is paused, cut any page robot clip that may be mid-play
-     so only the paused-overlay voice is heard. */
+  /* When the caller is paused, EVERY page-level audio source has to go
+     silent — only the fullscreen paused-overlay robot is allowed to
+     speak its "contact admin" line. We do this in three steps:
+       1. stopRobotClip()           — kills the playRobotClip pipeline.
+       2. stopAllRobotGuideAudio()  — kills every cached RobotGuide
+                                       Audio element (corner / network-
+                                       recovered / idle nudge / etc.).
+       3. setAccountPaused(true)    — flips a module-level flag inside
+                                       robotAudio.js so any subsequent
+                                       playRobotClip call is a no-op,
+                                       and RobotGuide skips new plays
+                                       unless variant === 'overlay'.
+     On resume (isActive === true) the flag flips back so future audio
+     can play normally again. */
   useEffect(() => {
-    if (isActive === false) stopRobotClip();
+    if (isActive === false) {
+      try { stopRobotClip();           } catch { /* ignore */ }
+      try { stopAllRobotGuideAudio();  } catch { /* ignore */ }
+      try { setAccountPaused(true);    } catch { /* ignore */ }
+    } else if (isActive === true) {
+      try { setAccountPaused(false);   } catch { /* ignore */ }
+    }
   }, [isActive]);
 
   /* Idea #20 — network-recovered reassurance. When the browser drops offline
@@ -399,6 +425,16 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
     };
   }, [isActive, activePage, jwtForEffect, timerSettings.robotNudgeIntervalMs, timerSettings.autoPauseNudgeCount]);
 
+  /* Voice the review-page idle nudge — same clip 40 ("do something")
+     the Call page uses for its idle nudge. Previously these pages
+     showed the visible bubble but stayed silent, so the warning felt
+     weaker than on Assigned (which plays clip 41 on its own nudges).
+     Fires once per nudge tick — matches the agent/form reason-card
+     nudge cadence in LeadCallNoteModal. */
+  useEffect(() => {
+    if (idleNudge >= 1) playRobotClip(40);
+  }, [idleNudge]);
+
   function handleLogout() {
     sessionStorage.removeItem('mhs_crm_user');
     sessionStorage.removeItem('mhs_crm_token');
@@ -426,10 +462,13 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
     <TimerSettingsContext.Provider value={timerSettings}>
     <div style={{ minHeight: '100vh', background: '#EDEAF8', fontFamily: 'Outfit, sans-serif', padding: 16 }}>
       <style>{`
+        /* Hide the scrollbar in WebKit (Chrome / Safari / Edge). The
+           inline scrollbarWidth:'none' covers Firefox; this covers the
+           rest. Applies at every viewport — overflow is always on. */
+        .caller-tabs::-webkit-scrollbar { width: 0; height: 0; display: none; }
         @media (max-width: 720px) {
           .caller-topbar  { gap: 8px !important; }
-          .caller-tabs    { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 4px !important; }
-          .caller-tabs::-webkit-scrollbar { display: none; }
+          .caller-tabs    { padding: 4px !important; }
           .caller-tab-btn { padding: 8px 12px !important; font-size: 0.78rem !important; }
         }
       `}</style>
@@ -462,6 +501,16 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
             boxShadow: '0 8px 32px rgba(91,33,182,0.10), 0 2px 8px rgba(91,33,182,0.04)',
             minWidth: 0,
             flexShrink: 1,
+            // Always-on horizontal scroll so tabs stay inside the white
+            // card at any viewport width. The scrollbar itself is hidden
+            // (looks ugly inside a pill); trackpad / touch / shift-wheel
+            // still scroll. Previously this lived in a 720px media query
+            // so wider screens with too many tabs (e.g. Untouched / Next
+            // Batch) overflowed the card.
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
           }}
         >
           {/* Hamburger — always visible, toggles the tab strip */}
@@ -566,6 +615,13 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
                 )}
               </div>
 
+              {/* Robot voice volume — persists per-browser in localStorage
+                  and applies to every playRobotClip() call across the app.
+                  Tapping the speaker icon mutes/restores; the slider does
+                  fine-grained control. Volume sample plays on slider
+                  release so the caller hears the new level. */}
+              <RobotVolumeRow />
+
               {/* Sign out */}
               <button
                 onClick={handleLogout}
@@ -602,9 +658,34 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
          page still shows the standard title + subtitle. */}
       {activePage !== 'call' && (
         <div style={{ marginBottom: 16, padding: '0 4px' }}>
-          <h1 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#3B0764' }}>
-            {PAGE_TITLES[activePage]?.title || 'Dashboard'}
-          </h1>
+          {/* Title row — heading + inline lead-count chip side-by-side.
+              `flex-wrap` lets the chip drop to its own line on narrow
+              viewports if there's not enough room for both. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <h1 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#3B0764' }}>
+              {PAGE_TITLES[activePage]?.title || 'Dashboard'}
+            </h1>
+            {/* Lead count chip — reported by the active module via the
+                onCount prop, hidden until the module has actually loaded
+                (leadCount === null) so we never show a misleading "0". */}
+            {leadCount != null && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '4px 12px', borderRadius: 50,
+                background: 'rgba(91,33,182,0.10)',
+                border: '1px solid rgba(91,33,182,0.20)',
+                color: '#5B21B6',
+                fontFamily: 'Outfit, sans-serif',
+                fontSize: '0.74rem', fontWeight: 700,
+                letterSpacing: '0.02em',
+              }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                {leadCount} {leadCount === 1 ? 'lead' : 'leads'}
+              </span>
+            )}
+          </div>
           <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)' }}>
             {PAGE_TITLES[activePage]?.subtitle || ''}
           </p>
@@ -613,12 +694,12 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
 
       {/* ── Active page ── */}
       {activePage === 'call'         && <CallModule           jwt={jwt} isActive={isActive} onStartAutoCall={requestAutoStart} />}
-      {activePage === 'assigned'     && <AssignedLeadsModule  jwt={jwt} isActive={isActive} externalHighlightId={externalHighlightId} setMood={setMood} pendingAutoStart={pendingAutoStart} clearPendingAutoStart={clearPendingAutoStart} />}
-      {activePage === 'untouched'    && <UntouchedLeadsModule jwt={jwt} />}
-      {activePage === 'completed'    && <CompletedLeadsModule jwt={jwt} />}
-      {activePage === 'not_picked'   && <NotPickedLeadsModule jwt={jwt} />}
-      {activePage === 'missed_calls' && <MissedCallsModule    jwt={jwt} />}
-      {activePage === 'next_batch'   && <NextBatchModule      jwt={jwt} />}
+      {activePage === 'assigned'     && <AssignedLeadsModule  jwt={jwt} isActive={isActive} externalHighlightId={externalHighlightId} setMood={setMood} pendingAutoStart={pendingAutoStart} clearPendingAutoStart={clearPendingAutoStart} onCount={setLeadCount} />}
+      {activePage === 'untouched'    && <UntouchedLeadsModule jwt={jwt} onCount={setLeadCount} />}
+      {activePage === 'completed'    && <CompletedLeadsModule jwt={jwt} onCount={setLeadCount} />}
+      {activePage === 'not_picked'   && <NotPickedLeadsModule jwt={jwt} onCount={setLeadCount} />}
+      {activePage === 'missed_calls' && <MissedCallsModule    jwt={jwt} onCount={setLeadCount} />}
+      {activePage === 'next_batch'   && <NextBatchModule      jwt={jwt} onCount={setLeadCount} />}
 
       {/* ── Floating incoming-call toasts (top-right, persists across tabs) ── */}
       <IncomingCallToast jwt={jwt} onOpenLead={handleOpenLead} />
@@ -673,5 +754,116 @@ export default function CallerShell({ callerName: nameProp, callerRole: roleProp
       )}
     </div>
     </TimerSettingsContext.Provider>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   RobotVolumeRow — slider + speaker icon for the persisted robot voice
+   volume. Subscribes to ROBOT_VOLUME_EVENT so cross-tab changes update
+   live. Plays a short sample (clip 40 = generic robot voice) on release
+   so the caller hears the new level immediately.
+   ────────────────────────────────────────────────────────────────────── */
+function RobotVolumeRow() {
+  const [vol, setVol] = useState(() => getRobotVolume());
+
+  useEffect(() => {
+    function onEvt(e) {
+      const next = typeof e.detail === 'number' ? e.detail : getRobotVolume();
+      setVol(next);
+    }
+    window.addEventListener(ROBOT_VOLUME_EVENT, onEvt);
+    return () => window.removeEventListener(ROBOT_VOLUME_EVENT, onEvt);
+  }, []);
+
+  // Remember the last non-zero level so unmute restores it.
+  const lastNonZeroRef = useRef(vol > 0 ? vol : 0.9);
+  useEffect(() => { if (vol > 0) lastNonZeroRef.current = vol; }, [vol]);
+
+  function commit(next) {
+    setRobotVolume(next); // module updates _volume + persists + dispatches event
+  }
+
+  function toggleMute() {
+    if (vol > 0) commit(0);
+    else commit(lastNonZeroRef.current || 0.9);
+  }
+
+  function previewClip() {
+    // Brief sample so the caller hears their new level. playRobotClip
+    // already reads the updated _volume so we don't pass it explicitly.
+    try { playRobotClip(40); } catch { /* ignore */ }
+  }
+
+  const muted   = vol <= 0;
+  const percent = Math.round(vol * 100);
+
+  return (
+    <div style={{
+      padding: '12px 16px',
+      borderBottom: '1px solid rgba(209,196,240,0.40)',
+      display: 'flex', flexDirection: 'column', gap: 8,
+      fontFamily: 'Outfit, sans-serif',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{
+          fontSize: '0.66rem', fontWeight: 700, letterSpacing: '0.06em',
+          textTransform: 'uppercase', color: 'rgba(91,33,182,0.55)',
+        }}>
+          Robot voice
+        </span>
+        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#5B21B6' }}>
+          {muted ? 'Muted' : `${percent}%`}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Speaker / mute toggle */}
+        <button
+          type="button"
+          onClick={toggleMute}
+          title={muted ? 'Unmute robot voice' : 'Mute robot voice'}
+          style={{
+            width: 30, height: 30,
+            borderRadius: 8, border: '1px solid rgba(139,92,246,0.25)',
+            background: muted ? 'rgba(220,38,38,0.10)' : 'rgba(91,33,182,0.08)',
+            color: muted ? '#DC2626' : '#5B21B6',
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+            transition: 'all 150ms',
+          }}
+        >
+          {muted ? (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <line x1="23" y1="9" x2="17" y2="15"/>
+              <line x1="17" y1="9" x2="23" y2="15"/>
+            </svg>
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              {vol >= 0.35 && <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>}
+              {vol >= 0.7  && <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>}
+            </svg>
+          )}
+        </button>
+
+        {/* Slider */}
+        <input
+          type="range"
+          min="0" max="100" step="1"
+          value={percent}
+          onChange={(e) => commit(Number(e.target.value) / 100)}
+          onMouseUp={previewClip}
+          onTouchEnd={previewClip}
+          style={{
+            flex: 1,
+            height: 4,
+            accentColor: '#5B21B6',
+            cursor: 'pointer',
+          }}
+        />
+      </div>
+    </div>
   );
 }

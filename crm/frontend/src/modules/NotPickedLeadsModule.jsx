@@ -23,8 +23,10 @@ function fmtPhone(num) {
   return `+91 ${num}`;
 }
 
-export default function NotPickedLeadsModule({ jwt }) {
+export default function NotPickedLeadsModule({ jwt, onCount }) {
   const [leads, setLeads]     = useState([]);
+  // Bubble the count up to CallerShell for the header chip.
+  useEffect(() => { if (typeof onCount === 'function') onCount(leads.length); }, [leads.length, onCount]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const sseRef = useRef(null);

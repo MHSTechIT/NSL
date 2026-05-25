@@ -41,6 +41,7 @@ const { startLinkSwapScheduler }                = require('../utils/linkSwapSche
 
 const { startListener }                         = require('../utils/pgListener');
 const { handleLeadCreated, sweepUnassignedLeads } = require('../utils/leadCreatedListener');
+const telegramPoller                            = require('../utils/telegramPoller');
 
 const PORT = process.env.PORT || 3003;
 
@@ -111,4 +112,9 @@ app.listen(PORT, () => {
     // fired, those leads sit with assigned_user_id = NULL. Catch them on boot.
     sweepUnassignedLeads().catch(e => console.error('[crm] sweep failed:', e.message));
   }
+
+  // Telegram long-poll worker — listens for Resume button taps + typed
+  // 'resume' replies. No-ops without TELEGRAM_BOT_TOKEN and respects
+  // DISABLE_TELEGRAM_POLLER=true (handy for tests).
+  telegramPoller.start();
 });

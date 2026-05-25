@@ -52,6 +52,61 @@ export default function UsersModule({ token, lockedDepartment = null, lockedMana
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
+  /* id → user lookup so the table can resolve team_leader_id / manager_id
+     UUIDs to display names without a second API roundtrip. Cheap because
+     the users list is already in memory. */
+  const usersById = useMemo(() => {
+    const map = new Map();
+    for (const u of users) map.set(u.id, u);
+    return map;
+  }, [users]);
+
+  /* Toolbar state: free-text search across name/email/phone, plus a
+     multi-select role filter popover. Both filter the in-memory list
+     client-side — the dataset is small enough that paginating server-
+     side isn't worth it yet. */
+  const [query,       setQuery]       = useState('');
+  const [roleFilter,  setRoleFilter]  = useState(() => new Set()); // empty = all roles
+  const [showFilter,  setShowFilter]  = useState(false);
+  const filterWrapRef = useRef(null);
+
+  // Close the role-filter popover on outside click + Escape.
+  useEffect(() => {
+    if (!showFilter) return;
+    function onDocDown(e) {
+      if (filterWrapRef.current && !filterWrapRef.current.contains(e.target)) {
+        setShowFilter(false);
+      }
+    }
+    function onKey(e) { if (e.key === 'Escape') setShowFilter(false); }
+    document.addEventListener('mousedown', onDocDown);
+    document.addEventListener('keydown',   onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocDown);
+      document.removeEventListener('keydown',   onKey);
+    };
+  }, [showFilter]);
+
+  const filteredUsers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return users.filter(u => {
+      if (roleFilter.size > 0 && !roleFilter.has(u.role)) return false;
+      if (q) {
+        const hay = `${u.full_name || ''} ${u.email || ''} ${u.phone || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [users, query, roleFilter]);
+
+  function toggleRole(value) {
+    setRoleFilter(prev => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value); else next.add(value);
+      return next;
+    });
+  }
+
   async function handleDelete(id, name) {
     if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
     try {
@@ -70,32 +125,169 @@ export default function UsersModule({ token, lockedDepartment = null, lockedMana
     }
   }
 
-  /* Create User button — portaled into the dashboard tab-bar action slot when
-     one is provided (manager dashboard, so it sits in line with the logo);
-     otherwise a plain right-aligned button above the table. */
-  const createUserBtn = (
-    <button
-      onClick={() => setShowForm(true)}
-      style={{
-        padding: '8px 16px', borderRadius: 50, border: 'none',
-        background: '#5B21B6', color: '#fff',
-        fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.86rem',
-        cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,33,182,0.30)',
-        display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
-      }}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-      </svg>
-      Create User
-    </button>
+  /* Toolbar — search + role filter + Create User, packaged together so
+     they can be portaled as a unit into the dashboard tab-bar action slot
+     when one is provided (manager dashboard), or rendered standalone
+     above the table otherwise. */
+  const toolbar = (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      {/* Search box — searches name + email + phone */}
+      <div style={{
+        position: 'relative',
+        display: 'inline-flex', alignItems: 'center',
+      }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(91,33,182,0.50)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 12, pointerEvents: 'none' }}>
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name, email, phone…"
+          style={{
+            height: 36,
+            padding: '0 14px 0 34px',
+            borderRadius: 50,
+            border: '1px solid rgba(139,92,246,0.25)',
+            background: '#fff',
+            fontFamily: 'Outfit, sans-serif',
+            fontSize: '0.82rem',
+            color: '#3B0764',
+            outline: 'none',
+            width: 240,
+            boxSizing: 'border-box',
+          }}
+        />
+      </div>
+
+      {/* Role filter — popover with multi-select checkboxes */}
+      <div ref={filterWrapRef} style={{ position: 'relative' }}>
+        <button
+          onClick={() => setShowFilter(o => !o)}
+          style={{
+            height: 36,
+            padding: '0 14px',
+            borderRadius: 50,
+            border: '1px solid rgba(139,92,246,0.25)',
+            background: roleFilter.size > 0 ? 'rgba(91,33,182,0.10)' : '#fff',
+            color: '#5B21B6',
+            fontFamily: 'Outfit, sans-serif',
+            fontWeight: 700, fontSize: '0.82rem',
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+          </svg>
+          Filter
+          {roleFilter.size > 0 && (
+            <span style={{
+              background: '#5B21B6', color: '#fff',
+              borderRadius: 50, padding: '1px 7px',
+              fontSize: '0.66rem', fontWeight: 800,
+              marginLeft: 2,
+            }}>
+              {roleFilter.size}
+            </span>
+          )}
+        </button>
+
+        {showFilter && (
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+            width: 220,
+            background: '#fff',
+            borderRadius: 14,
+            border: '1px solid rgba(139,92,246,0.20)',
+            boxShadow: '0 12px 36px rgba(91,33,182,0.18)',
+            padding: 8,
+            zIndex: 60,
+          }}>
+            <div style={{
+              padding: '6px 10px 8px',
+              fontFamily: 'Outfit, sans-serif', fontSize: '0.66rem',
+              fontWeight: 800, letterSpacing: 0.6,
+              color: 'rgba(91,33,182,0.60)', textTransform: 'uppercase',
+            }}>
+              Filter by role
+            </div>
+            {ROLES.map(r => {
+              const checked = roleFilter.has(r.value);
+              return (
+                <label
+                  key={r.value}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 10px', borderRadius: 10,
+                    cursor: 'pointer',
+                    background: checked ? 'rgba(91,33,182,0.10)' : 'transparent',
+                    fontFamily: 'Outfit, sans-serif',
+                    fontSize: '0.84rem', fontWeight: checked ? 700 : 500,
+                    color: '#3B0764',
+                  }}
+                  onMouseEnter={(e) => { if (!checked) e.currentTarget.style.background = 'rgba(237,234,248,0.60)'; }}
+                  onMouseLeave={(e) => { if (!checked) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleRole(r.value)}
+                    style={{ accentColor: '#5B21B6', width: 14, height: 14, cursor: 'pointer' }}
+                  />
+                  {r.label}
+                </label>
+              );
+            })}
+            {roleFilter.size > 0 && (
+              <button
+                onClick={() => setRoleFilter(new Set())}
+                style={{
+                  width: '100%',
+                  marginTop: 6,
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(139,92,246,0.25)',
+                  background: '#fff',
+                  color: '#5B21B6',
+                  fontFamily: 'Outfit, sans-serif',
+                  fontWeight: 700, fontSize: '0.78rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Clear filter
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Create User */}
+      <button
+        onClick={() => setShowForm(true)}
+        style={{
+          height: 36,
+          padding: '0 16px', borderRadius: 50, border: 'none',
+          background: '#5B21B6', color: '#fff',
+          fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.86rem',
+          cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,33,182,0.30)',
+          display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Create User
+      </button>
+    </div>
   );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {actionsSlotEl
-        ? createPortal(createUserBtn, actionsSlotEl)
-        : <div style={{ display: 'flex', justifyContent: 'flex-end' }}>{createUserBtn}</div>}
+        ? createPortal(toolbar, actionsSlotEl)
+        : <div style={{ display: 'flex', justifyContent: 'flex-end' }}>{toolbar}</div>}
 
       {/* Error banner */}
       {error && (
@@ -122,13 +314,38 @@ export default function UsersModule({ token, lockedDepartment = null, lockedMana
                   <th style={thStyle}>Email</th>
                   <th style={thStyle}>Phone</th>
                   <th style={thStyle}>Role</th>
+                  <th style={thStyle}>Manager</th>
+                  <th style={thStyle}>Team Leader</th>
+                  <th style={thStyle}>Department</th>
                   <th style={thStyle}>Smartflo</th>
                   <th style={thStyle}>Created</th>
                   <th style={{ ...thStyle, textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {users.map(u => {
+                {filteredUsers.length === 0 && (query || roleFilter.size > 0) && (
+                  <tr>
+                    <td colSpan={10} style={{
+                      padding: '32px 16px', textAlign: 'center',
+                      fontFamily: 'Outfit, sans-serif', fontSize: '0.86rem',
+                      color: 'rgba(91,33,182,0.55)',
+                    }}>
+                      No users match the current search / filter.
+                      {' '}
+                      <button
+                        onClick={() => { setQuery(''); setRoleFilter(new Set()); }}
+                        style={{
+                          background: 'none', border: 'none',
+                          color: '#5B21B6', fontWeight: 700, cursor: 'pointer',
+                          textDecoration: 'underline',
+                        }}
+                      >
+                        Reset
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {filteredUsers.map(u => {
                   const badge = ROLE_BADGE[u.role] || { bg: '#F3F4F6', fg: '#4B5563' };
                   return (
                     <tr key={u.id} style={{ borderTop: '1px solid rgba(209,196,240,0.30)' }}>
@@ -142,9 +359,19 @@ export default function UsersModule({ token, lockedDepartment = null, lockedMana
                           display: 'inline-block', padding: '3px 10px', borderRadius: 50,
                           fontSize: '0.72rem', fontWeight: 700,
                           background: badge.bg, color: badge.fg,
+                          whiteSpace: 'nowrap',
                         }}>
                           {ROLE_LABEL[u.role] || u.role}
                         </span>
+                      </td>
+                      <td style={tdStyle}>
+                        <RefCell name={usersById.get(u.manager_id)?.full_name} />
+                      </td>
+                      <td style={tdStyle}>
+                        <RefCell name={usersById.get(u.team_leader_id)?.full_name} />
+                      </td>
+                      <td style={tdStyle}>
+                        <DeptCell dept={u.department} />
                       </td>
                       <td style={tdStyle}>
                         <SmartfloCell user={u} />
@@ -231,7 +458,39 @@ const tdStyle = {
   padding: '14px 16px',
   fontSize: '0.86rem',
   color: '#3B0764',
+  whiteSpace: 'nowrap',
 };
+
+/* Resolved name cell — Manager / Team Leader columns. Shows an em-dash
+   for users whose role doesn't have that relationship or whose ref
+   points at a user no longer in the loaded list. */
+function RefCell({ name }) {
+  if (!name) {
+    return <span style={{ fontSize: '0.78rem', color: 'rgba(91,33,182,0.40)' }}>—</span>;
+  }
+  return <span style={{ fontWeight: 600 }}>{name}</span>;
+}
+
+/* Department pill — soft purple background, capitalized text. */
+function DeptCell({ dept }) {
+  if (!dept) {
+    return <span style={{ fontSize: '0.78rem', color: 'rgba(91,33,182,0.40)' }}>—</span>;
+  }
+  const palette = dept === 'sales'
+    ? { bg: 'rgba(91,33,182,0.10)',  fg: '#5B21B6' }
+    : { bg: 'rgba(245,158,11,0.12)', fg: '#B45309' };
+  return (
+    <span style={{
+      display: 'inline-block', padding: '3px 10px', borderRadius: 50,
+      fontSize: '0.7rem', fontWeight: 700, letterSpacing: 0.3,
+      textTransform: 'capitalize',
+      background: palette.bg, color: palette.fg,
+      whiteSpace: 'nowrap',
+    }}>
+      {dept}
+    </span>
+  );
+}
 
 /* Compact summary of a user's Smartflo settings for the users table */
 function SmartfloCell({ user }) {

@@ -27,6 +27,22 @@ const UPLOADS_ROOT = path.join(__dirname, '..', 'uploads');
 function authViaQuery(req, res, next) {
   const token = req.query?.token;
   if (!token) return res.status(401).json({ error: 'missing token' });
+  // Admin path — the bearer ADMIN_PASSWORD (same one /api/admin/* uses)
+  // also unlocks recording playback so the Sales → Completed Calls view
+  // can render <audio> tags for any caller's recording. The check is
+  // length-checked + constant-time to avoid a timing oracle.
+  const adminPwd = process.env.ADMIN_PASSWORD || '';
+  if (adminPwd && token.length === adminPwd.length) {
+    try {
+      const a = Buffer.from(token);
+      const b = Buffer.from(adminPwd);
+      const crypto = require('crypto');
+      if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+        req.caller = { id: null, admin: true };
+        return next();
+      }
+    } catch { /* fall through to JWT path */ }
+  }
   try {
     const payload = verify(token);
     if (!payload?.user_id) return res.status(401).json({ error: 'unauthorized' });
@@ -65,9 +81,11 @@ router.get('/:call_id', async (req, res) => {
   }
   if (!row || !row.recording_url) return res.status(404).json({ error: 'not_found' });
 
-  // Authorization: caller can stream their own calls. (Super-admin token has
-  // a different shape and isn't checked here — extend if you need that.)
-  if (row.caller_id && row.caller_id !== req.caller.id) {
+  // Authorization: caller can stream their own calls. Admin token
+  // (req.caller.admin === true, set by authViaQuery) bypasses the
+  // caller_id match so the Sales → Completed Calls view can play any
+  // caller's recording.
+  if (!req.caller.admin && row.caller_id && row.caller_id !== req.caller.id) {
     return res.status(403).json({ error: 'forbidden' });
   }
 

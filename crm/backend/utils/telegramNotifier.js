@@ -39,9 +39,10 @@ function prettyReason(r) {
 }
 
 /* ──────────────────────────────────────────────────────────────────────
-   Low-level send. Returns { ok, error? }. Never throws.
+   Low-level send. Returns { ok, error?, message_id? }. Never throws.
+   `opts.reply_markup` lets callers attach inline keyboards (Resume button).
    ────────────────────────────────────────────────────────────────────── */
-async function sendTelegram(chatId, text) {
+async function sendTelegram(chatId, text, opts = {}) {
   if (!BOT_TOKEN) {
     console.warn('[telegramNotifier] TELEGRAM_BOT_TOKEN missing — skipping send.');
     return { ok: false, error: 'TELEGRAM_BOT_TOKEN not set' };
@@ -49,14 +50,17 @@ async function sendTelegram(chatId, text) {
   if (!chatId) return { ok: false, error: 'chat_id missing' };
 
   try {
+    const body = {
+      chat_id:    String(chatId),
+      text:       text,
+      parse_mode: 'HTML',
+    };
+    if (opts.reply_markup) body.reply_markup = opts.reply_markup;
+
     const res = await fetch(TG_API('sendMessage'), {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        chat_id:    String(chatId),
-        text:       text,
-        parse_mode: 'HTML',
-      }),
+      body:    JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
@@ -64,9 +68,55 @@ async function sendTelegram(chatId, text) {
       console.error('[telegramNotifier] sendTelegram failed:', err);
       return { ok: false, error: err };
     }
-    return { ok: true };
+    return { ok: true, message_id: data.result?.message_id };
   } catch (err) {
     console.error('[telegramNotifier] sendTelegram threw:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+/* Edit a previously-sent message in place — used to swap the "Resume"
+   button for a "Resumed by X at HH:MM" confirmation. */
+async function editTelegramMessage(chatId, messageId, text, opts = {}) {
+  if (!BOT_TOKEN || !chatId || !messageId) return { ok: false };
+  try {
+    const body = {
+      chat_id:    String(chatId),
+      message_id: messageId,
+      text:       text,
+      parse_mode: 'HTML',
+    };
+    if (opts.reply_markup !== undefined) body.reply_markup = opts.reply_markup;
+
+    const res = await fetch(TG_API('editMessageText'), {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: !!data.ok, error: data.description };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/* Acknowledge an inline-keyboard tap so Telegram's spinner clears.
+   `text` (≤200 chars) is shown as a toast in the user's chat. */
+async function answerCallback(callbackQueryId, text, asAlert = false) {
+  if (!BOT_TOKEN || !callbackQueryId) return { ok: false };
+  try {
+    const res = await fetch(TG_API('answerCallbackQuery'), {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text:              text || '',
+        show_alert:        !!asAlert,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: !!data.ok };
+  } catch (err) {
     return { ok: false, error: err.message };
   }
 }
@@ -116,11 +166,20 @@ async function notifyAutoPause(callerId, reason) {
       `Department: ${caller.department || '—'}`,
       `Reason: ${escapeHtml(prettyReason(reason))}`,
       ``,
-      `Resume from the CRM → Notifications tab.`,
+      `Tap <b>Resume</b> below, or reply <code>resume</code>.`,
     ].join('\n');
 
+    // Inline button: callback_data is namespaced so the handler can route.
+    const reply_markup = {
+      inline_keyboard: [[
+        { text: '✅ Resume caller', callback_data: `resume:${caller.id}` },
+      ]],
+    };
+
     // Fire-and-forget all sends in parallel.
-    await Promise.all(recipients.map(r => sendTelegram(r.telegram_chat_id, text)));
+    await Promise.all(recipients.map(r =>
+      sendTelegram(r.telegram_chat_id, text, { reply_markup })
+    ));
   } catch (err) {
     console.error('[telegramNotifier] notifyAutoPause error:', err.message);
   }
@@ -137,6 +196,9 @@ function escapeHtml(s) {
 
 module.exports = {
   sendTelegram,
+  editTelegramMessage,
+  answerCallback,
   notifyAutoPause,
   escapeHtml,
+  prettyReason,
 };

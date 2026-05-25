@@ -438,6 +438,15 @@ const _callNotesMigration = pool.query(`
   ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS available_for_webinar TEXT;
   ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS next_batch_joining    TEXT;
 
+  -- outcome_subtag refines an outcome with a specific reason. Examples:
+  --   outcome=not_interested + outcome_subtag=wrong_number   (caller picked subtag)
+  --   outcome=not_interested + outcome_subtag=switch_off     (second-DNP card pick)
+  -- A NULL subtag means no refinement; every pre-change row stays valid.
+  -- last_note_outcome_subtag on the leads table is the denormalized latest
+  -- value, used by Completed Calls to render the secondary chip.
+  ALTER TABLE lead_call_notes ADD COLUMN IF NOT EXISTS outcome_subtag           TEXT;
+  ALTER TABLE leads           ADD COLUMN IF NOT EXISTS last_note_outcome_subtag TEXT;
+
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_note_outcome TEXT;   -- 'completed' | 'follow_up'
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_note_at      TIMESTAMPTZ;
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_at      TIMESTAMPTZ;
@@ -512,6 +521,24 @@ const _telegramAlertsMigration = pool.query(`
 `);
 if (_telegramAlertsMigration && typeof _telegramAlertsMigration.catch === 'function') {
   _telegramAlertsMigration.catch(err => console.error('[Migration] telegram_alert_recipients error:', err.message));
+}
+
+// Auto-migrate: telegram_poll_state — singleton row that tracks the highest
+// Telegram update_id we've processed via long-polling. Persisting this in
+// Postgres (not memory) means restarts don't replay messages.
+const _telegramPollMigration = pool.query(`
+  CREATE TABLE IF NOT EXISTS telegram_poll_state (
+    id              INTEGER     PRIMARY KEY DEFAULT 1,
+    last_update_id  BIGINT      NOT NULL    DEFAULT 0,
+    updated_at      TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
+    CHECK (id = 1)
+  );
+  INSERT INTO telegram_poll_state (id, last_update_id)
+       VALUES (1, 0)
+  ON CONFLICT (id) DO NOTHING;
+`);
+if (_telegramPollMigration && typeof _telegramPollMigration.catch === 'function') {
+  _telegramPollMigration.catch(err => console.error('[Migration] telegram_poll_state error:', err.message));
 }
 
 // Auto-migrate: create click_events table for button analytics

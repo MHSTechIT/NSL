@@ -234,9 +234,11 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen" style={{ maxWidth: 'none', background: '#EDEAF8' }}>
       <style>{`
+        /* Always-on scrollbar hide; overflow itself is set inline so the
+           pill scrolls horizontally at every viewport instead of bleeding
+           past the white card boundary. */
+        .admin-tabs-bar::-webkit-scrollbar { width: 0; height: 0; display: none; }
         @media (max-width: 640px) {
-          .admin-tabs-bar { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-          .admin-tabs-bar::-webkit-scrollbar { display: none; }
           .admin-tab-btn { padding: 8px 10px !important; font-size: 0.75rem !important; gap: 5px !important; }
           .admin-content-card { padding: 16px !important; }
           .admin-outer { padding-left: 12px !important; padding-right: 12px !important; padding-top: 12px !important; }
@@ -248,7 +250,13 @@ export default function AdminPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, gap: 8 }}>
 
           {/* Tabs */}
-          <div className="admin-tabs-bar" style={{ display: 'flex', gap: 4, background: '#fff', borderRadius: 16, padding: 6, boxShadow: '0 2px 12px rgba(91,33,182,0.10)', minWidth: 0, flex: '1 1 0' }}>
+          <div className="admin-tabs-bar" style={{
+            display: 'flex', gap: 4, background: '#fff', borderRadius: 16, padding: 6,
+            boxShadow: '0 2px 12px rgba(91,33,182,0.10)',
+            minWidth: 0, flex: '1 1 0',
+            overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+            scrollbarWidth: 'none', msOverflowStyle: 'none',
+          }}>
             {TABS.map(t => (
               <button
                 key={t.id}

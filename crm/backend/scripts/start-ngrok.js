@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-/* Start ngrok against the backend (port 3001) and print one public URL ready
+/* Start ngrok against the backend (port 3003) and print one public URL ready
    to paste into every Tata Smartflo webhook field. Backend webhook routes
-   share a single generic handler, so one URL covers every event type. */
+   share a single generic handler, so one URL covers every event type.
+
+   Port matches the CRM backend's actual listen port (servers/crm.js → 3003).
+   The old default of 3001 silently routed Tata to nothing in local dev —
+   resulting in zero webhook events, only the 35s synthetic-timeout-driven
+   auto-redial firing. Override with `PORT=xxxx npm run ngrok` if needed. */
 
 const { spawn } = require('child_process');
 const http      = require('http');
 
-const PORT       = 3001;
+const PORT       = Number(process.env.PORT) || 3003;
 const NGROK_API  = 'http://127.0.0.1:4040/api/tunnels';
 
 console.log(`\nStarting ngrok → http://localhost:${PORT} …`);

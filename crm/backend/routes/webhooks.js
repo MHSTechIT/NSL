@@ -287,6 +287,19 @@ function makeTataHandler(routeKind) {
       };
       const typed = TYPED[routeKind];
       if (typed) {
+        // Diagnostic: every typed SSE we push to the caller's tab.
+        // Pairs with the frontend "[caller] synthetic phase-timeout"
+        // line so a phase transition is always traceable to either a
+        // real webhook (this line) or the safety-net timer (frontend).
+        try {
+          console.log('[webhook→sse]', {
+            typed,
+            routeKind,
+            call_id: callRow.id,
+            lead_id: callRow.lead_id,
+            caller_id: callRow.caller_id,
+          });
+        } catch (_) { /* best-effort */ }
         callerSse.pushTo(callRow.caller_id, { type: typed, call: callRow });
       }
 
@@ -295,6 +308,16 @@ function makeTataHandler(routeKind) {
       // expose a dedicated "Call missed by Agent" trigger, so this is how the
       // state machine learns the caller missed their leg.
       if ((routeKind === 'hangup' || routeKind === 'recording') && !callRow.agent_answered_at) {
+        try {
+          console.log('[webhook→sse]', {
+            typed: 'agent.missed',
+            routeKind,
+            inferred: true,
+            call_id: callRow.id,
+            lead_id: callRow.lead_id,
+            caller_id: callRow.caller_id,
+          });
+        } catch (_) { /* best-effort */ }
         callerSse.pushTo(callRow.caller_id, { type: 'agent.missed', call: callRow });
         console.warn('[auto-call] caller missed SmartFlow leg', {
           call_id: callRow.id, lead_id: callRow.lead_id, caller_id: callRow.caller_id, routeKind,

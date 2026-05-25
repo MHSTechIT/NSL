@@ -2,9 +2,14 @@ import { classifyLeadTag, TAG_STYLES } from '../utils/leadTagging';
 
 /* Tag pill — live HOT / WARM / COLD / JUNK classification based on the
    set of fields a caller has filled so far. Renders nothing-yet "—" when
-   the form is empty. */
-export default function LeadTagBadge({ fields, size = 'md' }) {
-  const tag = classifyLeadTag(fields);
+   the form is empty.
+
+   `forceTag` overrides whatever the classifier returns — used by the
+   call-note modal so picking a Not Interested subtag (or the second-DNP
+   "Switch Off / Out of Service / No Ring" choice) forces the visible
+   badge to JUNK immediately, before save. */
+export default function LeadTagBadge({ fields, size = 'md', forceTag = null }) {
+  const tag = forceTag || classifyLeadTag(fields);
 
   if (!tag) {
     return (

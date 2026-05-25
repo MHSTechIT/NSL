@@ -40,10 +40,8 @@ export default function ManagerSettings({ token, onBack }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <style>{`
-        @media (max-width: 640px) {
-          .mset-tabs-bar { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-          .mset-tabs-bar::-webkit-scrollbar { display: none; }
-        }
+        /* Always-on scrollbar hide; overflow itself set inline. */
+        .mset-tabs-bar::-webkit-scrollbar { width: 0; height: 0; display: none; }
       `}</style>
 
       {/* Header — Back button + the Timer / Alerts tabs */}
@@ -70,7 +68,13 @@ export default function ManagerSettings({ token, onBack }) {
           </svg>
         </button>
 
-        <div className="mset-tabs-bar" style={{ display: 'flex', gap: 4, background: '#fff', borderRadius: 16, padding: 6, boxShadow: '0 2px 12px rgba(91,33,182,0.08)', minWidth: 0 }}>
+        <div className="mset-tabs-bar" style={{
+          display: 'flex', gap: 4, background: '#fff', borderRadius: 16, padding: 6,
+          boxShadow: '0 2px 12px rgba(91,33,182,0.08)',
+          minWidth: 0, flexShrink: 1,
+          overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none', msOverflowStyle: 'none',
+        }}>
           {SETTINGS_TABS.map(t => {
             const isActive = tab === t.id;
             return (

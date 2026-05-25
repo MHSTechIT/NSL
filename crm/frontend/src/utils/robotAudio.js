@@ -81,16 +81,109 @@ Object.values(ROBOT_CLIP).forEach(_audio);
 
 let _current = null;
 
+/* ── Per-user volume preference ──────────────────────────────────────
+   Persisted in localStorage so the caller's choice survives reloads
+   and follows them across tabs. Range 0–1 (0 = muted). Default 0.9
+   matches the legacy hardcoded value. */
+const VOLUME_KEY     = 'mhs_robot_volume';
+const VOLUME_DEFAULT = 0.9;
+const VOLUME_EVENT   = 'mhs:robot-volume';
+
+function _readVolume() {
+  try {
+    const raw = localStorage.getItem(VOLUME_KEY);
+    if (raw == null) return VOLUME_DEFAULT;
+    const v = Number(raw);
+    if (!Number.isFinite(v)) return VOLUME_DEFAULT;
+    return Math.min(1, Math.max(0, v));
+  } catch { return VOLUME_DEFAULT; }
+}
+let _volume = _readVolume();
+
+export function getRobotVolume() { return _volume; }
+
+/* Set the caller-wide robot voice volume. Persists to localStorage,
+   immediately updates any currently-playing clip, and fires a window
+   event so React components subscribed via the hook below re-render. */
+export function setRobotVolume(v) {
+  const next = Math.min(1, Math.max(0, Number(v) || 0));
+  _volume = next;
+  try { localStorage.setItem(VOLUME_KEY, String(next)); } catch { /* ignore */ }
+  if (_current) {
+    try { _current.volume = next; } catch { /* ignore */ }
+  }
+  try { window.dispatchEvent(new CustomEvent(VOLUME_EVENT, { detail: next })); } catch { /* ignore */ }
+}
+
+/* Cross-tab sync: respond to localStorage changes from other tabs so
+   adjusting volume in one place updates everywhere. */
+try {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== VOLUME_KEY) return;
+    _volume = _readVolume();
+    try { window.dispatchEvent(new CustomEvent(VOLUME_EVENT, { detail: _volume })); } catch { /* ignore */ }
+  });
+} catch { /* SSR / no window */ }
+
+export const ROBOT_VOLUME_EVENT = VOLUME_EVENT;
+
+/* ── Account-paused audio mute ────────────────────────────────────────
+   When the caller's account is paused, EVERYTHING audible has to stop
+   — leftover greetings, nudges, reason-card clips, even RobotGuide
+   speech-bubble audio in flight. CallerShell calls setAccountPaused
+   (true) the moment isActive flips false, then false again on resume.
+
+   While paused:
+     • playRobotClip(n) becomes a no-op.
+     • _current (whatever clip was last started) is stopped immediately.
+     • RobotGuide imports isAccountPaused() and refuses to start a new
+       clip unless variant === 'overlay' (the paused-account robot
+       itself, which IS allowed to speak its "contact admin" line). */
+let _accountPaused = false;
+export function isAccountPaused() { return _accountPaused; }
+export function setAccountPaused(paused) {
+  const next = !!paused;
+  if (next === _accountPaused) return;
+  _accountPaused = next;
+  if (_accountPaused) {
+    try { if (_current) { _current.pause(); _current.currentTime = 0; } } catch { /* ignore */ }
+    _current = null;
+  }
+}
+
+/* Wire any external Audio element (one created outside this module —
+   e.g. RobotGuide's _audioCache or CallModule's greeting Audio) to the
+   persisted robot volume. Sets the current value immediately and
+   subscribes to live slider changes so the user can drag the volume
+   and HEAR it update on in-flight clips, not just the next one.
+
+   Returns a teardown function — callers should invoke it when the
+   audio element is no longer needed (component unmount, etc.) so we
+   don't leak listeners. */
+export function bindAudioToRobotVolume(audio) {
+  if (!audio) return () => {};
+  try { audio.volume = _volume; } catch { /* ignore */ }
+  const sync = () => { try { audio.volume = _volume; } catch { /* ignore */ } };
+  try { window.addEventListener(VOLUME_EVENT, sync); } catch { /* SSR */ }
+  return () => {
+    try { window.removeEventListener(VOLUME_EVENT, sync); } catch { /* ignore */ }
+  };
+}
+
 /* Play the clip for robot-text number `n`, instantly. Any clip already
    playing is stopped first so two robot lines never overlap. */
 export function playRobotClip(n) {
+  // Account paused → silent. Stops nudges / greetings / reason-card
+  // clips from firing while the paused overlay owns the screen.
+  if (_accountPaused) return;
   const a = _audio(ROBOT_CLIP[n]);
   if (!a) return;
   try {
     if (_current && _current !== a) { _current.pause(); _current.currentTime = 0; }
     _current = a;
     a.currentTime = 0;
-    a.volume = 0.9;
+    a.volume = _volume;
+    if (_volume <= 0) return; // muted → don't bother starting playback
     a.play().catch(() => { /* autoplay blocked until first gesture */ });
   } catch { /* no Audio API */ }
 }

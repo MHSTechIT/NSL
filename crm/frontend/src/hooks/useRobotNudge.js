@@ -43,6 +43,18 @@ export default function useRobotNudge({
         if (raw) start = parseInt(raw, 10) || null;
       } catch (_) { /* ignore */ }
     }
+    // Stale-start safety net — a stored timestamp older than ~2× the
+    // auto-pause horizon almost certainly belongs to a previous session
+    // that already auto-paused (and never cleaned up because the tab
+    // was closed before `active` flipped false). Reusing it would re-
+    // fire onExhausted on the very first tick of a fresh modal mount,
+    // which is exactly the "click Start Auto Call → instantly paused"
+    // bug we just hit. Discard anything beyond the safe window.
+    const NUDGE_MAX_PERSIST_MS = Math.max(60_000, intervalMs * maxRepeats * 2);
+    if (start && Date.now() - start > NUDGE_MAX_PERSIST_MS) {
+      start = null;
+      if (storageKey) { try { localStorage.removeItem(storageKey); } catch (_) {} }
+    }
     if (!start) {
       start = Date.now();
       if (storageKey) { try { localStorage.setItem(storageKey, String(start)); } catch (_) {} }

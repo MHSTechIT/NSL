@@ -58,16 +58,23 @@ export default function MarketingModule({ token, source = 'meta' }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <style>{`
+        /* Always-on scrollbar hide; overflow itself set inline. */
+        .marketing-tabs-bar::-webkit-scrollbar { width: 0; height: 0; display: none; }
         @media (max-width: 640px) {
-          .marketing-tabs-bar { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-          .marketing-tabs-bar::-webkit-scrollbar { display: none; }
           .marketing-tab-btn { padding: 8px 10px !important; font-size: 0.75rem !important; gap: 5px !important; }
           .marketing-content-card { padding: 16px !important; }
         }
       `}</style>
 
       {/* Tab bar */}
-      <div className="marketing-tabs-bar" style={{ display: 'inline-flex', alignSelf: 'flex-start', maxWidth: '100%', gap: 4, background: '#fff', borderRadius: 16, padding: 6, boxShadow: '0 2px 12px rgba(91,33,182,0.08)', minWidth: 0 }}>
+      <div className="marketing-tabs-bar" style={{
+        display: 'inline-flex', alignSelf: 'flex-start', maxWidth: '100%', gap: 4,
+        background: '#fff', borderRadius: 16, padding: 6,
+        boxShadow: '0 2px 12px rgba(91,33,182,0.08)',
+        minWidth: 0, flexShrink: 1,
+        overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+        scrollbarWidth: 'none', msOverflowStyle: 'none',
+      }}>
         {TABS.map(t => (
           <button
             key={t.id}

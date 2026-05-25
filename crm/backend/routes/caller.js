@@ -279,7 +279,7 @@ const LEAD_SELECT = `
          l.language_pref, l.lead_score, l.wa_clicked, l.webinar_id, l.source,
          l.assigned_user_id, l.assigned_at, l.created_at,
          l.last_note_outcome, l.last_note_at, l.follow_up_at, l.completed_at,
-         l.last_note_interested,
+         l.last_note_interested, l.last_note_outcome_subtag, l.lead_tag,
          l.next_batch_parked, l.next_batch_parked_at,
          w.name AS webinar_name,
          latest_call.id                   AS last_call_id,
@@ -644,6 +644,25 @@ const ALLOWED_OUTCOMES = ['completed', 'follow_up', 'not_interested', 'not_picke
 const ALLOWED_RANGES   = ['250+', '200-250', '100-200', 'no_diabetes'];
 const ALLOWED_AGES     = ['0-18', '19-24', '25-34', '35-44', '45-54', 'above-54'];
 
+// Allowed values for outcome_subtag — the refinement reason the caller
+// picks in the Not Interested dropdown OR the second-DNP choice card.
+// Anything else is rejected with 422.
+const ALLOWED_OUTCOME_SUBTAGS = new Set([
+  // Not Interested toggle dropdown
+  'other_languages', 'already_paid', 'not_available_for_webinar',
+  'no_diabetes', 'no_sugar_interested', 'no_sugar_not_interested',
+  'not_register', 'just_for_knowledge', 'call_disconnected',
+  'wrong_number', 'already_attended',
+  // Second-DNP choice card (the three non-DNP options)
+  'switch_off', 'out_of_service', 'no_ring',
+]);
+
+// Allowed values for lead_tag — the modal computes this via
+// classifyLeadTag() OR forces 'JUNK' when a subtag is set. The route
+// trusts and persists what it receives, so the badge in Completed Calls
+// reflects exactly what the caller saw at save time.
+const ALLOWED_LEAD_TAGS = new Set(['HOT', 'WARM', 'COLD', 'JUNK']);
+
 router.post('/leads/:id/note', async (req, res) => {
   const lead_id = req.params.id;
   const {
@@ -654,10 +673,17 @@ router.post('/leads/:id/note', async (req, res) => {
     already_paid, webinar_attended, available_for_webinar, next_batch_joining,
     outcome, follow_up_at, call_id,
     interested,
+    outcome_subtag, lead_tag,
   } = req.body || {};
 
   if (!ALLOWED_OUTCOMES.includes(outcome)) {
     return res.status(422).json({ error: 'outcome must be one of: ' + ALLOWED_OUTCOMES.join(', ') });
+  }
+  if (outcome_subtag != null && outcome_subtag !== '' && !ALLOWED_OUTCOME_SUBTAGS.has(outcome_subtag)) {
+    return res.status(422).json({ error: 'invalid outcome_subtag' });
+  }
+  if (lead_tag != null && lead_tag !== '' && !ALLOWED_LEAD_TAGS.has(lead_tag)) {
+    return res.status(422).json({ error: 'invalid lead_tag' });
   }
   // 'not_picked' and 'auto_paused' both mean the caller never reached the
   // customer, so the discovery-field validations don't apply.
@@ -699,8 +725,8 @@ router.post('/leads/:id/note', async (req, res) => {
           range_for, patient_age, diet_status, takes_medicine, note,
           hba1c, other_languages, working_professional, location,
           already_paid, webinar_attended, available_for_webinar, next_batch_joining,
-          outcome, follow_up_at, interested)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+          outcome, follow_up_at, interested, outcome_subtag)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
        RETURNING id, created_at`,
       [
         lead_id, req.caller.id, call_id || null,
@@ -715,6 +741,7 @@ router.post('/leads/:id/note', async (req, res) => {
         outcome,
         outcome === 'follow_up' ? follow_up_at : null,
         interested === 'yes' || interested === 'no' ? interested : null,
+        outcome_subtag || null,
       ]
     );
 
@@ -729,14 +756,16 @@ router.post('/leads/:id/note', async (req, res) => {
     const parkForNextBatch = next_batch_joining === 'yes';
     await client.query(
       `UPDATE leads
-          SET last_note_outcome     = $2,
-              last_note_at          = NOW(),
-              follow_up_at          = $3,
-              completed_at          = CASE WHEN $2 IN ('completed','not_interested') THEN NOW() ELSE NULL END,
-              last_note_interested  = $4,
-              full_name             = COALESCE(NULLIF($5, ''), full_name),
-              next_batch_parked     = CASE WHEN $7 THEN TRUE  ELSE next_batch_parked    END,
-              next_batch_parked_at  = CASE WHEN $7 THEN NOW() ELSE next_batch_parked_at END
+          SET last_note_outcome         = $2,
+              last_note_at              = NOW(),
+              follow_up_at              = $3,
+              completed_at              = CASE WHEN $2 IN ('completed','not_interested') THEN NOW() ELSE NULL END,
+              last_note_interested      = $4,
+              full_name                 = COALESCE(NULLIF($5, ''), full_name),
+              next_batch_parked         = CASE WHEN $7 THEN TRUE  ELSE next_batch_parked    END,
+              next_batch_parked_at      = CASE WHEN $7 THEN NOW() ELSE next_batch_parked_at END,
+              last_note_outcome_subtag  = $8,
+              lead_tag                  = COALESCE($9, lead_tag)
         WHERE id = $1
           AND assigned_user_id = $6`,
       [
@@ -747,6 +776,8 @@ router.post('/leads/:id/note', async (req, res) => {
         cleanName,
         req.caller.id,
         parkForNextBatch,
+        outcome_subtag || null,
+        lead_tag || null,
       ]
     );
 

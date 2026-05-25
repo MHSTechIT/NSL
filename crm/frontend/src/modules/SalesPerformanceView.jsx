@@ -950,6 +950,14 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
      for the performance query. */
   const [customTime, setCustomTime] = useState({ hh: '11', mm: '59', ampm: 'PM' });
 
+  /* TL filter — picks a single team leader to narrow the page to only
+     the callers reporting to them (plus the TL themselves). '' = no
+     filter. Cascades into BOTH the Salesperson dropdown's option list
+     AND the visibleRows filter applied to the table. */
+  const [tlFilter, setTlFilter] = useState('');
+  const [tlOpen,   setTlOpen]   = useState(false);
+  const tlRef = useRef(null);
+
   /* Categories multi-select dropdown — combines status (Active/Paused) and
      role (Junior/Senior/Team Lead/Manager/Trainer/Admin) into a single
      filter pane with checkboxes. Values are namespaced strings like
@@ -1162,6 +1170,40 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [customRangeOpen]);
 
+  /* Outside-click closes the TL filter dropdown. */
+  useEffect(() => {
+    if (!tlOpen) return undefined;
+    function onDocClick(e) {
+      if (tlRef.current && !tlRef.current.contains(e.target)) setTlOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [tlOpen]);
+
+  /* Team-leader options for the TL dropdown (always all TLs, ignoring
+     any other active filter so the user can switch between them freely). */
+  const teamLeaderOptions = useMemo(
+    () => callers.filter(c => c.role === 'team_leader').sort((a, b) =>
+      String(a.full_name || '').localeCompare(String(b.full_name || ''))
+    ),
+    [callers]
+  );
+
+  /* Caller list after the TL filter is applied. When tlFilter is set,
+     keep only callers whose team_leader_id matches OR the TL themselves
+     (so the TL still appears in their own queue). Empty string keeps
+     the full list. */
+  const callersForView = useMemo(() => {
+    if (!tlFilter) return callers;
+    return callers.filter(c => c.team_leader_id === tlFilter || c.id === tlFilter);
+  }, [callers, tlFilter]);
+
+  /* Caller-id Set for the visibleRows filter — fast O(1) membership. */
+  const callersForViewIds = useMemo(
+    () => new Set(callersForView.map(c => c.id)),
+    [callersForView]
+  );
+
   /* Visible rows = data.rows after applying:
        • the multi-select salesperson filter
        • the active/paused status quick-filter pills
@@ -1175,6 +1217,7 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
   const visibleRows = data.rows.filter(r => {
     if (statusFilter === 'active' && r.is_active === false) return false;
     if (statusFilter === 'paused' && r.is_active !== false) return false;
+    if (tlFilter && !callersForViewIds.has(r.caller_id)) return false;
     if (salespeopleSel.size > 0 && !salespeopleSel.has(r.caller_id)) return false;
     if (selectedRoles.size > 0 && !selectedRoles.has(r.role)) return false;
     if (catStatuses.length > 0) {
@@ -1305,52 +1348,33 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
         }
       `}</style>
 
-      {/* Refresh + Export CSV portal — visually mounts beside the tab bar
-          in SalesDashboardModule via the parent's actions slot. Keeps the
-          handlers + state local to this view while sharing the tab-bar row. */}
-      {actionsSlotEl && createPortal(
-        <>
-          {lastUpdated && (
-            <span style={{ fontSize: '0.68rem', color: 'rgba(91,33,182,0.45)' }}>
-              Last updated: {lastUpdated}
-            </span>
-          )}
-          <button onClick={fetchData} style={{
-            height: '2.1rem', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(91,33,182,0.25)',
-            background: '#fff', color: '#5B21B6',
-            fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem', fontWeight: 700, cursor: 'pointer',
-          }}>↻ Refresh</button>
-          <button
-            onClick={() => setExportOpen(true)}
-            disabled={data.rows.length === 0}
-            style={{
-              height: '2.1rem', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(91,33,182,0.25)',
-              background: '#fff', color: '#5B21B6', fontWeight: 700, fontSize: '0.80rem',
-              fontFamily: 'Outfit, sans-serif',
-              cursor: data.rows.length === 0 ? 'not-allowed' : 'pointer',
-              opacity: data.rows.length === 0 ? 0.5 : 1,
-            }}
-          >
-            ⤓ Export CSV
-          </button>
-        </>,
-        actionsSlotEl
-      )}
+      {/* Refresh + Export CSV portal — REMOVED. The actions are now
+          inlined into Row 1 of the filter card below. The actionsSlotEl
+          prop from the parent dashboard is left in place but unused so
+          the parent can keep passing it without breaking. */}
 
       {/* Filter bar — always visible. Must outrank the sticky caller-card
           headers (z-index 20) so the popup dropdowns (Categories / Webinar
           / Salesperson / Custom-date calendar) render ABOVE the table
-          headers when their parent's stacking context inherits from here. */}
+          headers when their parent's stacking context inherits from here.
+          Now laid out as TWO rows:
+            Row 1 — Today / Custom pills + custom-date picker + Last
+                    updated + Refresh + Export CSV (the actions are
+                    inlined here rather than portaled into the tab-bar
+                    slot per the new design).
+            Row 2 — Categories / Webinar / TL / Salesperson dropdowns. */}
       <div className="sp-filter-bar" style={{
         position: 'relative',
         zIndex: 60,
-        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        display: 'flex', flexDirection: 'column', gap: 10,
         background: '#EFE9F7',
         borderRadius: 14,
         border: '1px solid rgba(139,92,246,0.15)',
         padding: '10px 14px', marginBottom: 16,
         boxShadow: '0 8px 24px rgba(91,33,182,0.10)',
       }}>
+        {/* Row 1 — date preset pills + actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         {[
           { id: 'today',  label: 'Today' },
           { id: 'custom', label: 'Custom' },
@@ -1653,11 +1677,47 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
           );
         })()}
 
+        {/* Last updated + Refresh + Export CSV — inlined into Row 1 per
+            the new layout. Previously these were portaled into the
+            parent SalesDashboardModule's tab-bar actions slot. */}
+        <div style={{ flex: 1 }} />
+        {lastUpdated && (
+          <span style={{ fontSize: '0.72rem', color: 'rgba(91,33,182,0.55)', whiteSpace: 'nowrap' }}>
+            Last updated: {lastUpdated}
+          </span>
+        )}
+        <button onClick={fetchData} style={{
+          height: '2.1rem', padding: '0 14px', borderRadius: 10,
+          border: '1px solid rgba(91,33,182,0.25)',
+          background: '#fff', color: '#5B21B6',
+          fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem', fontWeight: 700,
+          cursor: 'pointer', whiteSpace: 'nowrap',
+        }}>↻ Refresh</button>
+        <button
+          onClick={() => setExportOpen(true)}
+          disabled={data.rows.length === 0}
+          style={{
+            height: '2.1rem', padding: '0 14px', borderRadius: 10,
+            border: '1px solid rgba(91,33,182,0.25)',
+            background: '#fff', color: '#5B21B6',
+            fontFamily: 'Outfit, sans-serif', fontSize: '0.80rem', fontWeight: 700,
+            cursor: data.rows.length === 0 ? 'not-allowed' : 'pointer',
+            opacity: data.rows.length === 0 ? 0.5 : 1,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          ⤓ Export CSV
+        </button>
+        </div>
+        {/* Row 2 — Categories / Webinar / TL / Salesperson dropdowns */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+
         {/* Categories — unified multi-select dropdown with status + role
             checkboxes. Within the dropdown the user can pick any combo of
             Active / Paused / Junior / Senior / Team Lead / Manager / Trainer
             / Admin. Filters apply AND across groups, OR within a group. */}
-        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', marginLeft: 8 }}>Categories</span>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 0 }}>
+        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)' }}>Categories</span>
         <div ref={categoriesRef} style={{ position: 'relative' }}>
           <button
             type="button"
@@ -1666,7 +1726,7 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
               height: '2.1rem', padding: '0 32px 0 12px', borderRadius: 10,
               border: '1px solid rgba(139,92,246,0.25)', background: '#fff',
               fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#3B0764',
-              cursor: 'pointer', minWidth: 180, textAlign: 'left',
+              cursor: 'pointer', minWidth: 140, textAlign: 'left',
               position: 'relative',
             }}
           >
@@ -1752,11 +1812,13 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
             </div>
           )}
         </div>
+        </div>
 
         {/* Webinar custom dropdown — has an embedded search input so admins
             can filter a long webinar list. Single-select (one webinar at a
-            time, plus "All webinars"). */}
-        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', marginLeft: 8 }}>Webinar</span>
+            time, plus "All webinars"). Wrapped so label sticks to dropdown. */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 8 }}>
+        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)' }}>Webinar</span>
         <div ref={webinarRef} style={{ position: 'relative' }}>
           {(() => {
             const selectedWebinar = webinars.find(w => String(w.id) === String(webinarId));
@@ -1786,7 +1848,7 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
                     height: '2.1rem', padding: '0 32px 0 12px', borderRadius: 10,
                     border: '1px solid rgba(139,92,246,0.25)', background: '#fff',
                     fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#3B0764',
-                    cursor: 'pointer', minWidth: 200, textAlign: 'left',
+                    cursor: 'pointer', minWidth: 140, textAlign: 'left',
                     position: 'relative',
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                   }}
@@ -1885,10 +1947,111 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
             );
           })()}
         </div>
+        </div>
+
+        {/* TL filter — single-select dropdown listing every team leader.
+            Picking one narrows the Salesperson dropdown AND the table to
+            only callers reporting to that TL (plus the TL themselves).
+            Wrapped in an inline-flex so the label sticks to its trigger
+            when the toolbar wraps to a second row. */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 8 }}>
+          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)' }}>TL</span>
+          <div ref={tlRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setTlOpen(o => !o)}
+              style={{
+                height: '2.1rem', padding: '0 32px 0 12px', borderRadius: 10,
+                border: '1px solid rgba(139,92,246,0.25)',
+                background: tlFilter ? 'rgba(91,33,182,0.08)' : '#fff',
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#3B0764',
+                cursor: 'pointer', minWidth: 140, textAlign: 'left',
+                position: 'relative',
+              }}
+            >
+              {tlFilter
+                ? (teamLeaderOptions.find(c => c.id === tlFilter)?.full_name || 'Team Leader')
+                : 'All TLs'}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                style={{ position: 'absolute', right: 10, top: '50%', transform: `translateY(-50%) rotate(${tlOpen ? 180 : 0}deg)`, transition: 'transform 200ms' }}>
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {tlOpen && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+                minWidth: 220, maxHeight: 320, overflowY: 'auto',
+                background: '#fff', borderRadius: 10,
+                border: '1px solid rgba(209,196,240,0.60)',
+                boxShadow: '0 12px 36px rgba(91,33,182,0.20)',
+                padding: 4, zIndex: 50,
+                fontFamily: 'Outfit, sans-serif',
+              }}>
+                {/* All TLs — clears the filter */}
+                <button
+                  type="button"
+                  onClick={() => { setTlFilter(''); setTlOpen(false); }}
+                  style={{
+                    width: '100%', textAlign: 'left',
+                    padding: '8px 10px', borderRadius: 6, border: 'none',
+                    background: !tlFilter ? 'rgba(91,33,182,0.10)' : 'transparent',
+                    color: !tlFilter ? '#5B21B6' : 'rgba(59,7,100,0.85)',
+                    fontWeight: !tlFilter ? 700 : 600, fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid rgba(209,196,240,0.40)', marginBottom: 4,
+                  }}
+                  onMouseEnter={e => { if (tlFilter) e.currentTarget.style.background = 'rgba(91,33,182,0.05)'; }}
+                  onMouseLeave={e => { if (tlFilter) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  All TLs
+                </button>
+                {teamLeaderOptions.length === 0 ? (
+                  <div style={{ padding: '12px 10px', fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)', textAlign: 'center' }}>
+                    No team leaders configured
+                  </div>
+                ) : teamLeaderOptions.map(tl => {
+                  const active = tlFilter === tl.id;
+                  const teamSize = callers.filter(c => c.team_leader_id === tl.id).length;
+                  return (
+                    <button
+                      key={tl.id}
+                      type="button"
+                      onClick={() => { setTlFilter(tl.id); setTlOpen(false); }}
+                      style={{
+                        width: '100%', textAlign: 'left',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                        padding: '8px 10px', borderRadius: 6, border: 'none',
+                        background: active ? 'rgba(91,33,182,0.10)' : 'transparent',
+                        color: active ? '#5B21B6' : 'rgba(59,7,100,0.85)',
+                        fontWeight: active ? 700 : 600, fontSize: '0.82rem',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(91,33,182,0.04)'; }}
+                      onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {tl.full_name}{tl.department ? ` · ${tl.department}` : ''}
+                      </span>
+                      <span style={{
+                        flexShrink: 0, fontSize: '0.66rem', fontWeight: 800,
+                        background: 'rgba(91,33,182,0.10)', color: '#5B21B6',
+                        padding: '2px 7px', borderRadius: 50,
+                      }}>
+                        {teamSize}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Multi-select salesperson picker. Trigger button shows count;
-            panel has Select-all + per-caller checkboxes. */}
-        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)', marginLeft: 8 }}>Salesperson</span>
+            panel has Select-all + per-caller checkboxes. Wrapped in an
+            inline-flex with its label so they stay together on wrap. */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 8 }}>
+        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'rgba(91,33,182,0.65)' }}>Salesperson</span>
         <div ref={salespeopleRef} style={{ position: 'relative' }}>
           <button
             type="button"
@@ -1897,14 +2060,14 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
               height: '2.1rem', padding: '0 32px 0 12px', borderRadius: 10,
               border: '1px solid rgba(139,92,246,0.25)', background: '#fff',
               fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem', color: '#3B0764',
-              cursor: 'pointer', minWidth: 200, textAlign: 'left',
+              cursor: 'pointer', minWidth: 140, textAlign: 'left',
               position: 'relative',
             }}
           >
             {salespeopleSel.size === 0
               ? 'All salespeople'
               : salespeopleSel.size === 1
-                ? (callers.find(c => salespeopleSel.has(c.id))?.full_name || '1 selected')
+                ? (callersForView.find(c => salespeopleSel.has(c.id))?.full_name || '1 selected')
                 : `${salespeopleSel.size} selected`}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
               style={{ position: 'absolute', right: 10, top: '50%', transform: `translateY(-50%) rotate(${salespeopleOpen ? 180 : 0}deg)`, transition: 'transform 200ms' }}>
@@ -1964,8 +2127,8 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
               {(() => {
                 const q = salespeopleQuery.trim().toLowerCase();
                 const filtered = q
-                  ? callers.filter(c => (c.full_name || '').toLowerCase().includes(q))
-                  : callers;
+                  ? callersForView.filter(c => (c.full_name || '').toLowerCase().includes(q))
+                  : callersForView;
                 if (filtered.length === 0) {
                   return (
                     <div style={{ padding: '12px 10px', fontSize: '0.78rem', color: 'rgba(91,33,182,0.55)', textAlign: 'center' }}>
@@ -2018,6 +2181,8 @@ export default function SalesPerformanceView({ token, actionsSlotEl }) {
             </div>
           )}
         </div>
+        </div>
+        </div>{/* /Row 2 */}
       </div>
 
       {error && (

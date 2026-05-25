@@ -7,10 +7,10 @@ import happyBotRaw     from '../assets/bot/robot-idle.json';
 import confettiData    from '../assets/bot/confetti.json';
 import { lockArmsDown, normalizeLoop } from '../utils/patchRobotArm';
 import { setActivityStatus, setActivitySub } from '../utils/callerActivity';
-import { playRobotClip, ROBOT_CLIP } from '../utils/robotAudio';
+import { playRobotClip, stopRobotClip, ROBOT_CLIP } from '../utils/robotAudio';
 import SourceBadge from '../components/SourceBadge';
 import useRobotNudge from '../hooks/useRobotNudge';
-import RobotGuide from '../components/RobotGuide';
+import RobotGuide, { stopAllRobotGuideAudio } from '../components/RobotGuide';
 import { useTimerSettings } from '../context/TimerSettingsContext';
 // Tag-specific celebration audio. Played alongside the speech-bubble line.
 import hotLeadMp3   from '../assets/audio/hot-lead.mp3';
@@ -88,13 +88,17 @@ function fmtPhone(p) {
   return digits.startsWith('91') ? '+' + digits : '+91 ' + digits;
 }
 
-export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId, setMood, pendingAutoStart, clearPendingAutoStart }) {
+export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId, setMood, pendingAutoStart, clearPendingAutoStart, onCount }) {
   const t = useTimerSettings();
   const [leads, setLeads]         = useState([]);
+  // Bubble the lead count up to CallerShell so it can render the "N
+  // leads" chip under the page header. Fires on every length change.
+  useEffect(() => { if (typeof onCount === 'function') onCount(leads.length); }, [leads.length, onCount]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');
   const [highlightId, setHighlight] = useState(null);
   const [editLead, setEditLead]   = useState(null);   // which lead's note modal is open
+
   const sseRef = useRef(null);
   const rowRefs = useRef({});
 
@@ -124,6 +128,163 @@ export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [autoError, setAutoError]       = useState('');
   const cooldownTimerRef = useRef(null);
+
+  /* ── Modal-state persistence across browser refreshes ────────────────
+     A single sessionStorage key holds the snapshot needed to rebuild
+     the exact card the caller saw before refresh:
+       { lead_id, phase, cutCount, customerAttempt, agentAttempts,
+         dnpRetry, formTimerDeadline, autoMode, savedAt }
+     The MODAL reports its own state (phase / counters / timer deadline)
+     up via the onStateChange prop; this module merges in lead_id +
+     autoMode and writes the whole thing.
+
+     Must be declared AFTER `autoMode` is in scope — otherwise the
+     useEffect's dep array hits a temporal-dead-zone ReferenceError
+     during the first render. */
+  const MODAL_STATE_KEY        = 'mhs_caller_modal_state';
+  const MODAL_RESTORE_MAX_AGE  = 30 * 60 * 1000; // 30 min freshness cap
+  // Whitelist of phases that are SAFE to resume after a refresh.
+  // Includes only phases where the caller is genuinely "waiting" for
+  // something — confirming the extension, on a live call, filling the
+  // form, choosing a DNP reason, or seeing the paused screen.
+  //
+  // Ringing-class phases (agent_ringing_*, customer_ringing,
+  // recall_ringing) are DELIBERATELY excluded — by the time the page
+  // reloads, Tata's call has timed out and the banner would lie about
+  // an in-flight call. agent_reason_card is excluded because its state
+  // depends on counters that already reset on refresh. dnp_alert is a
+  // 1.5 s transient that auto-advances.
+  //
+  // When the saved phase isn't in this set, the snapshot is wiped and
+  // the modal opens to ext_check (fresh start) — which is what the
+  // user expects when they click Start Auto Call.
+  const VALID_RESTORE_PHASES = new Set([
+    'ext_check',
+    // Ring phases — preserved so refresh keeps the same banner the
+    // caller saw before reload (no spurious "first call again"
+    // transition). Pairs with the modal hydrating agentAttempts and
+    // phaseDeadline from the snapshot so the synthetic 35s timer
+    // resumes from its original deadline instead of restarting and
+    // accidentally placing a second Tata call.
+    'agent_ringing_1',
+    'agent_ringing_2',
+    'customer_ringing',
+    'recall_ringing',
+    'customer_on_call',
+    'form_window',
+    'form_reason_card',
+    'dnp_choice',
+    'auto_paused',
+  ]);
+  const restoredOnceRef        = useRef(false);
+  // Tracks whether we've ever had an editLead set. Prevents the mount-
+  // time fire of the snapshot-write effect (when editLead is still
+  // null) from wiping a perfectly good sessionStorage snapshot before
+  // the restore effect has had a chance to read it. Only flips true
+  // once a modal is actually opened OR a snapshot is restored.
+  const hadEditLeadRef         = useRef(false);
+  const [restoredSnapshot, setRestoredSnapshot] = useState(null);
+  const [modalStateFromChild,  setModalStateFromChild] = useState(null);
+
+  // Write the snapshot whenever editLead, autoMode, or the child's
+  // reported modal-state changes. Wipes ONLY when a previously-open
+  // modal closes (an intentional close) — never on the initial mount
+  // where editLead starts null.
+  useEffect(() => {
+    try {
+      if (!editLead?.id) {
+        // No modal currently open. Wipe ONLY if a modal was previously
+        // open in this session (real close action). On the initial
+        // mount of a fresh page, hadEditLeadRef is false so we leave
+        // the saved snapshot alone — the restore effect needs it.
+        if (hadEditLeadRef.current) {
+          sessionStorage.removeItem(MODAL_STATE_KEY);
+        }
+        return;
+      }
+      // A modal is now open — note that for the rest of this session.
+      hadEditLeadRef.current = true;
+      const child = modalStateFromChild || {};
+      const snap = {
+        lead_id:              editLead.id,
+        phase:                child.phase || null,
+        cutCount:             child.cutCount ?? 0,
+        customerAttempt:      child.customerAttempt ?? 1,
+        agentAttempts:        child.agentAttempts ?? 0,
+        dnpRetry:             !!child.dnpRetry,
+        customerAnsweredOnce: !!child.customerAnsweredOnce,
+        formTimerDeadline:    child.formTimerDeadline ?? null,
+        phaseDeadline:        child.phaseDeadline ?? null,
+        autoMode,
+        savedAt:              Date.now(),
+      };
+      sessionStorage.setItem(MODAL_STATE_KEY, JSON.stringify(snap));
+    } catch { /* sandbox / storage disabled */ }
+  }, [editLead?.id, autoMode, modalStateFromChild]);
+
+  /* On leads load, restore the snapshot ONCE per mount — picks the saved
+     lead out of the freshly-fetched queue and pre-loads the modal with
+     the saved phase / counters / timer. Skips if:
+       • a modal is already open (e.g. fresh click)
+       • leads haven't loaded yet
+       • snapshot missing, stale (>30 min), corrupt, or its lead is no
+         longer in this caller's queue (admin reassigned it) */
+  useEffect(() => {
+    if (restoredOnceRef.current || editLead || !leads.length) return;
+    let snap = null;
+    try {
+      const raw = sessionStorage.getItem(MODAL_STATE_KEY);
+      if (raw) snap = JSON.parse(raw);
+    } catch { /* corrupt JSON — wipe */ }
+    if (!snap || !snap.lead_id) { try { sessionStorage.removeItem(MODAL_STATE_KEY); } catch {} return; }
+    if ((Date.now() - (snap.savedAt || 0)) > MODAL_RESTORE_MAX_AGE) {
+      try { sessionStorage.removeItem(MODAL_STATE_KEY); } catch {}
+      return;
+    }
+    // Lead-membership check — if the saved lead is no longer in this
+    // caller's queue (e.g. admin reassigned), wipe and skip.
+    const match = leads.find(l => l.id === snap.lead_id);
+    if (!match) {
+      try { sessionStorage.removeItem(MODAL_STATE_KEY); } catch {}
+      return;
+    }
+    // Phase resumability check — some phases (ringing, reason cards,
+    // transient alerts) can't be safely resumed because Tata's call
+    // state has moved on. Instead of wiping the snapshot entirely and
+    // dropping the user back on the queue, we ALWAYS reopen the modal
+    // for the lead — but null out the phase so the modal falls back
+    // to its default (lead.last_call_id ? agent_ringing_1 : ext_check).
+    // The formTimerDeadline is also nulled because it only makes sense
+    // alongside form_window / form_reason_card. This means a refresh
+    // during ringing returns you to ext_check on the same lead, ready
+    // to confirm the extension and place a fresh call.
+    let safeSnap = snap;
+    if (snap.phase && !VALID_RESTORE_PHASES.has(snap.phase)) {
+      // Phase isn't safely resumable — null out the phase AND any
+      // phase-specific timers so the modal opens at its default
+      // (ext_check / agent_ringing_1 from lead.last_call_id) without
+      // resuming a stale form-window countdown or ring-timer deadline.
+      safeSnap = { ...snap, phase: null, formTimerDeadline: null, phaseDeadline: null };
+    }
+    restoredOnceRef.current = true;
+    /* Wipe inactivity nudge timestamps on restore — a refresh is itself
+       a deliberate user action, so it should reset "you've been idle"
+       timers instead of resuming them. Without this, refreshing during
+       ext_check (or any reason-card) re-reads the deadline-anchored
+       start time, may compute a count past maxRepeats, and immediately
+       fires onExhausted → self-pauses the account.
+
+       Task timers (the 45-second form-window countdown) are NOT touched
+       here — they live in snap.formTimerDeadline and resume correctly. */
+    try {
+      ['ext', 'agent', 'form'].forEach(kind => {
+        localStorage.removeItem(`mhs_nudge_${kind}_${match.id}`);
+      });
+    } catch { /* localStorage disabled */ }
+    if (safeSnap.autoMode) setAutoMode(safeSnap.autoMode);
+    setRestoredSnapshot(safeSnap);
+    setEditLead(match);
+  }, [leads, editLead]);
   /* Tag from the just-saved lead — used to pick the right speech-bubble
      message in the post-call celebration overlay. Cleared between calls
      so a stale tag never blends into the next celebration. */
@@ -633,6 +794,38 @@ export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId
      array. */
   function startAutoModeWith(arr) {
     if (!arr || !arr.length) return;
+    // Silence every robot audio source before opening the first lead so
+    // the SmartFlow extension card opens to dead silence — both the
+    // playRobotClip path (idle nudges, etc.) and the corner RobotGuide
+    // path (clip 41 idle nudge) are killed atomically.
+    try { stopRobotClip();           } catch { /* ignore */ }
+    try { stopAllRobotGuideAudio();  } catch { /* ignore */ }
+    // Fresh Start Auto Call → clear any restored snapshot so the modal
+    // opens cleanly at ext_check. Without this, a snapshot left over
+    // from a previous refresh-restore could trick the modal into
+    // initializing at a stale phase (e.g. agent_ringing_2 → banner
+    // says "Triggering the first call again" before the caller has
+    // even confirmed the extension).
+    setRestoredSnapshot(null);
+    setModalStateFromChild(null);
+    try { sessionStorage.removeItem(MODAL_STATE_KEY); } catch { /* ignore */ }
+    /* Fresh Start Auto Call → wipe nudge start-timestamps for every lead
+       in the queue so the ext_check / reason-card timers genuinely begin
+       at 0. Without this, leftover timestamps from a previous session
+       could make the amber "nanba irukkingala?" bubble (and any other
+       nudge) fire immediately on the first render, instead of after
+       the admin-configured `extAlertNudgeIntervalMs` of inaction.
+
+       The snapshot-restore path (browser refresh) does NOT come through
+       here, so mid-nudge state survives a refresh as intended. */
+    try {
+      arr.forEach(l => {
+        if (!l?.id) return;
+        ['ext', 'agent', 'form'].forEach(kind => {
+          localStorage.removeItem(`mhs_nudge_${kind}_${l.id}`);
+        });
+      });
+    } catch { /* localStorage disabled */ }
     const queue = [...arr];          // snapshot of the fresh list
     setAutoQueue(queue);
     setAutoIndex(0);
@@ -1007,6 +1200,14 @@ export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId
           key={editLead.id}
           jwt={jwt}
           lead={editLead}
+          /* Refresh-restore plumbing. restoreState seeds the modal's
+             initial phase / counters / timer when reopening after a
+             refresh. onStateChange bubbles every change back up so the
+             sessionStorage snapshot stays current. The snapshot is
+             passed once on mount (key={editLead.id} guarantees a fresh
+             instance) — subsequent state lives in the modal. */
+          restoreState={restoredSnapshot && restoredSnapshot.lead_id === editLead.id ? restoredSnapshot : null}
+          onStateChange={setModalStateFromChild}
           /* Mood bridge — flip the floating mascot to `thinking` whenever the
              modal lands on a reason card (caller is being asked why a call
              didn't connect or why the form wasn't filled). Return to `idle`
@@ -1030,6 +1231,12 @@ export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId
           onSaved={(outcome, meta) => {
             const finishedLead = editLead;
             setEditLead(null);
+            // Drop any restored snapshot — the lead is done, we don't
+            // want a subsequent leads-load to re-open it. The snapshot-
+            // write effect also fires when editLead → null and removes
+            // sessionStorage; this just resets the in-memory restore ref.
+            setRestoredSnapshot(null);
+            setModalStateFromChild(null);
             const remaining = leads.filter(x => x.id !== finishedLead.id);
             setLeads(remaining);
             // Capture the lead tag (HOT/WARM/COLD/JUNK) so the celebration
@@ -1288,6 +1495,14 @@ export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId
 
       {/* ── Break reason picker ── */}
       {breakStep === 'choose' && (
+        <>
+        {/* Single-column fallback for narrow phones — the 2x2 grid would
+            squeeze each button too tight under ~420 px wide. */}
+        <style>{`
+          @media (max-width: 420px) {
+            .break-picker-grid { grid-template-columns: 1fr !important; }
+          }
+        `}</style>
         <div
           style={{
             position: 'fixed', inset: 0, zIndex: 9600,
@@ -1328,7 +1543,12 @@ export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId
               rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }} />
           </div>
           <div onClick={e => e.stopPropagation()} style={{
-            width: '100%', maxWidth: 380, background: '#fff', borderRadius: 22,
+            // Wider card now that the four break buttons live in a 2x2
+            // grid (Tea / Lunch on the left, 2-Hour / Other on the right)
+            // instead of a tall single column. Cuts the card's height ~
+            // in half so the whole prompt fits on short screens without
+            // scrolling.
+            width: '100%', maxWidth: 520, background: '#fff', borderRadius: 22,
             padding: '26px 22px', boxShadow: '0 24px 64px rgba(91,33,182,0.30)',
           }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
@@ -1364,7 +1584,14 @@ export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId
                   : `${3 - breakChooseStrikes} chances left before auto-stop.`}
               </div>
             )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{
+              // 2x2 grid: Tea + Lunch on the left, 2-Hour + Other on
+              // the right. Auto-collapses to a single column under
+              // 420 px viewport so phones still get a comfortable tap
+              // target.
+              display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8,
+            }}
+            className="break-picker-grid">
               <button
                 onClick={() => { if (!teaExhausted) startBreak('Tea Break', 15); }}
                 disabled={teaExhausted}
@@ -1450,6 +1677,7 @@ export default function AssignedLeadsModule({ jwt, isActive, externalHighlightId
             </button>
           </div>
         </div>
+        </>
       )}
 
       {/* ── "Other" reason — custom message + minutes ── */}

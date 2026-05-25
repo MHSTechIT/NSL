@@ -36,6 +36,33 @@ const QUALITY_BADGE = {
   junk: { bg: 'rgba(107,114,128,0.18)', fg: '#374151', label: 'Junk' },
 };
 
+/* Outcome subtag → human label. Kept in sync with
+   ALLOWED_OUTCOME_SUBTAGS in backend/routes/caller.js and the option
+   arrays in LeadCallNoteModal.jsx. Unknown values fall back to a
+   titlecased version of the snake_case key. */
+const SUBTAG_LABEL = {
+  // Not Interested dropdown
+  wrong_number:              'Wrong Number',
+  call_disconnected:         'Call Disconnected',
+  other_languages:           'Other Languages',
+  no_diabetes:               'No Diabetes',
+  no_sugar_interested:       'No Sugar — Interested',
+  no_sugar_not_interested:   'No Sugar — Not Interested',
+  already_paid:              'Already Paid',
+  already_attended:          'Already Attended',
+  not_available_for_webinar: 'Not Available for Webinar',
+  not_register:              'Not Registered',
+  just_for_knowledge:        'Just for Knowledge',
+  // Second-DNP choice card
+  switch_off:                'Switch Off',
+  out_of_service:            'Out of Service',
+  no_ring:                   'No Ring',
+};
+function subtagLabel(v) {
+  if (!v) return '';
+  return SUBTAG_LABEL[v] || v.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 const RANGE_LABEL = {
   '250+':         '250+',
   '200-250':      '200–250',
@@ -85,9 +112,13 @@ function fmtDuration(sec) {
   return m > 0 ? `${m}m ${r}s` : `${r}s`;
 }
 
-export default function CompletedLeadsModule({ jwt }) {
+export default function CompletedLeadsModule({ jwt, onCount }) {
+  // Bubble the count up to CallerShell for the header chip. Hook is
+  // declared below right after the leads state — defined here just to
+  // keep the prop visible at the top.
   const t = useTimerSettings();
   const [leads, setLeads]     = useState([]);
+  useEffect(() => { if (typeof onCount === 'function') onCount(leads.length); }, [leads.length, onCount]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [filter, setFilter]   = useState('all');     // all | hot | warm | cold | junk | second_call
@@ -333,6 +364,23 @@ function LeadRow({ lead, jwt, expanded, onToggle, onSaved }) {
             {qBadge && (
               <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 50, fontSize: '0.68rem', fontWeight: 700, background: qBadge.bg, color: qBadge.fg, whiteSpace: 'nowrap' }}>
                 {qBadge.label}
+              </span>
+            )}
+            {/* Subtag chip — the specific decline reason captured at
+                save time (Not Interested dropdown OR second-DNP card).
+                Renders only when present so pre-change rows stay clean. */}
+            {lead.last_note_outcome_subtag && (
+              <span
+                title={`Reason: ${subtagLabel(lead.last_note_outcome_subtag)}`}
+                style={{
+                  display: 'inline-block', padding: '2px 8px', borderRadius: 50,
+                  fontSize: '0.66rem', fontWeight: 700,
+                  background: 'rgba(91,33,182,0.08)', color: '#5B21B6',
+                  whiteSpace: 'nowrap',
+                  border: '1px solid rgba(91,33,182,0.18)',
+                }}
+              >
+                {subtagLabel(lead.last_note_outcome_subtag)}
               </span>
             )}
           </div>
