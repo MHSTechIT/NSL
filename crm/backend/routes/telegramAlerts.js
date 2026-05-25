@@ -19,7 +19,17 @@ const { sendTelegram }   = require('../utils/telegramNotifier');
 router.use(adminAuth);
 
 /* ── GET /api/admin/telegram-alerts ─────────────────────────────────── */
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  // TL scope: only recipients targeting THIS team_leader (so a TL sees
+  // exactly who gets notified when their team auto-pauses). Manager +
+  // super-admin see everything as before.
+  const tl = req.adminUser && req.adminUser.kind === 'tl';
+  const params = [];
+  let whereSQL = '';
+  if (tl) {
+    params.push(req.adminUser.id);
+    whereSQL = `WHERE r.target_type = 'team_leader' AND r.team_leader_id = $1`;
+  }
   try {
     const { rows } = await pool.query(`
       SELECT r.id,
@@ -32,8 +42,9 @@ router.get('/', async (_req, res) => {
              tl.full_name AS team_leader_name
         FROM telegram_alert_recipients r
         LEFT JOIN crm_users tl ON tl.id = r.team_leader_id
+       ${whereSQL}
        ORDER BY r.created_at DESC
-    `);
+    `, params);
     res.json({ recipients: rows });
   } catch (err) {
     console.error('GET /telegram-alerts error:', err.message);

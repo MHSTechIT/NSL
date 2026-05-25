@@ -15,9 +15,12 @@ function constantTimeEqual(a, b) {
 /* Guards every /api/admin/* route. A request is authorised if EITHER:
      • the bearer token is the super-admin password (full access), OR
      • the bearer token is a valid CRM-user JWT whose role is 'manager'
-       (scoped access — the crm-users endpoints filter to the manager's
-       department; everything else is full access).
-   Attaches req.adminUser so downstream routes can scope by department.
+       (department-scoped), OR
+     • the bearer token is a valid CRM-user JWT whose role is
+       'team_leader' (team-scoped — narrower than the manager scope;
+       see routes/admin.js, each endpoint adds a parallel WHERE
+       team_leader_id = $1 when req.adminUser.kind === 'tl').
+   Attaches req.adminUser so downstream routes can scope appropriately.
    Any other role, or an invalid token, → 401. */
 function adminAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -32,15 +35,27 @@ function adminAuth(req, res, next) {
   }
 
   // 2. Manager — a valid CRM-user JWT with role 'manager'.
+  // 3. Team Leader — same, role 'team_leader'. Carries the same fields
+  //    as the manager kind; the difference is interpreted per-route.
   try {
     const payload = verify(token);
-    if (payload && payload.user_id && payload.role === 'manager') {
-      req.adminUser = {
-        kind:       'manager',
-        id:         payload.user_id,
-        department: payload.department || null,
-      };
-      return next();
+    if (payload && payload.user_id) {
+      if (payload.role === 'manager') {
+        req.adminUser = {
+          kind:       'manager',
+          id:         payload.user_id,
+          department: payload.department || null,
+        };
+        return next();
+      }
+      if (payload.role === 'team_leader') {
+        req.adminUser = {
+          kind:       'tl',
+          id:         payload.user_id,
+          department: payload.department || null,
+        };
+        return next();
+      }
     }
   } catch (_) { /* not a valid JWT — fall through to 401 */ }
 

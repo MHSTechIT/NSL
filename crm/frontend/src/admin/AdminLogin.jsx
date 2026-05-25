@@ -8,7 +8,7 @@ const ROLE_ROUTE = {
   manager:       '/manager',        // dedicated 2-module manager dashboard
   trainer:       '/caller/senior',  // placeholder
   admin:         '/caller/senior',  // placeholder
-  team_leader:   '/caller/senior',  // placeholder
+  team_leader:   '/tl',             // dedicated TL dashboard (Web Reminder, team-scoped)
 };
 
 export default function AdminLogin({ onLogin }) {

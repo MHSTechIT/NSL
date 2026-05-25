@@ -32,6 +32,14 @@ function getSource(req) {
 /* ── GET /api/admin/leads ── */
 router.get('/leads', async (req, res) => {
   const source = getSource(req);
+  // TL scope: only leads currently assigned to a caller on this TL's team.
+  const tl = req.adminUser && req.adminUser.kind === 'tl';
+  const params = [source];
+  let scopeSQL = '';
+  if (tl) {
+    params.push(req.adminUser.id);
+    scopeSQL = `AND l.assigned_user_id IN (SELECT id FROM crm_users WHERE team_leader_id = $${params.length})`;
+  }
   try {
     const { rows } = await pool.query(`
       SELECT l.*,
@@ -40,13 +48,18 @@ router.get('/leads', async (req, res) => {
         FROM leads l
         LEFT JOIN crm_users u ON u.id = l.assigned_user_id
        WHERE l.source = $1
+         ${scopeSQL}
        ORDER BY l.created_at DESC
-    `, [source]);
+    `, params);
     res.json({ leads: rows, total: rows.length });
   } catch (err) {
     // assigned_user_id column may be missing on a stale schema — fallback
     if (err.message && err.message.includes('column')) {
       try {
+        // Stale-schema fallback can't TL-scope (no assigned_user_id column);
+        // simplest correct behaviour is to return empty for TLs in that
+        // case rather than leaking unscoped rows.
+        if (tl) return res.json({ leads: [], total: 0 });
         const { rows } = await pool.query('SELECT * FROM leads WHERE source = $1 ORDER BY created_at DESC', [source]);
         return res.json({ leads: rows, total: rows.length });
       } catch (_) { /* fallthrough */ }
@@ -70,6 +83,19 @@ router.get('/leads', async (req, res) => {
    pass ?limit=N to override (capped at 2000). */
 router.get('/completed-calls', async (req, res) => {
   const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit, 10) || 500));
+  // TL scope: only leads handled by a caller on this TL's team. We push
+  // the filter into the WHERE clause rather than mutating the SELECT
+  // shape so the frontend response contract stays identical for every
+  // role. Manager scope is currently NOT applied here (the existing
+  // super-admin behaviour) — left untouched to avoid changing manager
+  // semantics in this pass.
+  const tl = req.adminUser && req.adminUser.kind === 'tl';
+  const params = [limit];
+  let scopeSQL = '';
+  if (tl) {
+    params.push(req.adminUser.id);
+    scopeSQL = `AND l.assigned_user_id IN (SELECT id FROM crm_users WHERE id = $${params.length} OR team_leader_id = $${params.length})`;
+  }
   try {
     const { rows } = await pool.query(`
       SELECT l.id, l.full_name, l.whatsapp_number, l.email, l.source,
@@ -119,9 +145,10 @@ router.get('/completed-calls', async (req, res) => {
            LIMIT 1
         ) latest_call ON TRUE
        WHERE l.last_note_outcome IN ('completed', 'not_interested')
+         ${scopeSQL}
        ORDER BY l.last_note_at DESC NULLS LAST
        LIMIT $1
-    `, [limit]);
+    `, params);
     res.json({ leads: rows, total: rows.length });
   } catch (err) {
     console.error('admin/completed-calls error:', err.message);
@@ -324,6 +351,11 @@ router.get('/timer-settings', async (req, res) => {
    Clamps every value to BOUNDS, persists, restarts backend schedulers live,
    and broadcasts the change to every connected caller browser via SSE. */
 router.put('/timer-settings', async (req, res) => {
+  // Timer settings are global / department-level configuration. TLs see
+  // them read-only in the UI; defense-in-depth: reject the PUT too.
+  if (req.adminUser && req.adminUser.kind === 'tl') {
+    return res.status(403).json({ error: 'Team leaders cannot modify timer settings.' });
+  }
   try {
     const { mergeTimerSettings } = require('../utils/timerDefaults');
     const merged = mergeTimerSettings(req.body && req.body.settings);
@@ -923,8 +955,21 @@ router.get('/dashboard', async (req, res) => {
    keeps the real key in the DB. */
 router.get('/crm-users', async (req, res) => {
   try {
-    // A manager only sees users in their own department; super-admin sees all.
+    // Three scopes:
+    //   super  → every user
+    //   mgr    → users in the manager's department
+    //   tl     → the TL themselves + their direct reports (team_leader_id = self.id)
     const mgr = req.adminUser && req.adminUser.kind === 'manager';
+    const tl  = req.adminUser && req.adminUser.kind === 'tl';
+    let whereSQL = '';
+    let params   = [];
+    if (mgr) {
+      whereSQL = 'WHERE department = $1';
+      params   = [req.adminUser.department];
+    } else if (tl) {
+      whereSQL = 'WHERE id = $1 OR team_leader_id = $1';
+      params   = [req.adminUser.id];
+    }
     const { rows } = await pool.query(
       `SELECT id, full_name, email, phone, role, is_active,
               department, team_leader_id, manager_id, password_plain,
@@ -932,9 +977,9 @@ router.get('/crm-users', async (req, res) => {
               tata_smartflo_api_key, tata_outbound_route,
               created_at
          FROM crm_users
-        ${mgr ? 'WHERE department = $1' : ''}
+        ${whereSQL}
         ORDER BY created_at DESC`,
-      mgr ? [req.adminUser.department] : []
+      params
     );
     const tata = require('../utils/tataClient');
     const users = rows.map(u => ({
@@ -1010,16 +1055,29 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
     tata_extension, tata_account_type, tata_agent_number, tata_caller_id,
     tata_smartflo_api_key, tata_outbound_route,
   } = req.body;
+  // TL guard: TLs may only create caller-level users — no managers, no
+  // peer TLs, no admins. Reject early with a clear message so a leaked
+  // /admin/crm-users POST from a TL JWT can't escalate privileges.
+  const isTL = req.adminUser && req.adminUser.kind === 'tl';
+  if (isTL && role !== 'junior_caller' && role !== 'senior_caller') {
+    return res.status(403).json({ error: 'Team leaders can only create caller users.' });
+  }
   // A manager can only create users in their OWN department — override
-  // whatever the body sent. Super-admin uses the submitted department.
-  const effectiveDept = (req.adminUser && req.adminUser.kind === 'manager')
+  // whatever the body sent. TLs same: their own department. Super-admin
+  // uses the submitted department.
+  const effectiveDept = (req.adminUser && (req.adminUser.kind === 'manager' || req.adminUser.kind === 'tl'))
     ? req.adminUser.department
     : (department ? String(department).trim() : null);
   // A manager-created user always reports to that manager; only super-admin
-  // may assign a different manager.
+  // may assign a different manager. TLs don't set manager_id at all.
   const effectiveManagerId = (req.adminUser && req.adminUser.kind === 'manager')
     ? req.adminUser.id
-    : (manager_id || null);
+    : (isTL ? null : (manager_id || null));
+  // A TL-created caller is automatically assigned to that TL's team.
+  // Super-admin / manager submissions honour the request body.
+  const effectiveTeamLeaderId = isTL
+    ? req.adminUser.id
+    : (team_leader_id || null);
   try {
     const password_hash = await hashPassword(password);
     const { rows } = await pool.query(
@@ -1041,7 +1099,7 @@ router.post('/crm-users', crmUserValidators, async (req, res) => {
         role,
         password_hash,
         effectiveDept,
-        team_leader_id || null,
+        effectiveTeamLeaderId,
         tata_extension?.trim() || null,
         tata_account_type?.trim() || null,
         tata_agent_number?.trim() || null,
@@ -1190,6 +1248,42 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
     // A manager cannot reassign who a user reports to — only super-admin can.
     delete updates.manager_id;
   }
+  // TL scope: can only edit users on THEIR team (target.team_leader_id =
+  // self.id, OR the TL editing their own profile). TLs cannot move
+  // people between teams, change roles upward, change department, or
+  // edit manager_id.
+  if (req.adminUser && req.adminUser.kind === 'tl') {
+    try {
+      const { rows: tgt } = await pool.query(
+        'SELECT id, role, team_leader_id, department FROM crm_users WHERE id = $1',
+        [id]
+      );
+      if (tgt.length === 0) return res.status(404).json({ error: 'User not found.' });
+      const t = tgt[0];
+      const isSelf = t.id === req.adminUser.id;
+      const isMyReport = t.team_leader_id === req.adminUser.id;
+      if (!isSelf && !isMyReport) {
+        return res.status(403).json({ error: 'You can only manage users on your team.' });
+      }
+      // Role escalations blocked: a TL can leave existing role intact
+      // OR set a caller to the other caller level, but never to manager/
+      // admin/team_leader/trainer.
+      if (Object.prototype.hasOwnProperty.call(updates, 'role')) {
+        const r = updates.role;
+        if (r !== 'junior_caller' && r !== 'senior_caller') {
+          delete updates.role;
+        }
+      }
+      // Lock department / team membership / manager.
+      if (Object.prototype.hasOwnProperty.call(updates, 'department')) {
+        updates.department = t.department;
+      }
+      delete updates.team_leader_id;
+      delete updates.manager_id;
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to verify user.' });
+    }
+  }
 
   // When the admin flips is_active back to TRUE, also clear the SmartFlow
   // auto-pause bookkeeping so the next system-driven pause starts from a
@@ -1259,14 +1353,29 @@ router.patch('/crm-users/:id', crmUserPatchValidators, async (req, res) => {
    Admin pauses are excluded: they leave auto_paused_at NULL. The card's
    Resume button calls PATCH /crm-users/:id { is_active: true }, which
    clears auto_paused_at + auto_pause_reason so the row drops off this feed. */
-router.get('/auto-paused-callers', async (_req, res) => {
+router.get('/auto-paused-callers', async (req, res) => {
   try {
+    // TL scope: only the auto-paused callers on this TL's team.
+    // Manager + super-admin: department-wide / global as before.
+    const tl  = req.adminUser && req.adminUser.kind === 'tl';
+    const mgr = req.adminUser && req.adminUser.kind === 'manager';
+    let whereExtra = '';
+    let params     = [];
+    if (tl) {
+      whereExtra = 'AND team_leader_id = $1';
+      params     = [req.adminUser.id];
+    } else if (mgr) {
+      whereExtra = 'AND department = $1';
+      params     = [req.adminUser.department];
+    }
     const { rows } = await pool.query(
       `SELECT id, full_name, role, auto_paused_at, auto_pause_reason
          FROM crm_users
         WHERE is_active = FALSE
           AND auto_paused_at IS NOT NULL
-        ORDER BY auto_paused_at DESC`
+          ${whereExtra}
+        ORDER BY auto_paused_at DESC`,
+      params
     );
     res.json({ callers: rows });
   } catch (err) {

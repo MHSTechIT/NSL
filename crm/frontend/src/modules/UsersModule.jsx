@@ -28,7 +28,17 @@ function fmtDate(iso) {
   } catch { return '—'; }
 }
 
-export default function UsersModule({ token, lockedDepartment = null, lockedManagerId = null, actionsSlotEl = null }) {
+export default function UsersModule({
+  token,
+  lockedDepartment   = null,
+  lockedManagerId    = null,
+  // TL mode: pin team_leader_id on every create/edit to the logged-in TL,
+  // lock department to theirs, and restrict the Role dropdown to caller-
+  // level roles only (TLs can't promote anyone to manager / TL / admin).
+  tlMode             = false,
+  lockedTeamLeaderId = null,
+  actionsSlotEl      = null,
+}) {
   const [users, setUsers]           = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState('');
@@ -428,6 +438,8 @@ export default function UsersModule({ token, lockedDepartment = null, lockedMana
           allUsers={users}
           lockedDepartment={lockedDepartment}
           lockedManagerId={lockedManagerId}
+          tlMode={tlMode}
+          lockedTeamLeaderId={lockedTeamLeaderId}
           onClose={() => { setShowForm(false); setEditing(null); }}
           onSaved={(u, isEdit) => {
             if (isEdit) {
@@ -519,7 +531,19 @@ function SmartfloCell({ user }) {
 }
 
 /* ── User Form Modal (create + edit) ── */
-function UserFormModal({ token, existing, allUsers = [], lockedDepartment = null, lockedManagerId = null, onClose, onSaved }) {
+function UserFormModal({
+  token,
+  existing,
+  allUsers           = [],
+  lockedDepartment   = null,
+  lockedManagerId    = null,
+  // TL mode props (mirror UsersModule). When set, the form pins
+  // team_leader_id to the logged-in TL and limits the Role options.
+  tlMode             = false,
+  lockedTeamLeaderId = null,
+  onClose,
+  onSaved,
+}) {
   const isEdit = !!existing;
   const [fullName, setFullName] = useState(existing?.full_name || '');
   const [email, setEmail]       = useState(existing?.email || '');
@@ -527,7 +551,7 @@ function UserFormModal({ token, existing, allUsers = [], lockedDepartment = null
   const [role, setRole]         = useState(existing?.role || 'junior_caller');
   const [department, setDepartment]     = useState(existing?.department || lockedDepartment || '');
   const [managerId, setManagerId]       = useState(existing?.manager_id || lockedManagerId || '');
-  const [teamLeaderId, setTeamLeaderId] = useState(existing?.team_leader_id || '');
+  const [teamLeaderId, setTeamLeaderId] = useState(existing?.team_leader_id || lockedTeamLeaderId || '');
   const [tataExtension, setTataExtension]     = useState(existing?.tata_extension || '');
   const [tataAccountType, setTataAccountType] = useState(existing?.tata_account_type || '');
   const [tataAgentNumber, setTataAgentNumber] = useState(existing?.tata_agent_number || '');
@@ -737,10 +761,20 @@ function UserFormModal({ token, existing, allUsers = [], lockedDepartment = null
               />
             </div>
 
-            {/* Role */}
+            {/* Role — TL mode restricts to caller-level roles only.
+                A TL cannot create a peer/superior (no team_leader /
+                manager / admin / trainer through this form). Backend
+                enforces this independently via the team_leader role
+                gate on the POST/PATCH endpoints. */}
             <div>
               <label style={fieldLabelStyle}>Role</label>
-              <BrandSelect value={role} onChange={setRole} options={ROLES} />
+              <BrandSelect
+                value={role}
+                onChange={setRole}
+                options={tlMode
+                  ? ROLES.filter(r => r.value === 'junior_caller' || r.value === 'senior_caller')
+                  : ROLES}
+              />
             </div>
 
             {/* Department */}
@@ -780,14 +814,16 @@ function UserFormModal({ token, existing, allUsers = [], lockedDepartment = null
             )}
 
             {/* Team Leader — team_leader-role users within the chosen
-                department. Shown only for caller roles. */}
+                department. Shown only for caller roles. In TL mode the
+                select is locked to the logged-in TL: callers created
+                from a TL's Users tab automatically join that TL's team. */}
             {showTeamLeader && (
               <div>
                 <label style={fieldLabelStyle}>Team Leader</label>
                 <BrandSelect
                   value={teamLeaderId}
                   onChange={setTeamLeaderId}
-                  disabled={!department}
+                  disabled={!department || !!lockedTeamLeaderId}
                   options={[
                     { value: '', label: !department
                         ? 'Select a department first'

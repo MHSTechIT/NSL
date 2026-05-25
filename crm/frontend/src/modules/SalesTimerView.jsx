@@ -74,7 +74,7 @@ function tidy(n) {
   return Number.isFinite(n) ? Number(n.toFixed(3)) : n;
 }
 
-export default function SalesTimerView({ token }) {
+export default function SalesTimerView({ token, readOnly = false }) {
   // `settings` is always held in DISPLAY units (seconds / counts).
   const [settings, setSettings] = useState(() => toDisplayAll(TIMER_DEFAULTS));
   const [loading, setLoading]   = useState(true);
@@ -326,13 +326,18 @@ export default function SalesTimerView({ token }) {
                               step={item.unit === 'count' ? 1 : 'any'}
                               onChange={e => handleChange(item.key, e.target.value)}
                               onBlur={() => handleBlur(item.key)}
+                              readOnly={readOnly}
+                              disabled={readOnly}
+                              title={readOnly ? 'Read-only — ask your manager to adjust this.' : undefined}
                               style={{
                                 width: 110, height: '2.5rem', padding: '0 10px', borderRadius: 8,
                                 border: '1px solid rgba(209,196,240,0.85)',
-                                background: 'rgba(237,234,248,0.30)',
+                                background: readOnly ? 'rgba(237,234,248,0.55)' : 'rgba(237,234,248,0.30)',
                                 fontFamily: 'Outfit, sans-serif', fontSize: '0.88rem', fontWeight: 600,
-                                color: '#3B0764', outline: 'none', boxSizing: 'border-box',
+                                color: readOnly ? 'rgba(59,7,100,0.55)' : '#3B0764',
+                                outline: 'none', boxSizing: 'border-box',
                                 textAlign: 'right',
+                                cursor: readOnly ? 'not-allowed' : 'auto',
                               }}
                             />
                             <span style={{
@@ -362,8 +367,11 @@ export default function SalesTimerView({ token }) {
       )}
 
       {/* Floating save button — transparent wrapper, sits over the page
-          content; only the button itself catches clicks. */}
-      {!loading && (
+          content; only the button itself catches clicks. Hidden entirely
+          for TL view (readOnly): TLs see the department-wide timer config
+          but cannot mutate it. Backend also rejects PUT /timer-settings
+          from a team_leader JWT (403) as a defense-in-depth. */}
+      {!loading && !readOnly && (
         <div style={{
           position: 'sticky', bottom: 16, zIndex: 20,
           display: 'flex', justifyContent: 'flex-end',

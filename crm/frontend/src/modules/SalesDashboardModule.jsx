@@ -245,14 +245,37 @@ export default function SalesDashboardModule({
   onSignOut        = null,
   onOpenSettings   = null,
   managerProfile   = null,
+  // ── TL (Team Leader) mode ──────────────────────────────────────────
+  // Same surface as the super-admin Web Reminder + Manager dashboard,
+  // just scoped to a single TL's team. Backend routes detect the
+  // team_leader JWT role and add a parallel WHERE team_leader_id = $1
+  // to each query. Frontend passes the TL's id down so child views
+  // and forms can lock their fields to the right team.
+  tlMode             = false,
+  lockedTeamLeaderId = null,
+  tlProfile          = null,
 }) {
   const [tab, setTab] = useState('performance');
   /* Manager mode slots the "User" tab in just before Notifications and drops
      "Timer" — Timer lives in the Settings page (reached via the profile menu).
-     Order: Performance · Leads · Leads Logic · User · Notifications. */
-  const tabs = managerMode
-    ? [...TABS.slice(0, 3), USER_TAB, TABS[3]]
-    : TABS;
+     Order: Performance · Leads · Leads Logic · User · Notifications.
+
+     TL mode wants ALL tabs (per product decision) plus the User tab — so
+     the TL can manage their team members AND has visibility into Timer
+     (read-only; backend rejects the PUT) and Alerts (TL-scoped recipients). */
+  let tabs;
+  if (tlMode) {
+    tabs = [...TABS.slice(0, 3), USER_TAB, ...TABS.slice(3)];
+  } else if (managerMode) {
+    tabs = [...TABS.slice(0, 3), USER_TAB, TABS[3]];
+  } else {
+    tabs = TABS;
+  }
+  /* Convenience: which scoped-profile mode is active? Used for the profile
+     menu + downstream prop forwarding. tlProfile takes precedence when
+     both are accidentally true (defensive). */
+  const profileForMenu = tlMode ? tlProfile : managerProfile;
+  const showProfileMenu = (tlMode || managerMode) && onSignOut;
   /* Right-side slot that sits on the same row as the tab bar. The
      Performance view portals its Refresh + Export CSV buttons into this
      slot via the `actionsSlotRef` prop so the actions logically belong
@@ -272,6 +295,8 @@ export default function SalesDashboardModule({
     let cancelled = false;
     const loadCount = async () => {
       try {
+        // The backend infers the team-leader scope from the JWT itself
+        // (no extra query param needed) — same way managerMode works.
         const res = await fetch('/api/admin/auto-paused-callers', {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -353,8 +378,8 @@ export default function SalesDashboardModule({
           ref={actionsSlotRef}
           style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}
         />
-        {managerMode && onSignOut && (
-          <ManagerProfileMenu profile={managerProfile} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
+        {showProfileMenu && (
+          <ManagerProfileMenu profile={profileForMenu} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
         )}
       </div>
 
@@ -362,9 +387,18 @@ export default function SalesDashboardModule({
       {tab === 'leads'         && <SalesLeadsTable        token={token} />}
       {tab === 'logic'         && <SalesLeadsLogicView    token={token} />}
       {tab === 'notifications' && <SalesNotificationsView token={token} />}
-      {tab === 'user'          && <UsersModule token={token} lockedDepartment={lockedDepartment} lockedManagerId={lockedManagerId} actionsSlotEl={slotEl} />}
+      {tab === 'user'          && (
+        <UsersModule
+          token={token}
+          lockedDepartment={lockedDepartment}
+          lockedManagerId={lockedManagerId}
+          tlMode={tlMode}
+          lockedTeamLeaderId={lockedTeamLeaderId}
+          actionsSlotEl={slotEl}
+        />
+      )}
       {tab === 'completed_calls' && <SalesCompletedCallsView token={token} />}
-      {tab === 'timer'         && <SalesTimerView         token={token} />}
+      {tab === 'timer'         && <SalesTimerView         token={token} readOnly={tlMode} />}
       {tab === 'alerts'        && <SalesAlertsView        token={token} />}
     </div>
   );
