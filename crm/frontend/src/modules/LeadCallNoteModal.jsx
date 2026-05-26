@@ -184,6 +184,23 @@ function callDefinitelyEnded(call) {
   return false;
 }
 
+/* How MANY independent terminal signals are present? Used to gate the
+   mid-call "Customer disconnected" transition: a SINGLE signal during
+   customer_on_call is treated as suspicious (Tata leg-blip CDR write)
+   and held inside a corroboration window; TWO OR MORE signals together
+   are high-confidence and commit immediately. The four signals are
+   independent enough that Tata's normal end-of-call write produces all
+   four within milliseconds; a leg blip only produces one. */
+function countTerminalSignals(call) {
+  if (!call) return 0;
+  let n = 0;
+  if (call.ended_at)  n++;
+  if (call.hangup_by) n++;
+  if (call.duration_sec != null && Number(call.duration_sec) > 0) n++;
+  if (TERMINAL_CALL_STATUS.has(call.status)) n++;
+  return n;
+}
+
 export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhaseChange, restoreState, onStateChange }) {
   const t = useTimerSettings();
   const [fullName, setFullName]                   = useState(lead.full_name || '');
@@ -420,6 +437,25 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
   const dnpRetryRef = useRef(false);
   const lastSeenSigsRef    = useRef(new Set());
   const customerMissedTimerRef = useRef(null);
+  /* Holds the setTimeout id for the hangup-corroboration window. When
+     Tata stamps ONE terminal signal mid-call (often a leg-blip CDR
+     write that DOESN'T correspond to a real hangup), we don't flip the
+     modal to form_window immediately — we schedule this timer for
+     t.hangupCorroborateMs and wait for a SECOND independent terminal
+     signal. If the second signal arrives before the timer fires, we
+     cancel + commit. If the timer fires with still only one signal,
+     we STAY on customer_on_call (treating it as a confirmed leg blip).
+     The user can manually press Recall / X / DNP if needed. */
+  const pendingHangupTimerRef  = useRef(null);
+  // Unmount safety net: if the modal closes while a hangup corroboration
+  // window is still pending, clear the timer so it doesn't fire against
+  // a torn-down component (no-op state setters → React warning).
+  useEffect(() => () => {
+    if (pendingHangupTimerRef.current) {
+      clearTimeout(pendingHangupTimerRef.current);
+      pendingHangupTimerRef.current = null;
+    }
+  }, []);
   /* Latest call object seen by handleCallEvent. Lets long-lived
      callbacks (e.g. the 3-second customer.missed deferred retry) read
      the freshest call state instead of the stale `call` they captured
@@ -763,19 +799,73 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
 
     if (eventType === 'call.hangup') {
       if (customerAnswered) {
-        // Tata's call.hangup can also fire spuriously mid-call (brief
-        // bridge resets, leg blips, late-arriving CDR events). Require
-        // the same corroborating evidence as customer.missed — at least
-        // one of ended_at / hangup_by / duration_sec / terminal status —
-        // before treating it as a real terminal hangup. Otherwise this
-        // turns a healthy 3-minute conversation into a 45-second form
-        // dash for the caller.
-        if (!callDefinitelyEnded(call)) return;
+        // Tata's call.hangup fires spuriously mid-call (brief bridge
+        // resets, leg blips, late-arriving CDR events) and the row
+        // sometimes carries ONE terminal column (status='ended', or
+        // ended_at, etc.) while the audio bridge is still up — which
+        // the user sees as the "Customer disconnected" banner
+        // appearing during a live conversation.
+        //
+        // Corroboration strategy:
+        //   0 terminal signals     → ignore
+        //   2+ terminal signals    → commit immediately (high confidence)
+        //   exactly 1 signal       → start a t.hangupCorroborateMs window.
+        //                            Each later poll tick re-enters this
+        //                            handler with the latest merged row;
+        //                            if signal count climbs to ≥2, the
+        //                            check above commits + cancels the
+        //                            pending timer. If the window expires
+        //                            with still only 1 signal, we treat
+        //                            it as a confirmed leg blip and STAY
+        //                            on customer_on_call. The caller can
+        //                            manually press Recall / X / DNP if
+        //                            the call is actually dead.
+        const sigCount = countTerminalSignals(call);
+        if (sigCount === 0) return;
 
-        if (phase !== 'form_window' && phase !== 'form_reason_card') {
-          setCallPhase('form_window');
-          setFormTimerSecs(prev => (prev > 0 ? prev : FORM_WINDOW_SECS));
+        function commitHangup() {
+          if (pendingHangupTimerRef.current) {
+            clearTimeout(pendingHangupTimerRef.current);
+            pendingHangupTimerRef.current = null;
+          }
+          const p = callPhaseRef.current;
+          if (p !== 'form_window' && p !== 'form_reason_card') {
+            setCallPhase('form_window');
+            setFormTimerSecs(prev => (prev > 0 ? prev : FORM_WINDOW_SECS));
+          }
         }
+
+        if (sigCount >= 2) {
+          commitHangup();
+          return;
+        }
+
+        // sigCount === 1 → suspicious. Schedule corroboration window
+        // (only once — a window is already running means we've already
+        // seen this signal and are waiting for a 2nd).
+        if (pendingHangupTimerRef.current) return;
+        try {
+          // eslint-disable-next-line no-console
+          console.warn('[caller] hangup signal awaiting corroboration', {
+            leadId: lead?.id,
+            signal: call.ended_at ? 'ended_at'
+                  : call.hangup_by ? 'hangup_by'
+                  : (call.duration_sec != null && Number(call.duration_sec) > 0) ? 'duration_sec'
+                  : TERMINAL_CALL_STATUS.has(call.status) ? 'status'
+                  : 'unknown',
+            waitMs: t.hangupCorroborateMs,
+          });
+        } catch { /* console may be stripped */ }
+        pendingHangupTimerRef.current = setTimeout(() => {
+          pendingHangupTimerRef.current = null;
+          // Window expired with no 2nd signal → treat as leg blip, stay put.
+          try {
+            // eslint-disable-next-line no-console
+            console.warn('[caller] hangup corroboration window expired with 1 signal — treating as leg blip', {
+              leadId: lead?.id,
+            });
+          } catch { /* console may be stripped */ }
+        }, t.hangupCorroborateMs);
       }
       // If customer never answered, the agent.missed / customer.missed events
       // will arrive separately and drive the right transition.
@@ -1037,6 +1127,12 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
     if (customerMissedTimerRef.current) {
       clearTimeout(customerMissedTimerRef.current);
       customerMissedTimerRef.current = null;
+    }
+    // A new attempt voids any pending hangup corroboration from the
+    // previous attempt — the suspected leg-blip is no longer relevant.
+    if (pendingHangupTimerRef.current) {
+      clearTimeout(pendingHangupTimerRef.current);
+      pendingHangupTimerRef.current = null;
     }
   }
 

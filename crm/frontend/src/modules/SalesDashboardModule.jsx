@@ -260,12 +260,15 @@ export default function SalesDashboardModule({
      "Timer" — Timer lives in the Settings page (reached via the profile menu).
      Order: Performance · Leads · Leads Logic · User · Notifications.
 
-     TL mode wants ALL tabs (per product decision) plus the User tab — so
-     the TL can manage their team members AND has visibility into Timer
-     (read-only; backend rejects the PUT) and Alerts (TL-scoped recipients). */
+     TL mode: Performance · Leads · Leads Logic · User · Notifications ·
+     Completed Calls. Timer and Alerts are intentionally hidden — TLs
+     don't tune global timer config and don't manage Telegram recipients
+     (those are manager+ responsibilities). */
   let tabs;
   if (tlMode) {
-    tabs = [...TABS.slice(0, 3), USER_TAB, ...TABS.slice(3)];
+    // Drop the 'timer' and 'alerts' tabs from the TL view.
+    const tlVisible = TABS.filter(t => t.id !== 'timer' && t.id !== 'alerts');
+    tabs = [...tlVisible.slice(0, 3), USER_TAB, ...tlVisible.slice(3)];
   } else if (managerMode) {
     tabs = [...TABS.slice(0, 3), USER_TAB, TABS[3]];
   } else {

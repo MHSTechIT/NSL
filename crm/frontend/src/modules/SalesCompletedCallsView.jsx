@@ -591,125 +591,14 @@ export default function SalesCompletedCallsView({ token }) {
           >⤓ Export CSV</button>
         </div>
 
-        {/* Row 2 — four dropdowns */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          {/* Categories — multi-select with status + role groups */}
-          <LabeledField label="Categories">
-            <div ref={categoriesRef} style={{ position: 'relative' }}>
-              <button onClick={() => setCategoriesOpen(o => !o)} style={triggerBtn(categoriesOpen)}>
-                {categoriesSel.size === 0 ? 'All categories' : `${categoriesSel.size} selected`}
-                <Chev open={categoriesOpen} />
-              </button>
-              {categoriesOpen && (
-                <div style={popoverPanel(260)}>
-                  <PanelHeaderClear active={categoriesSel.size === 0} onClick={() => setCategoriesSel(new Set())}>
-                    All categories
-                  </PanelHeaderClear>
-                  {CATEGORY_GROUPS.map(g => (
-                    <div key={g.title} style={{ marginTop: 4 }}>
-                      <GroupTitle>{g.title}</GroupTitle>
-                      {g.items.map(it => {
-                        const checked = categoriesSel.has(it.value);
-                        return (
-                          <CheckRow key={it.value} checked={checked} onClick={() => toggleCategory(it.value)} label={it.label} />
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </LabeledField>
-
-          {/* Webinar — single select */}
-          <LabeledField label="Webinar">
-            <div ref={webinarRef} style={{ position: 'relative' }}>
-              <button onClick={() => setWebinarOpen(o => !o)} style={triggerBtn(webinarOpen)}>
-                {webinarId
-                  ? (webinars.find(w => String(w.id) === String(webinarId))?.name || 'Webinar')
-                  : 'All webinars'}
-                <Chev open={webinarOpen} />
-              </button>
-              {webinarOpen && (
-                <div style={popoverPanel(260)}>
-                  <PanelHeaderClear active={!webinarId} onClick={() => { setWebinarId(''); setWebinarOpen(false); }}>
-                    All webinars
-                  </PanelHeaderClear>
-                  {webinars.length === 0 ? (
-                    <EmptyMsg>No webinars</EmptyMsg>
-                  ) : webinars.map(w => (
-                    <SelectRow
-                      key={w.id}
-                      active={String(webinarId) === String(w.id)}
-                      label={w.name + (w.is_active ? '' : ' (inactive)')}
-                      onClick={() => { setWebinarId(String(w.id)); setWebinarOpen(false); }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </LabeledField>
-
-          {/* TL — single select */}
-          <LabeledField label="TL">
-            <div ref={tlRef} style={{ position: 'relative' }}>
-              <button onClick={() => setTlOpen(o => !o)} style={triggerBtn(tlOpen, tlFilter ? 'rgba(91,33,182,0.08)' : '#fff')}>
-                {tlFilter
-                  ? (teamLeaderOptions.find(t => t.id === tlFilter)?.full_name || 'TL')
-                  : 'All TLs'}
-                <Chev open={tlOpen} />
-              </button>
-              {tlOpen && (
-                <div style={popoverPanel(220)}>
-                  <PanelHeaderClear active={!tlFilter} onClick={() => { setTlFilter(''); setTlOpen(false); }}>
-                    All TLs
-                  </PanelHeaderClear>
-                  {teamLeaderOptions.length === 0 ? (
-                    <EmptyMsg>No team leaders</EmptyMsg>
-                  ) : teamLeaderOptions.map(tl => (
-                    <SelectRow
-                      key={tl.id}
-                      active={tlFilter === tl.id}
-                      label={tl.full_name + (tl.department ? ` · ${tl.department}` : '')}
-                      onClick={() => { setTlFilter(tl.id); setTlOpen(false); }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </LabeledField>
-
-          {/* Salesperson — multi-select */}
-          <LabeledField label="Salesperson">
-            <div ref={salespeopleRef} style={{ position: 'relative' }}>
-              <button onClick={() => setSalespeopleOpen(o => !o)} style={triggerBtn(salespeopleOpen)}>
-                {salespeopleSel.size === 0
-                  ? 'All salespeople'
-                  : salespeopleSel.size === 1
-                    ? (callersForView.find(c => salespeopleSel.has(c.id))?.full_name || '1 selected')
-                    : `${salespeopleSel.size} selected`}
-                <Chev open={salespeopleOpen} />
-              </button>
-              {salespeopleOpen && (
-                <div style={popoverPanel(240)}>
-                  <PanelHeaderClear active={salespeopleSel.size === 0} onClick={() => setSalespeopleSel(new Set())}>
-                    All salespeople
-                  </PanelHeaderClear>
-                  {callersForView.length === 0 ? (
-                    <EmptyMsg>No callers</EmptyMsg>
-                  ) : callersForView.map(c => (
-                    <CheckRow
-                      key={c.id}
-                      checked={salespeopleSel.has(c.id)}
-                      onClick={() => toggleSalesperson(c.id)}
-                      label={c.full_name}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </LabeledField>
-        </div>
+        {/* Row 2 — Categories / Webinar / TL / Salesperson dropdowns
+            were removed per product decision. Per-column funnels in the
+            table header now own the multi-axis filtering UI (cleaner +
+            less duplicated control surface). Backing state and the
+            global-filter useMemo branches are intentionally left in
+            place: they're harmless when their state stays at the
+            initial empty values, and dropping them would invalidate
+            the useMemo dep array. */}
       </div>
 
       {error && (
