@@ -185,41 +185,29 @@ function callDefinitelyEnded(call) {
 }
 
 /* Whether the 45-second form-fill timer should run for THIS hangup.
-   Product rule (per the user's spec):
-     - Customer answered + SHORT call (< 3 min) → run timer.
-       Short = the caller had a brief interaction and might forget
-       details fast; the timer prods them to capture answers quickly.
-     - Customer answered + LONG call (≥ 3 min)  → NO timer.
-       Long = a real conversation happened; the caller has full
-       context and shouldn't be rushed.
-     - Customer never answered → form_window isn't reached anyway,
-       so this predicate doesn't apply.
+   Product rule (per the latest user spec):
+     - Customer answered → ALWAYS run the 45s timer, regardless of
+       call duration. The calm "Call ended, fill when ready" card is
+       explicitly disallowed — every customer-cut hangup must show
+       the urgent 45-second countdown so the caller fills the form
+       immediately while the conversation is fresh.
+     - Customer never answered → form_window isn't reached at all
+       (the customer.missed → DNP path runs instead), so this
+       predicate doesn't apply.
      - Agent explicitly closes via the X button → handled by
-       handleCloseClick which forces formTimerEnabled = false.
+       handleCloseClick which now shows CloseConfirmDialog and
+       saves outcome='incomplete' directly, bypassing form_window
+       entirely.
 
-   Why not check hangup_by? Survey of 16k recent calls shows Tata
-   stamps hangup_by as NULL on 99.97% of connected calls, so it can't
-   distinguish customer-cut from agent-cut. duration_sec is the only
-   reliable signal: a sub-3-minute connected call almost always means
-   the customer ended the conversation quickly.
-
-   The threshold is admin-tunable via the Timer page
-   (formTimerLongCallThresholdMs, range 1 min – 30 min, default 3 min).
-   Callers pass the live setting from useTimerSettings() so changes take
-   effect on the next render without needing a reload. The fallback of
-   180_000 ms preserves the original 3-minute behaviour if the setting
-   somehow isn't provided. */
-function shouldRunFormTimerFor(call, longCallThresholdMs) {
-  if (!call?.customer_answered_at) return false;
-  const dur = Number(call?.duration_sec);
-  // No duration recorded yet (call still finalizing) → assume short
-  // so the timer DOES run; the worst case is a 45s window for a
-  // borderline call, which is acceptable noise.
-  if (!Number.isFinite(dur) || dur <= 0) return true;
-  const thresholdSec = Number(longCallThresholdMs) > 0
-    ? Number(longCallThresholdMs) / 1000
-    : 180;
-  return dur < thresholdSec;
+   The `longCallThresholdMs` argument is kept in the signature for
+   backward compatibility with any caller that still passes it (and
+   the admin Timer page still surfaces the setting). It is no longer
+   consulted — the function unconditionally returns true for any
+   call where customer_answered_at is present. If the product team
+   wants to bring back duration-based suppression later, swap this
+   body back to compare `dur < thresholdSec`. */
+function shouldRunFormTimerFor(call, _longCallThresholdMs) {
+  return !!call?.customer_answered_at;
 }
 
 /* How MANY independent terminal signals are present? Used to gate the
@@ -1550,30 +1538,44 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
       const sugarConfirmation = confirmedRange
         ? (confirmedRange === lead.sugar_level ? 'same' : 'different')
         : null;
-      await fetch(`/api/caller/leads/${lead.id}/note`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-        body: JSON.stringify({
-          full_name:             (fullName || '').trim() || lead.full_name || null,
-          sugar_confirmation:    sugarConfirmation,
-          confirmed_range:       confirmedRange || null,
-          range_for:             rangeFor || null,
-          patient_age:           patientAge || null,
-          takes_medicine:        takesMedicine || null,
-          note:                  (note || '').trim() || 'Caller closed the form without completing.',
-          hba1c:                 hba1c || null,
-          working_professional:  workingProfessional || null,
-          location:              location || null,
-          webinar_attended:      webinarAttended || null,
-          available_for_webinar: availableForWebinar || null,
-          next_batch_joining:    nextBatchJoining || null,
-          outcome:               'incomplete',
-          call_id:               activeCallIdRef.current || lead.last_call_id || null,
-          interested:            interested === 'yes' || interested === 'no' ? interested : null,
-          outcome_subtag:        interestedSubtag || null,
-          lead_tag:              null, // leave the classifier alone — caller didn't finish
-        }),
-      }).catch(() => {});
+      // Surface backend failures (e.g. constraint violations, 5xx) instead
+      // of swallowing them — previously the silent .catch hid the
+      // 'incomplete' check-constraint rejection and left the lead at
+      // last_note_outcome=NULL while the UI happily auto-advanced.
+      try {
+        const res = await fetch(`/api/caller/leads/${lead.id}/note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+          body: JSON.stringify({
+            full_name:             (fullName || '').trim() || lead.full_name || null,
+            sugar_confirmation:    sugarConfirmation,
+            confirmed_range:       confirmedRange || null,
+            range_for:             rangeFor || null,
+            patient_age:           patientAge || null,
+            takes_medicine:        takesMedicine || null,
+            note:                  (note || '').trim() || 'Caller closed the form without completing.',
+            hba1c:                 hba1c || null,
+            working_professional:  workingProfessional || null,
+            location:              location || null,
+            webinar_attended:      webinarAttended || null,
+            available_for_webinar: availableForWebinar || null,
+            next_batch_joining:    nextBatchJoining || null,
+            outcome:               'incomplete',
+            call_id:               activeCallIdRef.current || lead.last_call_id || null,
+            interested:            interested === 'yes' || interested === 'no' ? interested : null,
+            outcome_subtag:        interestedSubtag || null,
+            lead_tag:              null, // leave the classifier alone — caller didn't finish
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          // eslint-disable-next-line no-console
+          console.error('[saveIncompleteAndClose] POST /note failed', res.status, body);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[saveIncompleteAndClose] network error', err);
+      }
     } finally {
       savingIncompleteRef.current = false;
       setCloseConfirm(null);

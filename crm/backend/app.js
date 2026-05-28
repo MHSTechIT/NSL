@@ -427,7 +427,11 @@ const _callNotesMigration = pool.query(`
   --                 (caller's SmartFlow phone never picked); lead parked for retry later.
   ALTER TABLE lead_call_notes DROP CONSTRAINT IF EXISTS lead_call_notes_outcome_check;
   ALTER TABLE lead_call_notes ADD CONSTRAINT lead_call_notes_outcome_check
-    CHECK (outcome IN ('completed','follow_up','not_interested','not_picked','auto_paused'));
+    CHECK (outcome IN ('completed','follow_up','not_interested','not_picked','auto_paused','incomplete'));
+  --   incomplete = caller hit the X button and confirmed in CloseConfirmDialog
+  --                that the lead should move to Completed Calls with the
+  --                INCOMPLETE tag. The auto-call stops; partial form values
+  --                are preserved on the note row.
   CREATE INDEX IF NOT EXISTS idx_lead_call_notes_lead   ON lead_call_notes (lead_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_lead_call_notes_caller ON lead_call_notes (caller_id, created_at DESC);
   -- Independent "interested" flag captured alongside the outcome
@@ -501,6 +505,24 @@ const _callNotesMigration = pool.query(`
 `);
 if (_callNotesMigration && typeof _callNotesMigration.catch === 'function') {
   _callNotesMigration.catch(err => console.error('[Migration] lead_call_notes error:', err.message));
+}
+
+// Auto-migrate (isolated): re-assert the lead_call_notes outcome CHECK
+// constraint so it includes 'incomplete'. This was originally part of the
+// big _callNotesMigration block above but that batch is a 100-line
+// multi-statement query; when ANY single statement in the batch errors
+// out the whole batch rolls back atomically and this constraint stays
+// stuck at its previous version (which is exactly how the 'incomplete'
+// outcome got silently rejected for half a day). Isolating this single
+// DDL into its own pool.query() makes it independent of every other
+// migration's success.
+const _incompleteConstraintMigration = pool.query(`
+  ALTER TABLE lead_call_notes DROP CONSTRAINT IF EXISTS lead_call_notes_outcome_check;
+  ALTER TABLE lead_call_notes ADD CONSTRAINT lead_call_notes_outcome_check
+    CHECK (outcome IN ('completed','follow_up','not_interested','not_picked','auto_paused','incomplete'));
+`);
+if (_incompleteConstraintMigration && typeof _incompleteConstraintMigration.catch === 'function') {
+  _incompleteConstraintMigration.catch(err => console.error('[Migration] outcome_check (incomplete) error:', err.message));
 }
 
 // Auto-migrate: telegram_alert_recipients — recipients of Telegram push alerts.
