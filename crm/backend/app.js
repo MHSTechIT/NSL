@@ -686,6 +686,24 @@ const _sourceMigration = Promise.all([_webinarTableMigration, _clickMigration]).
     SELECT NOW() + INTERVAL '4 days', TRUE, 'YT-101', 'yt'
     WHERE NOT EXISTS (SELECT 1 FROM webinars WHERE source = 'yt')
   `)
+).then(() =>
+  // Seed Meta 2.0 config row (independent WhatsApp links + webinar timing).
+  // Explicit id=3 — id=1 is Meta, id=2 is YT. Blank defaults; admin sets
+  // values via CRM → Meta 2.0 workspace → Marketing → Timer / WhatsApp Links.
+  pool.query(`
+    INSERT INTO webinar_config (id, source, kill_switch, tuesday_whatsapp_link, friday_whatsapp_link)
+    VALUES (3, 'meta2', false, '', '')
+    ON CONFLICT (source) DO NOTHING
+  `)
+).then(() =>
+  // Baseline active webinar for meta2 so new meta2 leads get a webinar_id and
+  // the admin's first timer save can UPDATE. 'M2-101' avoids colliding with
+  // Meta's 'AWS-N' and YT's 'YT-N' name spaces.
+  pool.query(`
+    INSERT INTO webinars (date_time, is_active, name, source)
+    SELECT NOW() + INTERVAL '4 days', TRUE, 'M2-101', 'meta2'
+    WHERE NOT EXISTS (SELECT 1 FROM webinars WHERE source = 'meta2')
+  `)
 ).catch(err => console.error('[Migration] source dimension error:', err.message));
 
 // Auto-migrate: alert phone + alert log for leads-alert scheduler

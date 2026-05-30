@@ -23,7 +23,7 @@ const {
 
 router.use(adminAuth);
 
-const ALLOWED_SOURCES = new Set(['meta', 'yt']);
+const ALLOWED_SOURCES = new Set(['meta', 'yt', 'meta2']);
 function getSource(req) {
   const v = req.query.source ?? req.body?.source;
   return ALLOWED_SOURCES.has(v) ? v : 'meta';

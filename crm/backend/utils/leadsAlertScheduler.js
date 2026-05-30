@@ -28,7 +28,7 @@
 const pool = require('../db');
 const wati = require('./watiClient');
 
-const SOURCES = ['meta', 'yt'];
+const SOURCES = ['meta', 'yt', 'meta2'];
 
 let _timer = null;
 

@@ -4,12 +4,13 @@
 
    `source` is the raw 'meta' | 'yt' value from the leads table. Unknown
    sources render nothing (defensive — never break a row layout). */
-const META = { label: 'META', bg: '#E0E7FF', fg: '#1E40AF', border: 'rgba(30,64,175,0.20)' };
-const YT   = { label: 'YT',   bg: '#FEE2E2', fg: '#B91C1C', border: 'rgba(185,28,28,0.22)' };
+const META  = { label: 'META',   bg: '#E0E7FF', fg: '#1E40AF', border: 'rgba(30,64,175,0.20)' };
+const YT    = { label: 'YT',     bg: '#FEE2E2', fg: '#B91C1C', border: 'rgba(185,28,28,0.22)' };
+const META2 = { label: 'META 2', bg: '#DCFCE7', fg: '#15803D', border: 'rgba(21,128,61,0.22)' };
 
 export default function SourceBadge({ source, style }) {
-  if (source !== 'meta' && source !== 'yt') return null;
-  const m = source === 'yt' ? YT : META;
+  if (source !== 'meta' && source !== 'yt' && source !== 'meta2') return null;
+  const m = source === 'yt' ? YT : source === 'meta2' ? META2 : META;
   return (
     <span
       title={`Lead source: ${m.label}`}

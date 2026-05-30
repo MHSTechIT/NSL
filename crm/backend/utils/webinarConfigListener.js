@@ -12,7 +12,7 @@ const pool        = require('../db');
 const cache       = require('./webinarConfigCache');
 const sseClients  = require('./sseClients');
 
-const SOURCES = new Set(['meta', 'yt']);
+const SOURCES = new Set(['meta', 'yt', 'meta2']);
 
 async function handleWebinarConfigUpdated(rawPayload) {
   const source = (rawPayload || '').trim();

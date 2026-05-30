@@ -3,7 +3,7 @@ const cache = require('./webinarConfigCache');
 const { broadcast } = require('./sseClients');
 const { rotateLink } = require('./linkRotation');
 
-const SOURCES = ['meta', 'yt'];
+const SOURCES = ['meta', 'yt', 'meta2'];
 
 const DEFAULT_INTERVAL_MS = 30_000;
 

@@ -38,7 +38,7 @@ const VALID_EVENTS = new Set([
   'explore_product_clicked',
 ]);
 
-const ALLOWED_SOURCES = new Set(['meta', 'yt']);
+const ALLOWED_SOURCES = new Set(['meta', 'yt', 'meta2']);
 
 /* POST /api/events — public, fire-and-forget click tracking */
 router.post('/events', async (req, res) => {

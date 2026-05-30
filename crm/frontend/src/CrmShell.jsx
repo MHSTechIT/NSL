@@ -67,8 +67,9 @@ function ComingSoonPanel({ label }) {
 }
 
 const WORKSPACES = [
-  { id: 'meta', label: 'Meta' },
-  { id: 'yt',   label: 'YT'   },
+  { id: 'meta',  label: 'Meta'     },
+  { id: 'yt',    label: 'YT'       },
+  { id: 'meta2', label: 'Meta 2.0' },
 ];
 
 export default function CrmShell() {

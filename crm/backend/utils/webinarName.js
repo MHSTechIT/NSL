@@ -1,6 +1,6 @@
 const pool = require('../db');
 
-const PREFIX_BY_SOURCE = { meta: 'AWS-', yt: 'YT-' };
+const PREFIX_BY_SOURCE = { meta: 'AWS-', yt: 'YT-', meta2: 'M2-' };
 const START = 101;
 
 function prefixFor(source) {
