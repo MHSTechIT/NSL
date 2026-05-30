@@ -280,31 +280,51 @@ export default function LeadCallNoteModal({ jwt, lead, onClose, onSaved, onPhase
   // Restore — runs once when the lead changes.
   useEffect(() => {
     if (!lead?.id) return;
+    // Base layer — prefill the qualification answers from the lead's previously
+    // saved note (last_note_*), so a returning follow-up / assigned lead shows
+    // what was already filled instead of opening blank. Follow-up scheduling
+    // fields are left fresh — a NEW follow-up is being decided.
+    if (lead.last_note_confirmed_range)       setConfirmedRange(lead.last_note_confirmed_range);
+    if (lead.last_note_range_for)             setRangeFor(lead.last_note_range_for);
+    if (lead.last_note_patient_age)           setPatientAge(lead.last_note_patient_age);
+    if (lead.last_note_takes_medicine)        setTakesMedicine(lead.last_note_takes_medicine);
+    if (lead.last_note_text)                  setNote(lead.last_note_text);
+    if (lead.last_note_hba1c)                 setHba1c(lead.last_note_hba1c);
+    if (lead.last_note_working_professional)  setWorkingProfessional(lead.last_note_working_professional);
+    if (lead.last_note_location)              setLocation(lead.last_note_location);
+    if (lead.last_note_webinar_attended)      setWebinarAttended(lead.last_note_webinar_attended);
+    if (lead.last_note_available_for_webinar) setAvailableForWebinar(lead.last_note_available_for_webinar);
+    if (lead.last_note_next_batch_joining)    setNextBatchJoining(lead.last_note_next_batch_joining);
+    const prevInterested = lead.last_note_interested_in_note || lead.last_note_interested;
+    if (prevInterested)                       setInterested(prevInterested);
+    if (lead.last_note_outcome_subtag)        setInterestedSubtag(lead.last_note_outcome_subtag);
+
+    // Overlay — an in-progress draft (e.g. a mid-call browser refresh) wins,
+    // but ONLY for fields the caller actually entered. Empty draft values must
+    // NOT wipe out the prefilled answers above, so we overlay truthy values only.
     let draft = null;
     try {
       const raw = localStorage.getItem(draftKey);
       if (raw) draft = JSON.parse(raw);
     } catch { /* corrupt JSON → just skip */ }
-    if (!draft) return;
-    // Only set fields that have a non-empty saved value so we don't
-    // accidentally clobber a value the parent prefilled (e.g. fullName
-    // from the lead row).
-    if (draft.fullName            != null) setFullName(draft.fullName);
-    if (draft.confirmedRange      != null) setConfirmedRange(draft.confirmedRange);
-    if (draft.rangeFor            != null) setRangeFor(draft.rangeFor);
-    if (draft.patientAge          != null) setPatientAge(draft.patientAge);
-    if (draft.takesMedicine       != null) setTakesMedicine(draft.takesMedicine);
-    if (draft.note                != null) setNote(draft.note);
-    if (draft.hba1c               != null) setHba1c(draft.hba1c);
-    if (draft.workingProfessional != null) setWorkingProfessional(draft.workingProfessional);
-    if (draft.location            != null) setLocation(draft.location);
-    if (draft.webinarAttended     != null) setWebinarAttended(draft.webinarAttended);
-    if (draft.availableForWebinar != null) setAvailableForWebinar(draft.availableForWebinar);
-    if (draft.nextBatchJoining    != null) setNextBatchJoining(draft.nextBatchJoining);
-    if (draft.interested          != null) setInterested(draft.interested);
-    if (draft.interestedSubtag    != null) setInterestedSubtag(draft.interestedSubtag);
-    if (draft.wantsFollowUp       != null) setWantsFollowUp(draft.wantsFollowUp);
-    if (draft.followUpAtLocal     != null) setFollowUpAtLocal(draft.followUpAtLocal);
+    if (draft) {
+      if (draft.fullName)            setFullName(draft.fullName);
+      if (draft.confirmedRange)      setConfirmedRange(draft.confirmedRange);
+      if (draft.rangeFor)            setRangeFor(draft.rangeFor);
+      if (draft.patientAge)          setPatientAge(draft.patientAge);
+      if (draft.takesMedicine)       setTakesMedicine(draft.takesMedicine);
+      if (draft.note)                setNote(draft.note);
+      if (draft.hba1c)               setHba1c(draft.hba1c);
+      if (draft.workingProfessional) setWorkingProfessional(draft.workingProfessional);
+      if (draft.location)            setLocation(draft.location);
+      if (draft.webinarAttended)     setWebinarAttended(draft.webinarAttended);
+      if (draft.availableForWebinar) setAvailableForWebinar(draft.availableForWebinar);
+      if (draft.nextBatchJoining)    setNextBatchJoining(draft.nextBatchJoining);
+      if (draft.interested)          setInterested(draft.interested);
+      if (draft.interestedSubtag)    setInterestedSubtag(draft.interestedSubtag);
+      if (draft.wantsFollowUp)       setWantsFollowUp(draft.wantsFollowUp);
+      if (draft.followUpAtLocal)     setFollowUpAtLocal(draft.followUpAtLocal);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.id]);
 
