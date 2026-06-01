@@ -2094,8 +2094,9 @@ router.get('/caller-leads/:callerId', async (req, res) => {
               l.lead_score, l.lead_tag, l.last_note_outcome, l.last_note_at,
               l.last_note_interested, l.last_note_outcome_subtag,
               l.follow_up_at, l.completed_at, l.assigned_at, l.created_at,
-              l.wa_clicked, l.utm_content,
+              l.wa_clicked, l.utm_content, l.next_batch_parked,
               l.webinar_id,
+              (l.webinar_id IS NULL OR l.webinar_id IN ${RECENT_WEBINARS_SQL}) AS on_recent_webinar,
               w.name AS webinar_name
          FROM leads l
          LEFT JOIN webinars w ON w.id = l.webinar_id
@@ -2108,6 +2109,53 @@ router.get('/caller-leads/:callerId', async (req, res) => {
   } catch (err) {
     console.error('[admin] caller-leads error:', err.message);
     res.status(500).json({ error: 'failed to load caller leads' });
+  }
+});
+
+/* ── GET /api/admin/caller-missed-calls/:callerId ──
+   The caller's Missed Calls page (inbound calls that weren't answered), for the
+   New Page → Caller page drawer. Mirrors GET /api/caller/calls/missed-inbound
+   but scoped to the given callerId (read-only — these are call records, not
+   movable leads). */
+router.get('/caller-missed-calls/:callerId', async (req, res) => {
+  const { callerId } = req.params;
+  if (!callerId) return res.status(400).json({ error: 'callerId required' });
+  try {
+    const { rows: meRows } = await pool.query(
+      `SELECT RIGHT(REGEXP_REPLACE(COALESCE(tata_caller_id, ''),    '\\D', '', 'g'), 10) AS caller_did,
+              RIGHT(REGEXP_REPLACE(COALESCE(tata_agent_number, ''), '\\D', '', 'g'), 10) AS agent_did
+         FROM crm_users WHERE id = $1`,
+      [callerId]
+    );
+    const myDids = [meRows[0]?.caller_did, meRows[0]?.agent_did].filter(d => d && d.length === 10);
+    const { rows } = await pool.query(
+      `SELECT c.id, c.lead_id, c.status, c.started_at, c.duration_sec, c.recording_url,
+              c.caller_phone,
+              l.full_name AS lead_full_name, l.whatsapp_number AS lead_phone, l.sugar_level AS lead_sugar_level
+         FROM calls c
+         LEFT JOIN leads l ON l.id = c.lead_id
+        WHERE c.direction = 'inbound'
+          AND (c.caller_id = $1 OR (c.caller_id IS NULL AND c.did_number = ANY($2::text[])))
+          AND (
+            c.status IN ('missed','failed')
+            OR (c.status = 'ringing' AND c.started_at < NOW() - INTERVAL '2 minutes')
+            OR (c.status = 'ended' AND c.agent_answered_at IS NULL)
+          )
+        ORDER BY c.started_at DESC NULLS LAST
+        LIMIT 200`,
+      [callerId, myDids]
+    );
+    const out = rows.map(r => ({
+      id: r.id, lead_id: r.lead_id, is_known: !!r.lead_id,
+      full_name: r.lead_full_name || 'Unknown caller',
+      phone: (r.caller_phone || r.lead_phone) ? String(r.caller_phone || r.lead_phone).replace(/\D/g, '').slice(-10) : null,
+      sugar_level: r.lead_sugar_level, status: r.status,
+      started_at: r.started_at, duration_sec: r.duration_sec, recording_url: r.recording_url,
+    }));
+    res.json({ calls: out, total: out.length });
+  } catch (err) {
+    console.error('[admin] caller-missed-calls error:', err.message);
+    res.status(500).json({ error: 'failed to load missed calls' });
   }
 });
 
@@ -2150,6 +2198,82 @@ router.post('/leads/reopen', async (req, res) => {
   } catch (err) {
     console.error('[admin] leads/reopen error:', err.message);
     res.status(500).json({ error: 'failed to reopen leads' });
+  }
+});
+
+/* ── POST /api/admin/leads/move ──
+   Admin lead mover (New Page → Caller page drawer). Moves a list of leads to a
+   target bucket (rewrites their state columns) and/or reassigns them to another
+   caller (assigned_user_id). Either or both may be supplied. This only touches
+   lead data — it does NOT change any caller's interface.
+
+   Body: { lead_ids: ["uuid",...],
+           target_bucket?: 'assigned'|'completed'|'not_picked'|'next_batch',
+           target_caller_id?: "uuid" }
+   Returns: { moved: <count> }
+*/
+router.post('/leads/move', async (req, res) => {
+  const ids = Array.isArray(req.body?.lead_ids)
+    ? req.body.lead_ids.filter(x => typeof x === 'string' && x.length > 0)
+    : [];
+  const targetBucket = req.body?.target_bucket || null;
+  const targetCaller = (typeof req.body?.target_caller_id === 'string' && req.body.target_caller_id)
+    ? req.body.target_caller_id : null;
+  if (ids.length === 0) return res.status(400).json({ error: 'lead_ids required' });
+  if (!targetBucket && !targetCaller) return res.status(400).json({ error: 'target_bucket or target_caller_id required' });
+
+  // column → raw SQL value. The bucket keywords/strings are controlled here
+  // (NOT user input) so they're safe to inline; only the caller id + ids are
+  // bound parameters.
+  const cols = {};
+  if (targetBucket === 'assigned') {
+    // A lead that was ALREADY worked (has any outcome — e.g. moved back from
+    // Completed / Not Picked) returns as a "2nd call" follow-up due now and
+    // KEEPS its lead_tag, so it shows as a completed/returning call rather than
+    // a brand-new lead. A never-worked lead (no outcome) stays genuinely fresh.
+    Object.assign(cols, {
+      last_note_outcome: `CASE WHEN last_note_outcome IS NOT NULL THEN 'follow_up' ELSE NULL END`,
+      follow_up_at:      `CASE WHEN last_note_outcome IS NOT NULL THEN NOW() ELSE NULL END`,
+      completed_at:      'NULL',
+      next_batch_parked: 'FALSE',
+      assigned_at:       'NOW()',
+      pinned_at:         'NOW()',
+      // lead_tag / last_note_interested / last_note_outcome_subtag / last_note_at
+      // are intentionally PRESERVED so the completed-call classification survives.
+    });
+  } else if (targetBucket === 'completed') {
+    Object.assign(cols, {
+      last_note_outcome: `'completed'`, completed_at: 'NOW()', last_note_at: 'NOW()',
+      follow_up_at: 'NULL', next_batch_parked: 'FALSE',
+    });
+  } else if (targetBucket === 'not_picked') {
+    Object.assign(cols, {
+      last_note_outcome: `'not_picked'`, last_note_at: 'NOW()',
+      completed_at: 'NULL', follow_up_at: 'NULL', next_batch_parked: 'FALSE',
+    });
+  } else if (targetBucket === 'next_batch') {
+    Object.assign(cols, { next_batch_parked: 'TRUE', next_batch_parked_at: 'NOW()' });
+  } else if (targetBucket) {
+    return res.status(422).json({ error: 'invalid target_bucket' });
+  }
+
+  const params = [];
+  if (targetCaller) {
+    params.push(targetCaller);
+    cols.assigned_user_id = `$${params.length}`;
+    if (!cols.assigned_at) cols.assigned_at = 'NOW()';
+  }
+  const setClause = Object.entries(cols).map(([k, v]) => `${k} = ${v}`).join(', ');
+  params.push(ids);
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE leads SET ${setClause} WHERE id = ANY($${params.length}::uuid[])`,
+      params
+    );
+    res.json({ moved: rowCount });
+  } catch (err) {
+    console.error('[admin] leads/move error:', err.message);
+    res.status(500).json({ error: 'failed to move leads' });
   }
 });
 
@@ -2454,6 +2578,181 @@ router.get('/sales-performance', async (req, res) => {
   } catch (err) {
     console.error('sales-performance error:', err.message);
     res.status(500).json({ error: 'Failed to load sales performance.' });
+  }
+});
+
+/* ── GET /api/admin/caller-report?from=YYYY-MM-DD&to=YYYY-MM-DD&webinar_id=<id> ──
+   "Caller 360" combined report — one row per caller merging telephony activity
+   (the Intern Hourly Report) with lead-disposition breakdown (the Lead Outcome
+   Report). Returns RAW atoms (per-outcome / per-subtag counts); the frontend
+   composes the human-facing categories + conversion % (see
+   crm/frontend/src/modules/callerReportCategories.js) so the business rules for
+   a few fuzzy categories can be tuned without touching SQL.
+
+   `from`/`to` are IST day bounds and drive the CALL activity window. An optional
+   `webinar_id` scopes BOTH the calls and the lead dispositions to one webinar /
+   batch. TL / salesperson / category filtering is done client-side (same as the
+   Performance tab) so this endpoint just returns every caller. */
+router.get('/caller-report', async (req, res) => {
+  const istNow   = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const todayYmd = istNow.toISOString().slice(0, 10);
+  const fromYmd  = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : todayYmd;
+  const toYmd    = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to   || '') ? req.query.to   : fromYmd;
+  const dayStart = new Date(`${fromYmd}T00:00:00+05:30`).toISOString();
+  const dayEnd   = new Date(`${toYmd}T23:59:59.999+05:30`).toISOString();
+  const webinarId = req.query.webinar_id ? String(req.query.webinar_id) : null;
+  const params = [dayStart, dayEnd, webinarId]; // $1, $2, $3
+
+  try {
+    const { rows } = await pool.query(`
+      WITH w AS (
+        SELECT $1::timestamptz AS d_start, $2::timestamptz AS d_end
+      ),
+      caller_base AS (
+        -- Report shows only the callers themselves (junior + senior) —
+        -- team leaders and managers are intentionally excluded.
+        SELECT u.id AS caller_id, u.full_name AS name, u.role, u.is_active,
+               u.tata_extension
+          FROM crm_users u
+         WHERE u.role IN ('junior_caller','senior_caller')
+           AND u.deleted_at IS NULL
+      ),
+      call_agg AS (
+        -- Telephony activity, date-windowed, outbound only. "answered" =
+        -- customer truly picked up (customer_answered_at), matching the
+        -- Performance tab's "connected" definition.
+        SELECT c.caller_id,
+               COUNT(*) FILTER (WHERE c.direction = 'outbound')::int AS touched,
+               COUNT(*) FILTER (WHERE c.direction = 'outbound' AND c.customer_answered_at IS NOT NULL)::int AS answered,
+               COUNT(*) FILTER (WHERE c.direction = 'outbound' AND c.customer_answered_at IS NULL)::int AS missed,
+               COALESCE(SUM(c.duration_sec) FILTER (WHERE c.direction = 'outbound' AND c.customer_answered_at IS NOT NULL), 0)::int AS answered_dur_sec,
+               COALESCE(SUM(c.duration_sec) FILTER (WHERE c.direction = 'outbound' AND c.customer_answered_at IS NULL), 0)::int AS missed_dur_sec,
+               COALESCE(SUM(c.duration_sec) FILTER (WHERE c.direction = 'outbound'), 0)::int AS total_dur_sec
+          FROM calls c CROSS JOIN w
+         WHERE c.caller_id IS NOT NULL
+           AND c.started_at >= w.d_start AND c.started_at <= w.d_end
+           AND ($3::text IS NULL OR EXISTS (
+                 SELECT 1 FROM leads ll
+                  WHERE ll.id = c.lead_id AND ll.webinar_id::text = $3::text
+               ))
+         GROUP BY c.caller_id
+      ),
+      disp_agg AS (
+        -- Lead disposition atoms per caller, optionally scoped to one webinar.
+        -- Batch label = the caller's most common webinar name among their leads.
+        SELECT l.assigned_user_id AS caller_id,
+               mode() WITHIN GROUP (ORDER BY web.name) AS batch,
+               COUNT(*)::int AS assigned,
+               COUNT(*) FILTER (WHERE l.last_note_outcome IS NOT NULL)::int AS with_note,
+               COUNT(*) FILTER (WHERE l.last_note_outcome IS NULL)::int AS new_leads,
+               COUNT(*) FILTER (WHERE l.last_note_interested = 'yes')::int AS interested,
+               COUNT(*) FILTER (WHERE l.next_batch_parked = TRUE)::int AS next_batch,
+               -- lead_tag classification counts
+               COUNT(*) FILTER (WHERE l.lead_tag = 'HOT')::int  AS hot,
+               COUNT(*) FILTER (WHERE l.lead_tag = 'WARM')::int AS warm,
+               COUNT(*) FILTER (WHERE l.lead_tag = 'COLD')::int AS cold,
+               COUNT(*) FILTER (WHERE l.lead_tag = 'JUNK')::int AS junk,
+               -- UNTOUCHED: no-note leads sitting on an OLDER (non-recent) webinar
+               COUNT(*) FILTER (
+                 WHERE l.last_note_outcome IS NULL
+                   AND l.next_batch_parked = FALSE
+                   AND l.webinar_id IS NOT NULL
+                   AND l.webinar_id NOT IN ${RECENT_WEBINARS_SQL}
+               )::int AS untouched,
+               -- outcomes
+               COUNT(*) FILTER (WHERE l.last_note_outcome = 'completed')::int AS o_completed,
+               COUNT(*) FILTER (WHERE l.last_note_outcome = 'follow_up' AND l.follow_up_at > NOW())::int AS o_follow_up,
+               COUNT(*) FILTER (WHERE l.last_note_outcome = 'not_interested')::int AS o_not_interested,
+               COUNT(*) FILTER (WHERE l.last_note_outcome = 'not_picked')::int AS o_not_picked,
+               COUNT(*) FILTER (WHERE l.last_note_outcome = 'incomplete')::int AS o_incomplete,
+               -- outcome_subtag atoms (the 14 enum values from caller.js)
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'other_languages')::int          AS st_other_languages,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'already_paid')::int             AS st_already_paid,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'not_available_for_webinar')::int AS st_not_available_for_webinar,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'no_diabetes')::int              AS st_no_diabetes,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'no_sugar_interested')::int      AS st_no_sugar_interested,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'no_sugar_not_interested')::int  AS st_no_sugar_not_interested,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'not_register')::int             AS st_not_register,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'just_for_knowledge')::int       AS st_just_for_knowledge,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'call_disconnected')::int        AS st_call_disconnected,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'wrong_number')::int             AS st_wrong_number,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'already_attended')::int         AS st_already_attended,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'switch_off')::int               AS st_switch_off,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'out_of_service')::int           AS st_out_of_service,
+               COUNT(*) FILTER (WHERE l.last_note_outcome_subtag = 'no_ring')::int                  AS st_no_ring
+          FROM leads l
+          LEFT JOIN webinars web ON web.id = l.webinar_id
+         WHERE l.assigned_user_id IS NOT NULL
+           AND ($3::text IS NULL OR l.webinar_id::text = $3::text)
+         GROUP BY l.assigned_user_id
+      )
+      SELECT cb.caller_id, cb.name, cb.role, cb.is_active, cb.tata_extension,
+             da.batch,
+             COALESCE(ca.touched, 0)          AS touched,
+             COALESCE(ca.answered, 0)         AS answered,
+             COALESCE(ca.missed, 0)           AS missed,
+             COALESCE(ca.answered_dur_sec, 0) AS answered_dur_sec,
+             COALESCE(ca.missed_dur_sec, 0)   AS missed_dur_sec,
+             COALESCE(ca.total_dur_sec, 0)    AS total_dur_sec,
+             COALESCE(da.assigned, 0)         AS assigned,
+             COALESCE(da.with_note, 0)        AS with_note,
+             COALESCE(da.new_leads, 0)        AS new_leads,
+             COALESCE(da.interested, 0)       AS interested,
+             COALESCE(da.next_batch, 0)       AS next_batch,
+             COALESCE(da.hot, 0)              AS hot,
+             COALESCE(da.warm, 0)             AS warm,
+             COALESCE(da.cold, 0)             AS cold,
+             COALESCE(da.junk, 0)             AS junk,
+             COALESCE(da.untouched, 0)        AS untouched,
+             COALESCE(da.o_completed, 0)      AS o_completed,
+             COALESCE(da.o_follow_up, 0)      AS o_follow_up,
+             COALESCE(da.o_not_interested, 0) AS o_not_interested,
+             COALESCE(da.o_not_picked, 0)     AS o_not_picked,
+             COALESCE(da.o_incomplete, 0)     AS o_incomplete,
+             COALESCE(da.st_other_languages, 0)          AS st_other_languages,
+             COALESCE(da.st_already_paid, 0)             AS st_already_paid,
+             COALESCE(da.st_not_available_for_webinar, 0) AS st_not_available_for_webinar,
+             COALESCE(da.st_no_diabetes, 0)              AS st_no_diabetes,
+             COALESCE(da.st_no_sugar_interested, 0)      AS st_no_sugar_interested,
+             COALESCE(da.st_no_sugar_not_interested, 0)  AS st_no_sugar_not_interested,
+             COALESCE(da.st_not_register, 0)             AS st_not_register,
+             COALESCE(da.st_just_for_knowledge, 0)       AS st_just_for_knowledge,
+             COALESCE(da.st_call_disconnected, 0)        AS st_call_disconnected,
+             COALESCE(da.st_wrong_number, 0)             AS st_wrong_number,
+             COALESCE(da.st_already_attended, 0)         AS st_already_attended,
+             COALESCE(da.st_switch_off, 0)               AS st_switch_off,
+             COALESCE(da.st_out_of_service, 0)           AS st_out_of_service,
+             COALESCE(da.st_no_ring, 0)                  AS st_no_ring
+        FROM caller_base cb
+        LEFT JOIN call_agg ca ON ca.caller_id = cb.caller_id
+        LEFT JOIN disp_agg da ON da.caller_id = cb.caller_id
+       ORDER BY cb.name ASC
+    `, params);
+
+    // Numeric atom keys — summed into the totals footer in one place.
+    const NUM_KEYS = [
+      'touched','answered','missed','answered_dur_sec','missed_dur_sec','total_dur_sec',
+      'assigned','with_note','new_leads','interested','next_batch',
+      'hot','warm','cold','junk','untouched',
+      'o_completed','o_follow_up','o_not_interested','o_not_picked','o_incomplete',
+      'st_other_languages','st_already_paid','st_not_available_for_webinar','st_no_diabetes',
+      'st_no_sugar_interested','st_no_sugar_not_interested','st_not_register','st_just_for_knowledge',
+      'st_call_disconnected','st_wrong_number','st_already_attended','st_switch_off',
+      'st_out_of_service','st_no_ring',
+    ];
+    const totals = {};
+    for (const k of NUM_KEYS) totals[k] = rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+
+    res.json({
+      rows,
+      totals,
+      window: { from: fromYmd, to: toYmd },
+      webinar_id: webinarId,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('caller-report error:', err.message);
+    res.status(500).json({ error: 'Failed to load caller report.' });
   }
 });
 

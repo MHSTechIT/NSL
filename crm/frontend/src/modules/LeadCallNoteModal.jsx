@@ -113,27 +113,21 @@ export const WORKING_PROFESSIONAL = [
 ].map(label => ({ value: label.toLowerCase().replace(/\s+/g, '_'), label }));
 
 const LOCATIONS_RAW = [
-  'chennai','madurai','bangalore','theni','thiruvallur','salem','thirupur','coimbatore','trichy','vellore',
-  'selam','villupuram','kerala','erode','kancheepuram','kanyakumari','viruthunagar','kadaloor','karur',
-  'madhurai','namakkal','thirupathur','tanjore','thanjavur','thenkasi','vilupuram','puthukottai','sivagangai',
-  'thiruvarur','thoothukudi','chengalpattu','dharmapuri','krishnagiri','pudhukottai','thiruchy',
-  'thiruvannamalai','ariyalur','coyamuthur','kadalor','kallakurichi','karnataka','nagapatinam','nagapattinam',
-  'ranipettai','thirunelveli','thiruppur','virudhunagar','dindigul','pondicherry','tirunelveli','dindukal',
-  'kadalur','kalakurichi','kallakuruchi','kanniyakumari','kumbakonam','mailadurai','namakal','oosur',
-  'pondicheery','thiruvanamalai','thuthukodi','thuthukudi','tiruppur','tiruvanamalai','aandhra','combathur',
-  'comibatore','dhindukal','kalakuruchi','kerela','mayiladuthurai','neelagiri','nilagiri','perambalur',
-  'pollachi','ramanadhapuram','ramnadu','sales','sivakasi','tenkasi','thanjaore','thirunalveli',
-  'thirunelvelli','thiruvalur','thiruvanmalai','thiruvaru','thoothukodi','thuthukoodi','trirupur','cuddalore',
-  'kirisnagriji','maiyiladurai','nilgiris','vellour','andamaan','andaman','andhra','andra pradhash',
-  'chagalpattu','iyambakkam','kadallour','kadallur','kanchipuram','karaikal','karaikkal','karaikudi',
-  'karanataka','karnaka','karnata','kirishanagiri','kirishnagiri','kirshnagiri','krishna giri','maharastra',
-  'mayiladudurai','mudurai','muduri','munnar','myladudurai','myladurai','nagai','nagalapuram','nangarkovil',
-  'nellur','osur','palani','pandichery','pera','permablur','pettaipettai','podicherry','pudhu',
-  'pudukkottai','pudukottai','rajapalayam','ramanadu','ramanathanpuram','ranipet','ranipett','salam',
-  'sithur','sivagagai','sivaganga','tanjavur','tanjjore','telungana','teni','thanjaur','thanvanamalai',
-  'tharmapuri','thirchy','thirichy','thirippathur','thiruchandhur','thirunallvalli','thiruppathur','thirupu',
-  'thiruthani','thiruvanandhapuram','thrichy','thricy','tirupattur','trichi','trivhy','ulunthurpettai',
-  'vadachennai','vandhavasi','virudachalam','viruthachalam','vithunagar','pondicherry',
+  // Cleaned canonical list — 52 Tamil Nadu districts/towns (all 38 districts +
+  // 14 major towns) + 11 nearby / other-state entries. Misspelling variants and
+  // junk entries removed.
+  'ariyalur', 'chengalpattu', 'chennai', 'coimbatore', 'cuddalore', 'dharmapuri',
+  'dindigul', 'erode', 'hosur', 'kallakurichi', 'kanchipuram', 'kanyakumari',
+  'karaikudi', 'karur', 'krishnagiri', 'kumbakonam', 'madurai', 'mayiladuthurai',
+  'nagapattinam', 'nagalapuram', 'nagercoil', 'namakkal', 'nilgiris', 'palani',
+  'perambalur', 'pollachi', 'pudukkottai', 'rajapalayam', 'ramanathapuram', 'ranipet',
+  'salem', 'sivaganga', 'sivakasi', 'tenkasi', 'thanjavur', 'theni', 'thoothukudi',
+  'tiruchendur', 'tirunelveli', 'tirupathur', 'tiruppur', 'tiruttani', 'tiruvallur',
+  'tiruvannamalai', 'tiruvarur', 'tiruchirappalli', 'ulundurpettai', 'vandavasi',
+  'vellore', 'villupuram', 'virudhachalam', 'virudhunagar',
+  // Nearby union territory / other states
+  'andaman', 'andhra pradesh', 'bangalore', 'karnataka', 'kerala', 'maharashtra',
+  'munnar', 'nellore', 'pondicherry', 'telangana', 'thiruvananthapuram',
 ];
 export const LOCATIONS = Array.from(new Set(LOCATIONS_RAW.map(s => s.trim().toLowerCase())))
   .sort()

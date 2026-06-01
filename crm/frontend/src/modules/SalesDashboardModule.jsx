@@ -7,6 +7,7 @@ import SalesNotificationsView from './SalesNotificationsView';
 import SalesTimerView         from './SalesTimerView';
 import SalesAlertsView        from './SalesAlertsView';
 import SalesCompletedCallsView from './SalesCompletedCallsView';
+import SalesNewPageView       from './SalesNewPageView';
 import UsersModule            from './UsersModule';
 
 const TABS = [
@@ -16,6 +17,18 @@ const TABS = [
     icon: (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/>
+      </svg>
+    ),
+  },
+  {
+    // New page slotted right next to Performance. Functionality TBD — renders
+    // SalesNewPageView (a placeholder) for now. Rename id/label when defined.
+    id: 'newpage',
+    label: 'New Page',
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+        <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
       </svg>
     ),
   },
@@ -264,13 +277,22 @@ export default function SalesDashboardModule({
      Completed Calls. Timer and Alerts are intentionally hidden — TLs
      don't tune global timer config and don't manage Telegram recipients
      (those are manager+ responsibilities). */
+  // Slot USER_TAB immediately before the Notifications tab, id-based so the
+  // ordering survives tabs being inserted/removed elsewhere in TABS.
+  const withUserBeforeNotifications = (list) => {
+    const i = list.findIndex(t => t.id === 'notifications');
+    return i === -1 ? [...list, USER_TAB] : [...list.slice(0, i), USER_TAB, ...list.slice(i)];
+  };
   let tabs;
   if (tlMode) {
     // Drop the 'timer' and 'alerts' tabs from the TL view.
     const tlVisible = TABS.filter(t => t.id !== 'timer' && t.id !== 'alerts');
-    tabs = [...tlVisible.slice(0, 3), USER_TAB, ...tlVisible.slice(3)];
+    tabs = withUserBeforeNotifications(tlVisible);
   } else if (managerMode) {
-    tabs = [...TABS.slice(0, 3), USER_TAB, TABS[3]];
+    // Manager subset: Performance (+ adjacent new page), Leads, Leads Logic,
+    // User, Notifications. Timer/Alerts/Completed Calls are intentionally out.
+    const mgrIds = ['performance', 'newpage', 'leads', 'logic', 'notifications'];
+    tabs = withUserBeforeNotifications(TABS.filter(t => mgrIds.includes(t.id)));
   } else {
     tabs = TABS;
   }
@@ -387,6 +409,7 @@ export default function SalesDashboardModule({
       </div>
 
       {tab === 'performance'   && <SalesPerformanceView   token={token} actionsSlotEl={slotEl} />}
+      {tab === 'newpage'       && <SalesNewPageView       token={token} />}
       {tab === 'leads'         && <SalesLeadsTable        token={token} />}
       {tab === 'logic'         && <SalesLeadsLogicView    token={token} />}
       {tab === 'notifications' && <SalesNotificationsView token={token} />}
