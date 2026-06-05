@@ -619,8 +619,8 @@ router.post('/leads/:id/note', async (req, res) => {
           range_for, patient_age, diet_status, takes_medicine, note,
           hba1c, other_languages, working_professional, location,
           already_paid, webinar_attended, available_for_webinar, next_batch_joining,
-          outcome, follow_up_at, interested, outcome_subtag)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          outcome, follow_up_at, interested, outcome_subtag, lead_tag)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
        RETURNING id, created_at`,
       [
         lead_id, req.caller.id, call_id || null,
@@ -636,6 +636,7 @@ router.post('/leads/:id/note', async (req, res) => {
         outcome === 'follow_up' ? follow_up_at : null,
         interested === 'yes' || interested === 'no' ? interested : null,
         outcome_subtag || null,
+        lead_tag || null,
       ]
     );
 

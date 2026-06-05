@@ -105,8 +105,8 @@ async function assignNewLead(leadId, sugarLevel, webinarId) {
       [callerId, leadId]
     );
     await client.query(
-      `INSERT INTO lead_assignments (lead_id, caller_id, webinar_id, reason)
-       VALUES ($1, $2, $3, 'round_robin')`,
+      `INSERT INTO lead_assignments (lead_id, caller_id, webinar_id, reason, kind)
+       VALUES ($1, $2, $3, 'round_robin', 'fresh')`,
       [leadId, callerId, webinarId]
     );
 

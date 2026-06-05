@@ -46,16 +46,18 @@ export function composeCategories(row) {
 }
 
 /* ── Funnel + conversion headline numbers (inline columns) ───────────────────
-   connected = true customer pickups (calls.customer_answered_at).
-   notPicking = outbound calls the customer didn't pick up.
-   actualLeads = leads that have at least one saved call note.
+   assigned    = cumulative assignment events (fresh + reassigned) in the window.
+   connected   = "answered" = notes with outcome completed/follow_up.
+   notPicking  = outbound calls the customer didn't pick up.
+   interested  = Hot + Warm + Cold (from note history).
+   actualLeads = FRESH assignments only (kind='fresh') — excludes moved-back leads.
    connPct: TODO confirm the exact denominator — seeded as connected / assigned. */
 export function funnelMetrics(row) {
   const assigned    = num(row.assigned);
   const connected   = num(row.answered);
   const notPicking  = num(row.missed);
   const interested  = num(row.interested);
-  const actualLeads = num(row.with_note);
+  const actualLeads = num(row.actual_leads);
   const connPct     = assigned > 0 ? Math.round((connected / assigned) * 1000) / 10 : null;
   return { assigned, connected, notPicking, interested, actualLeads, connPct };
 }

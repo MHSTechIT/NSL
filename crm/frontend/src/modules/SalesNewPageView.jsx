@@ -12,8 +12,12 @@ import CallerLeadsMoveDrawer from '../admin/CallerLeadsMoveDrawer';
 const VIOLET = '#5B21B6';
 const INK    = '#3B0764';
 const todayIstYmd = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
-const secToMin = (s) => Math.round(num(s) / 60);
-const secToHr  = (s) => (num(s) / 3600).toFixed(2);
+const pad2 = (n) => String(n).padStart(2, '0');
+/* seconds → "HH.MM.SS" (zero-padded) for a single combined talk-time column */
+const secToHms = (s) => {
+  const t = Math.max(0, Math.round(num(s)));
+  return `${pad2(Math.floor(t / 3600))}.${pad2(Math.floor((t % 3600) / 60))}.${pad2(t % 60)}`;
+};
 function toCsvCell(v) {
   const s = String(v ?? '');
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -33,6 +37,55 @@ function convColor(p) {
   return '#B91C1C';
 }
 
+/* ── Live caller-status badge — same rules as the Performance page ──
+   Green = working · Orange = on break · Red = idle/overrun/offline.
+   Tracking window 9 AM–6 PM IST; outside it shows "Off hours". Needs `nowTick`
+   (a periodically-updated timestamp) so the rest/offline timers stay live. */
+function fmtRest(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '0m';
+  const totalMins = Math.floor(ms / 60000);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+function badgeStyleByColor(c) {
+  const palettes = {
+    green:  { bg: 'rgba(5,150,105,0.15)',  fg: '#047857' },
+    orange: { bg: 'rgba(245,158,11,0.18)', fg: '#B45309' },
+    red:    { bg: 'rgba(220,38,38,0.14)',  fg: '#B91C1C' },
+  };
+  const p = palettes[c] || palettes.red;
+  return {
+    display: 'inline-block', padding: '2px 9px', borderRadius: 50,
+    fontSize: '0.66rem', fontWeight: 700, background: p.bg, color: p.fg,
+    whiteSpace: 'nowrap', fontFamily: 'Outfit, sans-serif',
+  };
+}
+function StatusBadge({ row, nowTick }) {
+  const now = nowTick;
+  const istHr = new Date(now + 5.5 * 3600 * 1000).getUTCHours();
+  if (!(istHr >= 9 && istHr < 18)) {
+    return <span title="Tracking window is 9 AM – 6 PM IST" style={{ ...badgeStyleByColor('red'), background: 'rgba(107,114,128,0.12)', color: '#6B7280' }}>Off hours</span>;
+  }
+  const hbAge = row.last_heartbeat_at ? now - new Date(row.last_heartbeat_at).getTime() : Infinity;
+  if (hbAge > 90_000) {
+    const restMs = row.rest_started_at ? Math.max(0, now - new Date(row.rest_started_at).getTime()) : null;
+    return <span title={`No heartbeat in ${Math.floor(hbAge / 1000)}s`} style={badgeStyleByColor('red')}>Offline{restMs != null && ` · ${fmtRest(restMs)}`}</span>;
+  }
+  if (row.activity_status === 'working') return <span style={badgeStyleByColor('green')}>Working</span>;
+  if (row.activity_status === 'on_break') {
+    const b = row.activity_break || {};
+    const endsAtMs = b.endsAt ? new Date(b.endsAt).getTime() : (typeof b.endsAt === 'number' ? b.endsAt : null);
+    if (endsAtMs && now > endsAtMs) {
+      const restMs = row.rest_started_at ? Math.max(0, now - new Date(row.rest_started_at).getTime()) : 0;
+      return <span title={`Break overrun — was ${b.reason || 'on break'}`} style={badgeStyleByColor('red')}>Overrun · {fmtRest(restMs)}</span>;
+    }
+    return <span title={b.reason || 'On break'} style={badgeStyleByColor('orange')}>{b.reason || 'Break'}</span>;
+  }
+  const restMs = row.rest_started_at ? Math.max(0, now - new Date(row.rest_started_at).getTime()) : 0;
+  return <span style={badgeStyleByColor('red')}>Resting · {fmtRest(restMs)}</span>;
+}
+
 /* ── Column groups (exact 30-column spec). Each col's `get(row)` works on both
    a caller row and the totals row (same atom shape). Collapsible groups can be
    folded to a single placeholder column. ──────────────────────────────────── */
@@ -42,10 +95,8 @@ const GROUPS = [
     { id: 'touched',  label: 'Touched',  get: (r) => num(r.touched) },
   ]},
   { id: 'answered', label: 'ANSWERED', color: '#7C3AED', collapsible: true, cols: [
-    { id: 'answered', label: 'Answered',     get: (r) => num(r.answered) },
-    { id: 'ansdur',   label: 'Ans Dur (s)',  get: (r) => num(r.answered_dur_sec) },
-    { id: 'ansmin',   label: 'Ans Talk (m)', get: (r) => secToMin(r.answered_dur_sec) },
-    { id: 'anshr',    label: 'Ans Talk (h)', get: (r) => secToHr(r.answered_dur_sec) },
+    { id: 'answered', label: 'Answered',         get: (r) => num(r.answered) },
+    { id: 'anstalk',  label: 'Ans Talk (h.m.s)', get: (r) => secToHms(r.answered_dur_sec) },
   ]},
   { id: 'interested', label: 'INTERESTED', color: '#8B5CF6', cols: [
     { id: 'interested', label: 'Interested', get: (r) => num(r.interested) },
@@ -66,10 +117,8 @@ const GROUPS = [
     { id: 'nodia',  label: 'No Diabetes',               get: (r) => num(r.st_no_diabetes) },
   ]},
   { id: 'dnp', label: 'DNP', color: '#7C3AED', collapsible: true, cols: [
-    { id: 'dnp',     label: 'DNP',            get: (r) => num(r.o_not_picked) },
-    { id: 'missdur', label: 'Missed Dur (s)', get: (r) => num(r.missed_dur_sec) },
-    { id: 'missmin', label: 'Miss Talk (m)',  get: (r) => secToMin(r.missed_dur_sec) },
-    { id: 'misshr',  label: 'Miss Talk (h)',  get: (r) => secToHr(r.missed_dur_sec) },
+    { id: 'dnp',      label: 'DNP',               get: (r) => num(r.o_not_picked) },
+    { id: 'misstalk', label: 'Miss Talk (h.m.s)', get: (r) => secToHms(r.missed_dur_sec) },
   ]},
   { id: 'outcome', label: 'OUTCOME', color: '#5B21B6', cols: [
     { id: 'nextbatch', label: 'Next Batch',   get: (r) => num(r.next_batch) },
@@ -124,6 +173,8 @@ export default function SalesNewPageView({ token }) {
   const rootRef                   = useRef(null);
   const scrollRef                 = useRef(null);
   const [scrollH, setScrollH]     = useState(null);        // fill viewport → scrollbar at page bottom
+  const [nowTick, setNowTick]     = useState(() => Date.now()); // live clock for the status badge
+  useEffect(() => { const t = setInterval(() => setNowTick(Date.now()), 10_000); return () => clearInterval(t); }, []);
 
   const range = useMemo(() => {
     if (preset === 'all')   return { from: '2020-01-01', to: todayIstYmd() }; // from the beginning
@@ -342,7 +393,10 @@ export default function SalesNewPageView({ token }) {
                     >
                       <td style={{ ...tdBase, ...stickyLeft, background: rowBg, boxShadow: isSel ? 'inset 3px 0 0 #5B21B6, 2px 0 4px rgba(91,33,182,0.08)' : '2px 0 4px rgba(91,33,182,0.06)' }}>
                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                          <span style={{ fontWeight: 700, color: isSel ? VIOLET : INK }}>{r.name}</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <span style={{ fontWeight: 700, color: isSel ? VIOLET : INK, whiteSpace: 'nowrap' }}>{r.name}</span>
+                            <StatusBadge row={r} nowTick={nowTick} />
+                          </span>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

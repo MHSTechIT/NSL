@@ -4,9 +4,6 @@ import MarketingModule      from './modules/MarketingModule';
 import UsersModule          from './modules/UsersModule';
 import SalesDashboardModule from './modules/SalesDashboardModule';
 import ZoomModule           from './modules/ZoomModule';
-import NsmMarketingModule   from './modules/NsmMarketingModule';
-import NsmUsersModule       from './modules/NsmUsersModule';
-import NsmSalesDashboard    from './modules/NsmSalesDashboard';
 
 const MODULES = [
   {
@@ -86,8 +83,6 @@ const WORKSPACES = [
   { id: 'meta',       label: 'Meta'       },
   { id: 'yt',         label: 'YT'         },
   { id: 'meta2',      label: 'Meta 2.0'   },
-  { id: 'nsm-caller', label: 'NSM-Caller' },
-  { id: 'nsm-ivr',    label: 'NSM-IVR'    },
 ];
 
 export default function CrmShell() {
@@ -255,7 +250,7 @@ export default function CrmShell() {
                   return (
                     <button
                       key={w.id}
-                      onClick={() => { setWorkspace(w.id); setWsOpen(false); if (w.id === 'meta' || w.id === 'nsm-ivr') setActive('marketing'); }}
+                      onClick={() => { setWorkspace(w.id); setWsOpen(false); if (w.id === 'meta') setActive('marketing'); }}
                       style={{
                         width: '100%', display: 'flex', alignItems: 'center', gap: 8,
                         padding: '8px 10px', borderRadius: 8, border: 'none',
@@ -278,7 +273,7 @@ export default function CrmShell() {
           </div>
           )}
 
-          {MODULES.filter(m => workspace !== 'nsm-ivr' || m.id === 'marketing').map(m => {
+          {MODULES.map(m => {
             const isActive = activeModule === m.id;
             return (
               <button
@@ -390,33 +385,17 @@ export default function CrmShell() {
         </div>
 
         {/* Active module — Marketing is wired for both Meta and YT (filtered by source).
-            Users + Sales are Meta-only for now; YT shows a coming-soon placeholder.
-            NSM-Caller is a brand-new workspace with no modules wired yet — show a
-            placeholder for every tab so it never falls back to Meta's source data. */}
-        {workspace === 'nsm-caller' ? (
-          activeModule === 'marketing'
-            ? <NsmMarketingModule token={token} />
-            : activeModule === 'users'
-            ? <NsmUsersModule token={token} />
-            : activeModule === 'sales'
-            ? <NsmSalesDashboard token={token} />
-            : <ComingSoonPanel label={`NSM-Caller · ${MODULE_TITLES[activeModule]?.title || 'Dashboard'}`} />
-        ) : workspace === 'nsm-ivr' ? (
-          activeModule === 'marketing'
-            ? <NsmMarketingModule token={token} source="nsm-ivr" apiBase="/api/admin/nsm-ivr" />
-            : <ComingSoonPanel label={`NSM-IVR · ${MODULE_TITLES[activeModule]?.title || 'Dashboard'}`} />
-        ) : (
-          <>
-            {activeModule === 'marketing' && <MarketingModule token={token} source={workspace} />}
-            {activeModule === 'users' && (workspace === 'meta'
-              ? <UsersModule token={token} />
-              : <ComingSoonPanel label="YT · Users" />)}
-            {activeModule === 'sales' && (workspace === 'meta'
-              ? <SalesDashboardModule token={token} />
-              : <ComingSoonPanel label="YT · Sales" />)}
-            {activeModule === 'zoom' && <ZoomModule token={token} source={workspace} />}
-          </>
-        )}
+            Users + Sales are Meta-only for now; YT shows a coming-soon placeholder. */}
+        <>
+          {activeModule === 'marketing' && <MarketingModule token={token} source={workspace} />}
+          {activeModule === 'users' && (workspace === 'meta'
+            ? <UsersModule token={token} />
+            : <ComingSoonPanel label="YT · Users" />)}
+          {activeModule === 'sales' && (workspace === 'meta'
+            ? <SalesDashboardModule token={token} />
+            : <ComingSoonPanel label="YT · Sales" />)}
+          {activeModule === 'zoom' && <ZoomModule token={token} source={workspace} />}
+        </>
       </main>
     </div>
   );
