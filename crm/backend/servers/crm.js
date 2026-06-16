@@ -39,6 +39,7 @@ const { mergeTimerSettings }                    = require('../utils/timerDefault
 const leadsAlertScheduler                       = require('../utils/leadsAlertScheduler');
 const { startLinkSwapScheduler }                = require('../utils/linkSwapScheduler');
 const emptyQueueAlertScheduler                  = require('../utils/emptyQueueAlertScheduler');
+const dnpReassignScheduler                      = require('../utils/dnpReassignScheduler');
 
 const { startListener }                         = require('../utils/pgListener');
 const { handleLeadCreated, sweepUnassignedLeads } = require('../utils/leadCreatedListener');
@@ -64,7 +65,7 @@ app.listen(PORT, () => {
   console.log(`[crm] running on port ${PORT}`);
 
   if (DISABLE_SCHEDULERS) {
-    console.log('[crm] DISABLE_SCHEDULERS=true → skipping linkSwap, tataInboundSync, leadsAlert, emptyQueueAlert, sheetsSync, staleCallReaper, activitySpanReaper, dailyReconciliation');
+    console.log('[crm] DISABLE_SCHEDULERS=true → skipping linkSwap, tataInboundSync, leadsAlert, emptyQueueAlert, dnpReassign, sheetsSync, staleCallReaper, activitySpanReaper, dailyReconciliation');
   } else {
     // All schedulers — race-prone if run in more than one process, so CRM owns
     // every one and the funnel services start none.
@@ -93,6 +94,10 @@ app.listen(PORT, () => {
     // admin-configured delay (TL & Assistant Timer sub-page). Fixed 60s tick;
     // the delay itself is read from timer_settings each run.
     emptyQueueAlertScheduler.startScheduler();
+
+    // Auto-reopen DNP (Not Picked) leads into Assigned at 11:00/13:00/16:00 IST,
+    // Mon–Sat (skips Sunday) — so callers retry unreached customers.
+    dnpReassignScheduler.startScheduler();
 
     cron.schedule('25 18 * * *', () => {
       console.log('[Sheets Sync] Starting daily sync...');

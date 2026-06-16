@@ -185,6 +185,20 @@ if (_emptyQueueAlertMigration && typeof _emptyQueueAlertMigration.catch === 'fun
   _emptyQueueAlertMigration.catch(err => console.error('[Migration] caller_empty_queue_alert error:', err.message));
 }
 
+// Auto-migrate: single global daily call target (one number for all callers).
+// Powers the admin "Daily target" box on the Sales report + the caller cup.
+const _dailyTargetMigration = pool.query(`
+  CREATE TABLE IF NOT EXISTS caller_daily_target (
+    id          SMALLINT PRIMARY KEY DEFAULT 1,
+    target      INTEGER     NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  INSERT INTO caller_daily_target (id, target) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+`);
+if (_dailyTargetMigration && typeof _dailyTargetMigration.catch === 'function') {
+  _dailyTargetMigration.catch(err => console.error('[Migration] caller_daily_target error:', err.message));
+}
+
 // Auto-migrate: create workspace_flags table (Settings → Workspace on/off map)
 const _workspaceFlagsMigration = pool.query(`
   CREATE TABLE IF NOT EXISTS workspace_flags (

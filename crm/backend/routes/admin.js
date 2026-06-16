@@ -855,6 +855,34 @@ router.put('/settings', async (req, res) => {
   }
 });
 
+/* ── GET /api/admin/daily-target ──
+   The single GLOBAL daily call target (one number every caller shares). Drives
+   the admin "Daily target" box on the Sales report and the caller-page cup. */
+router.get('/daily-target', async (_req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT target FROM caller_daily_target WHERE id = 1');
+    res.json({ target: rows[0]?.target ?? 0 });
+  } catch (err) {
+    console.error('Get daily-target error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch daily target' });
+  }
+});
+
+/* ── PUT /api/admin/daily-target   body: { target } ──
+   Sets the global daily call target. Clamped to 0–100000. */
+router.put('/daily-target', async (req, res) => {
+  let target = parseInt(req.body?.target, 10);
+  if (!Number.isFinite(target) || target < 0) target = 0;
+  target = Math.min(target, 100000);
+  try {
+    await pool.query('UPDATE caller_daily_target SET target = $1, updated_at = NOW() WHERE id = 1', [target]);
+    res.json({ success: true, target });
+  } catch (err) {
+    console.error('Update daily-target error:', err.message);
+    res.status(500).json({ error: 'Failed to save daily target' });
+  }
+});
+
 /* ── POST /api/admin/settings/test-alert ──
    Triggers an immediate dry-run of the alert scheduler so admin can verify
    the WATI key + phone are wired up. Body: { source }

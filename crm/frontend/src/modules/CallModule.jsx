@@ -3,6 +3,7 @@ import Lottie from 'lottie-react';
 import useRobotNudge from '../hooks/useRobotNudge';
 import { useTimerSettings } from '../context/TimerSettingsContext';
 import CallStatsPanel from './CallStatsPanel';
+import CallerTargetCup from './CallerTargetCup';
 
 // Use the SAME robot the corner MascotBot uses (robot-idle.json) — the
 // happy variant + heart-eye overlay didn't land the eyes inside the
@@ -321,6 +322,11 @@ export default function CallModule({ jwt, onStartAutoCall, isActive, robotMessag
         gap: 'min(7vw, 110px)',
       }}
     >
+      {/* Daily target progress cup — top-right of the Call page */}
+      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 5 }}>
+        <CallerTargetCup jwt={jwt} />
+      </div>
+
       <style>{`
         @keyframes cm-bubble-in {
           from { opacity: 0; transform: translateY(-6px) scale(0.96); }

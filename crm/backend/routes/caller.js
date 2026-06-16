@@ -422,6 +422,33 @@ router.get('/leads/not-picked', async (req, res) => {
   }
 });
 
+/* ── GET /api/caller/daily-target ──
+   The global daily call target + how many DISTINCT leads this caller has dialed
+   today (IST). Powers the caller-page progress cup. attempts counts outbound
+   call attempts to actual leads; `done` flips true once target is reached. */
+router.get('/daily-target', async (req, res) => {
+  const cfg = workspaceConfig(req.caller.workspace);
+  try {
+    const { rows: t } = await pool.query('SELECT target FROM caller_daily_target WHERE id = 1');
+    const target = t[0]?.target ?? 0;
+    const { rows: a } = await pool.query(
+      `SELECT COUNT(DISTINCT lead_id)::int AS attempts
+         FROM ${cfg.calls}
+        WHERE caller_id = $1
+          AND direction = 'outbound'
+          AND lead_id IS NOT NULL
+          AND (started_at AT TIME ZONE 'Asia/Kolkata')::date
+              = (NOW() AT TIME ZONE 'Asia/Kolkata')::date`,
+      [req.caller.id]
+    );
+    const attempts_today = a[0]?.attempts ?? 0;
+    res.json({ target, attempts_today, done: target > 0 && attempts_today >= target });
+  } catch (err) {
+    console.error('caller/daily-target error:', err.message);
+    res.status(500).json({ error: 'Failed to load daily target' });
+  }
+});
+
 /* ── GET /api/caller/leads/untouched ──
    Leads still assigned to this caller but tied to an OLDER webinar — older
    than the current + previous webinar. They drop out of the Assigned queue

@@ -224,6 +224,10 @@ export default function SalesNewPageView({ token, source = 'all' }) {
   const [callLogRow, setCallLogRow]       = useState(null); // "View call log" drawer target
   const [activityRow, setActivityRow]     = useState(null); // status-pill → activity timeline drawer
   const [isFs, setIsFs]           = useState(false);       // laptop full-screen view
+  /* Global daily call target (one number for all callers; shows as the caller cup). */
+  const [dailyTarget, setDailyTarget] = useState('');
+  const [targetSaving, setTargetSaving] = useState(false);
+  const [targetSaved, setTargetSaved]   = useState(false);
   const rootRef                   = useRef(null);
   const scrollRef                 = useRef(null);
   const [scrollH, setScrollH]     = useState(null);        // fill viewport → scrollbar at page bottom
@@ -394,6 +398,26 @@ export default function SalesNewPageView({ token, source = 'all' }) {
     return () => { clearTimeout(t); window.removeEventListener('resize', measure); };
   }, [isFs, loading]);
 
+  /* Load + save the single global daily call target. */
+  useEffect(() => {
+    fetch('/api/admin/daily-target', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d) setDailyTarget(String(d.target ?? 0)); })
+      .catch(() => {});
+  }, [token]);
+  async function saveDailyTarget() {
+    setTargetSaving(true); setTargetSaved(false);
+    try {
+      const res = await fetch('/api/admin/daily-target', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ target: parseInt(dailyTarget, 10) || 0 }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { setDailyTarget(String(d.target)); setTargetSaved(true); setTimeout(() => setTargetSaved(false), 2000); }
+    } catch { /* ignore */ } finally { setTargetSaving(false); }
+  }
+
   /* total inline column count for loading/empty colSpan (collapsed group = 1 col) */
   // caller_id → workspace tag, from the crm_users list (callers carry a workspace).
   const workspaceById = useMemo(() => {
@@ -486,6 +510,29 @@ export default function SalesNewPageView({ token, source = 'all' }) {
               </div>
             </>
           )}
+
+          {/* Daily target — single global goal shown as the caller-page cup. */}
+          <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.78rem', fontWeight: 700, color: 'rgba(91,33,182,0.7)', whiteSpace: 'nowrap' }}>
+              Daily target
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={dailyTarget}
+              onChange={(e) => setDailyTarget(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => { if (e.key === 'Enter') saveDailyTarget(); }}
+              placeholder="0"
+              style={{ width: 76, height: '2.1rem', padding: '0 10px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.25)', background: '#fff', fontFamily: 'Outfit, sans-serif', fontSize: '0.85rem', color: INK, textAlign: 'right', fontWeight: 700, outline: 'none' }}
+            />
+            <button
+              onClick={saveDailyTarget}
+              disabled={targetSaving}
+              style={{ padding: '7px 14px', borderRadius: 10, border: 'none', background: targetSaved ? '#059669' : VIOLET, color: '#fff', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.78rem', cursor: targetSaving ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+            >
+              {targetSaving ? '…' : targetSaved ? '✓ Saved' : 'Set'}
+            </button>
+          </div>
         </div>
 
         {/* First line — all dropdowns + actions (order:1 → above the presets row). */}
