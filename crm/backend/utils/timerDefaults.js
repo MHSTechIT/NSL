@@ -26,6 +26,8 @@ const BOUNDS = {
   lateReturnNudgeIntervalMs:   [30000,  5000,  600000],
   lateReturnNudgeCount:        [5,      1,     20],
   breakPickerStrikeCount:      [3,      1,     20],
+  // TL & Assistant — delayed manager alert when a caller's Assigned page is empty
+  mgrEmptyLeadsAlertDelayMs:   [600000, 60000, 3600000],
   // break cards
   breakPickerCountdownMs:     [10000,   3000,  120000],
   breakBubbleHideMs:          [10000,   2000,  60000],
@@ -94,6 +96,7 @@ const EDITABLE_KEYS = [
   'customBreakNudgeIntervalMs', 'customBreakNudgeCount',
   'lateReturnNudgeIntervalMs', 'lateReturnNudgeCount',
   'breakPickerCountdownMs', 'breakPickerStrikeCount',
+  'mgrEmptyLeadsAlertDelayMs',
 ];
 
 // Flat { key: default }.

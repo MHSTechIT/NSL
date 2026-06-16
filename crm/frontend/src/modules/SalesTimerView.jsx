@@ -103,6 +103,7 @@ export default function SalesTimerView({ token, source = 'all', readOnly = false
   const [error, setError]       = useState('');
   const [toast, setToast]       = useState(null);          // { msg, kind }
   const [collapsed, setCollapsed] = useState({});          // { groupId: true }
+  const [subPage, setSubPage]   = useState('callers');     // 'callers' | 'tl'
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -186,36 +187,36 @@ export default function SalesTimerView({ token, source = 'all', readOnly = false
     setCollapsed(prev => ({ ...prev, [id]: !prev[id] }));
   }
 
+  // Groups belonging to the active sub-page (existing cards default to 'callers';
+  // the manager-alert card is tagged page:'tl').
+  const pageGroups = VISIBLE_GROUPS.filter(g => (g.page || 'callers') === subPage);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 80 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h3 style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: '#3B0764' }}>
-            Timer settings
-          </h3>
-          <span style={{ fontSize: '0.74rem', color: 'rgba(91,33,182,0.55)', fontFamily: 'Outfit, sans-serif' }}>
-            Robot-nudge &amp; auto-pause timings, per caller card — all times in seconds
-          </span>
-        </div>
-        <button
-          onClick={resetAll}
-          disabled={loading}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '8px 16px', borderRadius: 50,
-            border: '1px solid rgba(220,38,38,0.35)', background: '#fff',
-            color: '#B91C1C', fontFamily: 'Outfit, sans-serif',
-            fontWeight: 700, fontSize: '0.8rem',
-            cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.5 : 1,
-          }}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="23 4 23 10 17 10"/>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-          </svg>
-          Reset all to defaults
-        </button>
+      {/* Sub-page tabs — Callers (current cards) vs TL & Assistant */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        {[
+          { id: 'callers', label: 'Callers' },
+          { id: 'tl',      label: 'TL & Assistant' },
+        ].map(t => {
+          const active = subPage === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setSubPage(t.id)}
+              style={{
+                padding: '7px 18px', borderRadius: 50, cursor: 'pointer',
+                border: active ? '1px solid transparent' : '1px solid rgba(139,92,246,0.30)',
+                background: active ? 'linear-gradient(135deg, #5B21B6, #7C3AED)' : '#fff',
+                color: active ? '#fff' : '#5B21B6',
+                fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.82rem',
+                boxShadow: active ? '0 2px 10px rgba(91,33,182,0.25)' : 'none',
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {error && (
@@ -228,9 +229,15 @@ export default function SalesTimerView({ token, source = 'all', readOnly = false
         <div className="bg-white rounded-card shadow-card" style={{ padding: 40, textAlign: 'center', fontFamily: 'Outfit, sans-serif', color: 'rgba(91,33,182,0.55)', fontSize: '0.88rem' }}>
           Loading timer settings…
         </div>
+      ) : pageGroups.length === 0 ? (
+        <div className="bg-white rounded-card shadow-card" style={{ padding: '40px 24px', textAlign: 'center' }}>
+          <p style={{ margin: 0, fontFamily: 'Outfit, sans-serif', fontSize: '0.84rem', color: 'rgba(91,33,182,0.55)' }}>
+            No settings on this page yet.
+          </p>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {VISIBLE_GROUPS.map(group => {
+          {pageGroups.map(group => {
             const isCollapsed = !!collapsed[group.id];
             return (
               <div
@@ -391,8 +398,9 @@ export default function SalesTimerView({ token, source = 'all', readOnly = false
           content; only the button itself catches clicks. Hidden entirely
           for TL view (readOnly): TLs see the department-wide timer config
           but cannot mutate it. Backend also rejects PUT /timer-settings
-          from a team_leader JWT (403) as a defense-in-depth. */}
-      {!loading && !readOnly && (
+          from a team_leader JWT (403) as a defense-in-depth. Also hidden on
+          the TL & Assistant sub-page, which has no editable fields yet. */}
+      {pageGroups.length > 0 && !loading && !readOnly && (
         <div style={{
           position: 'sticky', bottom: 16, zIndex: 20,
           display: 'flex', justifyContent: 'flex-end',

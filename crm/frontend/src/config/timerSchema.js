@@ -90,6 +90,17 @@ export const TIMER_GROUPS = [
     ],
   },
 
+  /* ── TL & Assistant sub-page ───────────────────────────────────────────── */
+  {
+    id: 'mgralerts',
+    page: 'tl',
+    label: 'Manager alert — empty assigned leads',
+    items: [
+      { key: 'mgrEmptyLeadsAlertDelayMs', label: 'Alert manager after Assigned leads stay empty for', unit: 'min', default: 600000, min: 60000, max: 3600000,
+        help: "When a caller's Assigned page has zero leads for this long, the MANAGER gets an alert. (The TL & assistant manager are alerted immediately; the manager only after this delay.) Range 1–60 minutes. Default 10 minutes." },
+    ],
+  },
+
   /* ── FIXED — present for caller-app defaults, not shown on the Timer page ── */
   {
     id: 'fixedbreak',
@@ -240,6 +251,7 @@ export const EDITABLE_KEYS = [
   'customBreakNudgeIntervalMs', 'customBreakNudgeCount',
   'lateReturnNudgeIntervalMs', 'lateReturnNudgeCount',
   'breakPickerCountdownMs', 'breakPickerStrikeCount',
+  'mgrEmptyLeadsAlertDelayMs',
 ];
 
 /* Clamp a single value to its schema bounds; falls back to the default

@@ -185,6 +185,34 @@ async function notifyAutoPause(callerId, reason) {
   }
 }
 
+/* ──────────────────────────────────────────────────────────────────────
+   Public: notify MANAGERS that a caller's Assigned page has been empty for
+   the configured delay (mgrEmptyLeadsAlertDelayMs on the TL & Assistant
+   Timer sub-page). The TL/assistant see the empty state immediately on the
+   Notifications page; the manager is pinged only after this delay.
+   Sent to manager recipients only (target_type='manager'); fired by
+   emptyQueueAlertScheduler.
+   ────────────────────────────────────────────────────────────────────── */
+async function notifyEmptyQueue(caller, minutesEmpty) {
+  try {
+    const recipients = (await recipientsForCaller(caller)).filter(r => r.target_type === 'manager');
+    if (recipients.length === 0) return;
+
+    const text = [
+      `⚠️ <b>Empty queue alert</b>`,
+      ``,
+      `<b>${escapeHtml(caller.full_name)}</b> (${ROLE_LABEL[caller.role] || caller.role}) has had <b>zero</b> assigned leads for <b>${minutesEmpty} min</b>.`,
+      `Department: ${caller.department || '—'}`,
+      ``,
+      `Please refill their queue.`,
+    ].join('\n');
+
+    await Promise.all(recipients.map(r => sendTelegram(r.telegram_chat_id, text)));
+  } catch (err) {
+    console.error('[telegramNotifier] notifyEmptyQueue error:', err.message);
+  }
+}
+
 /* Tiny HTML-escaper for Telegram's `parse_mode: HTML`. Keep this in sync
    with any new tag we use (b, i, code, etc.). */
 function escapeHtml(s) {
@@ -199,6 +227,7 @@ module.exports = {
   editTelegramMessage,
   answerCallback,
   notifyAutoPause,
+  notifyEmptyQueue,
   escapeHtml,
   prettyReason,
 };

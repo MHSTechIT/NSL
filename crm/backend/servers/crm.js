@@ -38,6 +38,7 @@ const schedulerManager                          = require('../utils/schedulerMan
 const { mergeTimerSettings }                    = require('../utils/timerDefaults');
 const leadsAlertScheduler                       = require('../utils/leadsAlertScheduler');
 const { startLinkSwapScheduler }                = require('../utils/linkSwapScheduler');
+const emptyQueueAlertScheduler                  = require('../utils/emptyQueueAlertScheduler');
 
 const { startListener }                         = require('../utils/pgListener');
 const { handleLeadCreated, sweepUnassignedLeads } = require('../utils/leadCreatedListener');
@@ -63,7 +64,7 @@ app.listen(PORT, () => {
   console.log(`[crm] running on port ${PORT}`);
 
   if (DISABLE_SCHEDULERS) {
-    console.log('[crm] DISABLE_SCHEDULERS=true → skipping linkSwap, tataInboundSync, leadsAlert, sheetsSync, staleCallReaper, activitySpanReaper, dailyReconciliation');
+    console.log('[crm] DISABLE_SCHEDULERS=true → skipping linkSwap, tataInboundSync, leadsAlert, emptyQueueAlert, sheetsSync, staleCallReaper, activitySpanReaper, dailyReconciliation');
   } else {
     // All schedulers — race-prone if run in more than one process, so CRM owns
     // every one and the funnel services start none.
@@ -87,6 +88,11 @@ app.listen(PORT, () => {
     // kept off the caller Timer Settings page and run on fixed intervals.
     leadsAlertScheduler.startScheduler();
     startLinkSwapScheduler();
+
+    // Delayed manager alert when a caller's Assigned queue stays empty past the
+    // admin-configured delay (TL & Assistant Timer sub-page). Fixed 60s tick;
+    // the delay itself is read from timer_settings each run.
+    emptyQueueAlertScheduler.startScheduler();
 
     cron.schedule('25 18 * * *', () => {
       console.log('[Sheets Sync] Starting daily sync...');

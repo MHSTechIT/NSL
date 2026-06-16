@@ -1,6 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import DateTimePicker from '../admin/DateTimePicker';
+import { ALL_WORKSPACES, isWorkspaceEnabled, fetchWorkspaceFlags } from '../utils/workspaceFlags';
+
+/* Workspaces are single-select here (not "all"): leads + callers are
+   source-scoped, so a YT lead can never be handed to a Meta caller. */
+const WS_IDS = new Set(ALL_WORKSPACES.map(w => w.id));
 
 /* Manual Lead Assignment modal — opens from the Sales → Leads toolbar.
 
@@ -30,7 +35,35 @@ function toIsoOrEmpty(local) {
   return new Date(`${local}T00:00:00+05:30`).toISOString();
 }
 
-export default function ManualAssignModal({ token, onClose, onAssigned }) {
+export default function ManualAssignModal({ token, source = 'all', onClose, onAssigned }) {
+  /* Workspace filter — single-select. Assignment must target one concrete
+     source; if the parent is in "all" mode we default to Meta. */
+  const [workspace, setWorkspace] = useState(() => (WS_IDS.has(source) ? source : 'meta'));
+
+  /* Only workspaces enabled on the Settings page are offered here. Defaults to
+     "all enabled" until the flags load, so nothing flickers/hides wrongly. */
+  const [wsFlags, setWsFlags] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchWorkspaceFlags(token).then(f => { if (!cancelled) setWsFlags(f || {}); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [token]);
+  const enabledWorkspaces = useMemo(
+    () => ALL_WORKSPACES.filter(w => isWorkspaceEnabled(wsFlags, w.id)),
+    [wsFlags]
+  );
+  /* If the selected workspace gets disabled in Settings, fall back to the first
+     still-enabled one so we never query a hidden source. */
+  useEffect(() => {
+    if (enabledWorkspaces.length && !enabledWorkspaces.some(w => w.id === workspace)) {
+      setWorkspace(enabledWorkspaces[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledWorkspaces]);
+
+  /* Selected callers (checkboxes) — only these receive leads. */
+  const [selected, setSelected] = useState(() => new Set());
+
   /* Default range = last 7 days → now, in IST. */
   const [from, setFrom] = useState(() => {
     const d = new Date(Date.now() + 5.5 * 3600 * 1000 - 7 * 24 * 3600 * 1000);
@@ -57,14 +90,14 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/admin/webinars', { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`/api/admin/webinars?source=${encodeURIComponent(workspace)}`, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) return;
         const d = await res.json();
         if (!cancelled) setWebinars(d.webinars || []);
       } catch (_) { /* non-fatal */ }
     })();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, workspace]);
 
   /* Current + past webinars are pickable. "Current" = the active webinar
      (is_active) — its date_time is in the FUTURE, so it must be kept even
@@ -89,6 +122,7 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
     const t = setTimeout(async () => {
       try {
         const url = `/api/admin/leads/assignment-pool?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`
+          + `&source=${encodeURIComponent(workspace)}`
           + (webinarId ? `&webinar_id=${encodeURIComponent(webinarId)}` : '');
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         const d = await res.json();
@@ -102,33 +136,72 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
     }, 250);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, token, webinarId]);
+  }, [from, to, token, webinarId, workspace]);
+
+  /* Changing workspace swaps the lead pool entirely → clear any in-progress
+     counts + selection so stale numbers can't be submitted to the new source. */
+  function changeWorkspace(ws) {
+    if (ws === workspace) return;
+    setWorkspace(ws);
+    setWebinarId('');        // webinar list is per-source — drop the old pick
+    setCounts({});
+    setSelected(new Set());
+    setMsg('');
+  }
 
   const totalRequested = useMemo(() => {
     return Object.values(counts).reduce((s, n) => s + (Number(n) || 0), 0);
   }, [counts]);
 
-  /* Auto-distribute the available pool evenly across the visible callers.
-     Remainder from an uneven divide is sprinkled across the first N rows. */
+  /* Auto-distribute the available pool evenly across the SELECTED callers
+     (or all callers when nothing is checked). Remainder is sprinkled across
+     the first N rows, and the targets are checked so the UI stays in sync. */
   function autoDistribute() {
-    if (pool.callers.length === 0 || pool.available === 0) return;
-    const base = Math.floor(pool.available / pool.callers.length);
-    const remainder = pool.available - base * pool.callers.length;
+    const targets = selected.size
+      ? pool.callers.filter(c => selected.has(c.id))
+      : pool.callers;
+    if (targets.length === 0 || pool.available === 0) return;
+    const base = Math.floor(pool.available / targets.length);
+    const remainder = pool.available - base * targets.length;
     const next = {};
-    pool.callers.forEach((c, i) => {
-      next[c.id] = base + (i < remainder ? 1 : 0);
-    });
+    targets.forEach((c, i) => { next[c.id] = base + (i < remainder ? 1 : 0); });
     setCounts(next);
+    setSelected(new Set(targets.map(c => c.id)));
   }
 
   function clearAll() {
     setCounts({});
+    setSelected(new Set());
   }
 
   function setCount(userId, raw) {
     const digits = (raw || '').replace(/\D/g, '');
     const n = digits === '' ? '' : Math.min(Number(digits), pool.available);
     setCounts(prev => ({ ...prev, [userId]: n }));
+    // Typing a positive count auto-selects that caller.
+    if (n !== '' && n > 0) setSelected(prev => (prev.has(userId) ? prev : new Set(prev).add(userId)));
+  }
+
+  /* Toggle one caller's checkbox. Unchecking also clears its count so it can't
+     be submitted. */
+  function toggleCaller(userId) {
+    const wasSelected = selected.has(userId);
+    setSelected(prev => {
+      const n = new Set(prev);
+      if (n.has(userId)) n.delete(userId); else n.add(userId);
+      return n;
+    });
+    if (wasSelected) setCounts(prev => { const c = { ...prev }; delete c[userId]; return c; });
+  }
+
+  /* Header checkbox — select all callers, or clear everything if all are on. */
+  function toggleAll() {
+    if (selected.size === pool.callers.length) {
+      setSelected(new Set());
+      setCounts({});
+    } else {
+      setSelected(new Set(pool.callers.map(c => c.id)));
+    }
   }
 
   async function submit() {
@@ -155,6 +228,7 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
           from: toIsoOrEmpty(from),
           to:   toIsoOrEmpty(to),
           webinar_id: webinarId || null,
+          source: workspace,
           distribution,
         }),
       });
@@ -228,6 +302,14 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
             <DateTimePicker value={to} onChange={setTo} placeholder="To date & time" />
           </div>
 
+          {/* Workspace filter — single-select dropdown; assignment is always
+              scoped to one source (a YT lead can't go to a Meta caller). Only
+              workspaces enabled on the Settings page appear. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'rgba(91,33,182,0.65)' }}>WORKSPACE</span>
+            <WorkspaceSelect options={enabledWorkspaces} value={workspace} onChange={changeWorkspace} />
+          </div>
+
           {/* Webinar filter — restricts the pool to one webinar (current/past
               only; upcoming webinars have no leads yet so they're hidden). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
@@ -296,14 +378,23 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
           <div style={{ marginTop: 14 }}>
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 90px 110px',
-              gap: 8,
+              gridTemplateColumns: '26px 1fr 90px 110px',
+              gap: 8, alignItems: 'center',
               padding: '8px 12px',
               fontSize: '0.68rem', fontWeight: 700,
               color: 'rgba(91,33,182,0.55)',
               textTransform: 'uppercase', letterSpacing: '0.05em',
               borderBottom: '1px solid rgba(91,33,182,0.12)',
             }}>
+              <input
+                type="checkbox"
+                aria-label="Select all callers"
+                checked={pool.callers.length > 0 && selected.size === pool.callers.length}
+                ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < pool.callers.length; }}
+                onChange={toggleAll}
+                disabled={pool.callers.length === 0}
+                style={{ width: 16, height: 16, accentColor: '#5B21B6', cursor: pool.callers.length === 0 ? 'default' : 'pointer' }}
+              />
               <span>Caller</span>
               <span style={{ textAlign: 'right' }}>Open now</span>
               <span style={{ textAlign: 'right' }}>Assign</span>
@@ -313,14 +404,24 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
               <div style={{ padding: 16, textAlign: 'center', color: 'rgba(91,33,182,0.55)', fontSize: '0.84rem' }}>
                 {loadingPool ? 'Loading callers…' : 'No active callers found.'}
               </div>
-            ) : pool.callers.map(c => (
+            ) : pool.callers.map(c => {
+              const isSel = selected.has(c.id);
+              return (
               <div key={c.id} style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 90px 110px',
+                gridTemplateColumns: '26px 1fr 90px 110px',
                 gap: 8, alignItems: 'center',
                 padding: '10px 12px',
                 borderBottom: '1px solid rgba(91,33,182,0.06)',
+                background: isSel ? 'rgba(124,58,237,0.05)' : 'transparent',
               }}>
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${c.full_name}`}
+                  checked={isSel}
+                  onChange={() => toggleCaller(c.id)}
+                  style={{ width: 16, height: 16, accentColor: '#5B21B6', cursor: 'pointer' }}
+                />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#3B0764', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {c.full_name}
@@ -348,7 +449,8 @@ export default function ManualAssignModal({ token, onClose, onAssigned }) {
                   }}
                 />
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Status message */}
@@ -543,6 +645,122 @@ function WebinarSelect({ webinars, value, onChange }) {
                         (inactive)
                       </span>
                     )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+/* Single-select workspace dropdown — same portal/positioning approach as
+   WebinarSelect so it isn't clipped by the modal's scroll container. `options`
+   is the Settings-enabled workspace list ([{ id, label }]); there is no "All"
+   row because assignment always targets one concrete source. */
+function WorkspaceSelect({ options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos]   = useState({ top: 0, left: 0, width: 0, maxH: 300 });
+  const wrapRef    = useRef(null);
+  const triggerRef = useRef(null);
+
+  useEffect(() => {
+    function onDown(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }
+    function onScroll() { setOpen(false); }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('scroll', onScroll, true);
+    };
+  }, []);
+
+  function toggle() {
+    if (!open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      const width = Math.max(200, r.width);
+      let left = r.left;
+      if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+      const spaceBelow = window.innerHeight - r.bottom - 8;
+      const maxH = Math.min(300, Math.max(160, spaceBelow));
+      const top  = spaceBelow >= 180 ? r.bottom + 4 : Math.max(8, r.top - maxH - 4);
+      setPos({ top, left, width, maxH });
+    }
+    setOpen(o => !o);
+  }
+
+  const selected = options.find(w => w.id === value);
+  const triggerLabel = selected ? selected.label : (value || 'Select workspace');
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={toggle}
+        style={{
+          height: '2.1rem', padding: '0 30px 0 12px', borderRadius: 10,
+          border: open ? '1px solid rgba(91,33,182,0.55)' : '1px solid rgba(139,92,246,0.25)',
+          background: '#fff', fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem',
+          color: '#3B0764', fontWeight: 700, cursor: 'pointer', outline: 'none',
+          textAlign: 'left', position: 'relative', whiteSpace: 'nowrap',
+          minWidth: 160, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis',
+          boxShadow: open ? '0 0 0 3px rgba(91,33,182,0.08)' : 'none',
+          transition: 'border 200ms, box-shadow 200ms',
+        }}
+      >
+        {triggerLabel}
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="#5B21B6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{ position: 'absolute', right: 10, top: '50%', transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`, transition: 'transform 200ms' }}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && createPortal(
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{
+            position: 'fixed', top: pos.top, left: pos.left, width: pos.width,
+            background: '#fff', border: '1px solid rgba(139,92,246,0.18)', borderRadius: 12,
+            boxShadow: '0 12px 40px rgba(91,33,182,0.18)', zIndex: 9999, overflow: 'hidden',
+            fontFamily: 'Outfit, sans-serif',
+          }}
+        >
+          <div style={{ maxHeight: pos.maxH, overflowY: 'auto' }}>
+            {options.length === 0 && (
+              <div style={{ padding: '10px 12px', fontSize: '0.8rem', color: 'rgba(91,33,182,0.55)' }}>
+                No workspaces enabled
+              </div>
+            )}
+            {options.map(w => {
+              const isSel = w.id === value;
+              return (
+                <div
+                  key={w.id}
+                  onClick={() => { onChange(w.id); setOpen(false); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer',
+                    background: isSel ? 'rgba(91,33,182,0.06)' : 'transparent',
+                    borderBottom: '1px solid rgba(139,92,246,0.08)', transition: 'background 120ms',
+                  }}
+                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(139,92,246,0.06)'; }}
+                  onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ width: 14, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+                    {isSel && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B21B6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                  </span>
+                  <span style={{ flex: 1, fontSize: '0.82rem', color: '#3B0764', fontWeight: isSel ? 700 : 600 }}>
+                    {w.label}
                   </span>
                 </div>
               );

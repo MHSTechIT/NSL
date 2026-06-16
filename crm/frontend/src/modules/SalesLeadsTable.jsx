@@ -285,6 +285,7 @@ export default function SalesLeadsTable({ token, source = 'all' }) {
       {manualAssignOpen && (
         <ManualAssignModal
           token={token}
+          source={source}
           onClose={() => setManualAssignOpen(false)}
           onAssigned={() => fetchLeads()}
         />

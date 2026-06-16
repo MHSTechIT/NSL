@@ -171,6 +171,20 @@ if (_timerSettingsMigration && typeof _timerSettingsMigration.catch === 'functio
   _timerSettingsMigration.catch(err => console.error('[Migration] timer_settings error:', err.message));
 }
 
+// Auto-migrate: empty-queue alert state. One row per caller while their
+// Assigned page is empty; emptyQueueAlertScheduler alerts the manager once a
+// streak crosses the configured delay (mgrEmptyLeadsAlertDelayMs).
+const _emptyQueueAlertMigration = pool.query(`
+  CREATE TABLE IF NOT EXISTS caller_empty_queue_alert (
+    caller_id   UUID PRIMARY KEY,
+    empty_since TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    alerted_at  TIMESTAMPTZ
+  );
+`);
+if (_emptyQueueAlertMigration && typeof _emptyQueueAlertMigration.catch === 'function') {
+  _emptyQueueAlertMigration.catch(err => console.error('[Migration] caller_empty_queue_alert error:', err.message));
+}
+
 // Auto-migrate: create workspace_flags table (Settings → Workspace on/off map)
 const _workspaceFlagsMigration = pool.query(`
   CREATE TABLE IF NOT EXISTS workspace_flags (
