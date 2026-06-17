@@ -44,6 +44,9 @@ function startMetaLeadSyncScheduler({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
   if (_timer) { clearInterval(_timer); _timer = null; }
   _timer = setInterval(tick, intervalMs);
   console.log(`[metaLeadSync] reconciliation scheduler started — every ${Math.round(intervalMs / 60000)} min (window ${WINDOW_MINUTES} min)`);
+  // Kick off an immediate pull so leads flow on boot instead of after the first
+  // full interval (avoids a "nothing's happening" gap right after a restart).
+  tick().catch(e => console.error('[metaLeadSync] initial tick:', e.message));
 }
 
 function stopMetaLeadSyncScheduler() {

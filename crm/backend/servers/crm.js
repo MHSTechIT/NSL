@@ -67,7 +67,7 @@ app.listen(PORT, () => {
   console.log(`[crm] running on port ${PORT}`);
 
   if (DISABLE_SCHEDULERS) {
-    console.log('[crm] DISABLE_SCHEDULERS=true → skipping linkSwap, whapiMemberRotation, metaLeadSync, tataInboundSync, leadsAlert, emptyQueueAlert, dnpReassign, sheetsSync, staleCallReaper, activitySpanReaper, dailyReconciliation');
+    console.log('[crm] DISABLE_SCHEDULERS=true → skipping linkSwap, whapiMemberRotation, tataInboundSync, leadsAlert, emptyQueueAlert, dnpReassign, sheetsSync, staleCallReaper, activitySpanReaper, dailyReconciliation (metaLeadSync still runs — idempotent)');
   } else {
     // All schedulers — race-prone if run in more than one process, so CRM owns
     // every one and the funnel services start none.
@@ -98,12 +98,6 @@ app.listen(PORT, () => {
     // can't read the count. meta/yt/meta2 keep lead-count rotation above.
     startWhapiMemberScheduler();
 
-    // Reconciliation sweep behind the Meta lead-gen webhook: every 5 min, pull
-    // any leads the webhook missed (Render cold start, deploy, dropped retry)
-    // for each workspace's selected forms. Dedups on meta_lead_id so it never
-    // double-inserts. Light load; crash-safe (errors-as-values + overlap guard).
-    startMetaLeadSyncScheduler();
-
     // Delayed manager alert when a caller's Assigned queue stays empty past the
     // admin-configured delay (TL & Assistant Timer sub-page). Fixed 60s tick;
     // the delay itself is read from timer_settings each run.
@@ -119,6 +113,19 @@ app.listen(PORT, () => {
     });
     console.log('[Sheets Sync] Daily sync scheduled at 11:55 PM IST');
     startDailyReconciliation();
+  }
+
+  // Meta lead-gen reconciliation sweep — every 5 min, pull any leads the webhook
+  // missed (cold start, deploy, dropped retry) for each workspace's selected
+  // forms, dedup on meta_lead_id, and assign directly via round-robin. Runs in
+  // EVERY environment (even when DISABLE_SCHEDULERS=true) because it's idempotent
+  // and assigns directly — unlike the non-idempotent schedulers above it can't
+  // double-insert or race, so it's safe to run on a local box sharing the prod DB.
+  // Opt out with DISABLE_META_LEAD_SYNC=true.
+  if (process.env.DISABLE_META_LEAD_SYNC === 'true') {
+    console.log('[crm] DISABLE_META_LEAD_SYNC=true → Meta lead reconciliation poller off');
+  } else {
+    startMetaLeadSyncScheduler();
   }
 
   if (DISABLE_LEAD_LISTENER) {
