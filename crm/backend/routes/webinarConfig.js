@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../db');
 const cache = require('../utils/webinarConfigCache');
 const { addClient, removeClient, broadcast } = require('../utils/sseClients');
+const { rolloverWebinarIfEnded } = require('../utils/webinarRollover');
 
 const ALLOWED_SOURCES = new Set(['meta', 'yt', 'meta2', 'metatemp', 'tagmango']);
 function normalizeSource(value) {
@@ -88,10 +89,13 @@ router.get('/webinar-config', async (req, res) => {
   // Always check for a due scheduled swap first — this makes the swap
   // fire on the very next page load even if Render was sleeping when
   // the scheduled time passed.
+  // Self-heal: if the current webinar has ended, promote the upcoming (or blank
+  // the card when there's no upcoming) — same fire-on-read pattern as the swap.
+  const rolled  = await rolloverWebinarIfEnded(source);
   const swapped = await checkAndExecutePendingSwap(source);
 
-  // If a swap just happened, skip the cache and fetch fresh counts
-  if (!swapped) {
+  // If a swap or rollover just happened, skip the cache and fetch fresh
+  if (!swapped && !rolled) {
     const hit = cache.get(source);
     if (hit) return res.json(hit);
   }

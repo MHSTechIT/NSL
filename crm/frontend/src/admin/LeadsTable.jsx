@@ -218,6 +218,8 @@ export default function LeadsTable({ token, source = 'meta' }) {
   const [dupLeads, setDupLeads]     = useState([]);
   const [dupOpen, setDupOpen]       = useState(false);
   const [dupLoading, setDupLoading] = useState(false);
+  const [dupDeleting, setDupDeleting] = useState(false);
+  const [dupConfirm, setDupConfirm]   = useState(false);   // arm the delete-all confirm
 
   function loadLeads() {
     setLoading(true);
@@ -234,6 +236,29 @@ export default function LeadsTable({ token, source = 'meta' }) {
       .then(d => setDupLeads(d.leads || []))
       .catch(() => setDupLeads([]))
       .finally(() => setDupLoading(false));
+  }
+
+  // Delete ONLY the quarantined duplicates (separate from the Leads-page delete).
+  // No id list is sent, so it isn't limited by the request size.
+  async function deleteDuplicates() {
+    setDupDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/duplicate-leads/delete?source=${source}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Delete failed (${res.status}).`);
+      setSyncToast({ ok: true, msg: `✓ ${data.deleted} duplicate${data.deleted !== 1 ? 's' : ''} deleted.` });
+      setDupConfirm(false);
+      loadDuplicates();
+      loadLeads();
+      setTimeout(() => setSyncToast(null), 4000);
+    } catch (e) {
+      setSyncToast({ ok: false, msg: e.message });
+      setTimeout(() => setSyncToast(null), 4000);
+    } finally {
+      setDupDeleting(false);
+    }
   }
 
   useEffect(() => { loadLeads(); }, [token, source]);
@@ -730,8 +755,8 @@ export default function LeadsTable({ token, source = 'meta' }) {
             />
             <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '0.83rem', fontWeight: 600, color: '#DC2626' }}>
               {selected.size === 0
-                ? (activeFilter === 'duplicates' ? 'Select all duplicates' : 'Select leads to delete')
-                : `${selected.size} duplicate${selected.size !== 1 ? 's' : ''} selected`}
+                ? 'Select leads to delete'
+                : `${selected.size} lead${selected.size !== 1 ? 's' : ''} selected`}
             </span>
           </div>
           {selected.size > 0 && (
@@ -1168,11 +1193,32 @@ export default function LeadsTable({ token, source = 'meta' }) {
                   Duplicate leads <span style={{ color: '#D97706' }}>({dupLeads.length})</span>
                 </div>
                 <div style={{ fontSize: '0.78rem', color: 'rgba(91,33,182,0.6)', marginTop: 2 }}>
-                  Same phone + webinar as an existing lead. Kept here — never shown in Leads, never assigned to a caller, never deleted.
+                  Same phone + webinar as an existing lead. Hidden from Leads, never assigned to a caller. Deleting here removes ONLY these duplicates — your real leads are untouched.
                 </div>
               </div>
+              {/* Delete only the duplicates — two-step confirm, separate from the Leads-page delete. */}
+              {dupLeads.length > 0 && (
+                dupConfirm ? (
+                  <>
+                    <button onClick={deleteDuplicates} disabled={dupDeleting}
+                      style={{ border: 'none', background: dupDeleting ? 'rgba(220,38,38,0.55)' : '#DC2626', color: '#fff', borderRadius: 50, padding: '0 16px', height: 34, cursor: dupDeleting ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                      {dupDeleting ? 'Deleting…' : `Yes, delete ${dupLeads.length}`}
+                    </button>
+                    <button onClick={() => setDupConfirm(false)} disabled={dupDeleting}
+                      style={{ border: '1.5px solid rgba(91,33,182,0.30)', background: '#fff', color: '#5B21B6', borderRadius: 50, padding: '0 14px', height: 34, cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem' }}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => setDupConfirm(true)} title="Delete only the duplicate leads"
+                    style={{ border: '1.5px solid rgba(220,38,38,0.40)', background: 'rgba(254,242,242,0.85)', color: '#DC2626', borderRadius: 50, padding: '0 16px', height: 34, cursor: 'pointer', fontWeight: 800, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                    Delete all {dupLeads.length}
+                  </button>
+                )
+              )}
               <button onClick={loadDuplicates} title="Refresh" style={{ border: '1.5px solid rgba(91,33,182,0.30)', background: '#fff', color: '#5B21B6', borderRadius: 50, width: 34, height: 34, cursor: 'pointer', fontWeight: 800 }}>↻</button>
-              <button onClick={() => setDupOpen(false)} title="Close" style={{ border: 'none', background: 'rgba(91,33,182,0.08)', color: '#5B21B6', borderRadius: 50, width: 34, height: 34, cursor: 'pointer', fontWeight: 800 }}>✕</button>
+              <button onClick={() => { setDupConfirm(false); setDupOpen(false); }} title="Close" style={{ border: 'none', background: 'rgba(91,33,182,0.08)', color: '#5B21B6', borderRadius: 50, width: 34, height: 34, cursor: 'pointer', fontWeight: 800 }}>✕</button>
             </div>
 
             <div style={{ overflow: 'auto' }}>

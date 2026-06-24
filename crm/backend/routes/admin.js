@@ -194,6 +194,30 @@ router.get('/duplicate-leads', async (req, res) => {
   }
 });
 
+/* ── POST /api/admin/duplicate-leads/delete ──
+   Permanently delete ONLY the quarantined duplicate leads (is_duplicate=TRUE)
+   for this workspace — the action behind the Delete button inside the floating
+   Duplicates page. Scoped to is_duplicate so it can never touch a real lead in
+   the main pipeline, and never the "kept" original. No id list is sent (avoids
+   the request-size limit), so it works no matter how many duplicates there are. */
+router.post('/duplicate-leads/delete', async (req, res) => {
+  const source = getReportSource(req);
+  const tl = req.adminUser && req.adminUser.kind === 'tl';
+  if (tl) return res.status(403).json({ error: 'Only an admin/manager can delete duplicates.' });
+  try {
+    const result = await pool.query(
+      `DELETE FROM leads
+        WHERE COALESCE(is_duplicate, FALSE) = TRUE
+          AND ($1 = 'all' OR source = $1)`,
+      [source]
+    );
+    res.json({ success: true, deleted: result.rowCount });
+  } catch (err) {
+    console.error('Delete duplicate-leads error:', err.message);
+    res.status(500).json({ error: 'Failed to delete duplicate leads.' });
+  }
+});
+
 /* ── GET /api/admin/completed-calls ──
    Powers the Sales → Completed Calls tab. Returns every lead whose
    latest call note has outcome = 'completed' or 'not_interested', joined
@@ -761,7 +785,12 @@ router.post('/leads/fetch-meta', async (req, res) => {
 
 /* ── POST /api/admin/leads/delete ── */
 router.post('/leads/delete', async (req, res) => {
-  const source = getSource(req);
+  // Use getReportSource (accepts 'all') to MATCH the /leads list endpoint. With
+  // getSource, 'all' silently became 'meta', so deleting leads while viewing
+  // "All workspaces" matched nothing (the selected metatemp/yt/… rows have a
+  // different source) and silently deleted 0. The guard keeps a concrete source
+  // scoped exactly as before.
+  const source = getReportSource(req);
   // Accept ids from body (JSON) or query string as fallback
   const raw = [].concat(req.body?.ids || req.query.ids || []);
   const ids = raw.map(String).filter(s => s.length > 0);
@@ -771,7 +800,7 @@ router.post('/leads/delete', async (req, res) => {
   try {
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
     const result = await pool.query(
-      `DELETE FROM leads WHERE id IN (${placeholders}) AND source = $${ids.length + 1}`,
+      `DELETE FROM leads WHERE id IN (${placeholders}) AND ($${ids.length + 1} = 'all' OR source = $${ids.length + 1})`,
       [...ids, source]
     );
     res.json({ success: true, deleted: result.rowCount });
