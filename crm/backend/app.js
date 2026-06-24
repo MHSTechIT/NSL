@@ -297,6 +297,29 @@ const _shareConfigMigration = pool.query(`
   ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;
   CREATE INDEX IF NOT EXISTS idx_leads_assigned_user ON leads (assigned_user_id, created_at DESC);
 
+  -- Duplicate quarantine. is_duplicate=TRUE means: UNASSIGNED lead that shares a
+  -- phone (last 10 digits) + webinar with a "keeper" lead (one that's assigned,
+  -- or simply older). These are hidden from the Leads list and shown only on the
+  -- floating Duplicates page. Assigned duplicates are LEFT ALONE so callers never
+  -- lose live work, and nothing is ever deleted. The backfill below is idempotent
+  -- (only touches still-unmarked rows) so it's cheap on every boot after the 1st.
+  ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_duplicate BOOLEAN NOT NULL DEFAULT FALSE;
+  CREATE INDEX IF NOT EXISTS idx_leads_is_duplicate ON leads (is_duplicate) WHERE is_duplicate = TRUE;
+  UPDATE leads d SET is_duplicate = TRUE
+   WHERE d.assigned_user_id IS NULL
+     AND d.is_duplicate = FALSE
+     AND LENGTH(RIGHT(regexp_replace(COALESCE(d.whatsapp_number,''),'[^0-9]','','g'),10)) = 10
+     AND EXISTS (
+       SELECT 1 FROM leads e
+        WHERE e.id <> d.id
+          AND e.webinar_id = d.webinar_id
+          AND RIGHT(regexp_replace(COALESCE(e.whatsapp_number,''),'[^0-9]','','g'),10)
+            = RIGHT(regexp_replace(COALESCE(d.whatsapp_number,''),'[^0-9]','','g'),10)
+          AND (e.assigned_user_id IS NOT NULL
+               OR e.created_at < d.created_at
+               OR (e.created_at = d.created_at AND e.id < d.id))
+     );
+
   CREATE TABLE IF NOT EXISTS lead_assignments (
     id         BIGSERIAL PRIMARY KEY,
     lead_id    UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,

@@ -43,6 +43,10 @@ async function assignNewLead(leadId, sugarLevel, webinarId) {
     `, [leadId]);
 
     if (dup.length > 0) {
+      // Quarantine it: flag as duplicate so it's hidden from the Leads list and
+      // shown only on the floating Duplicates page (assigned_user_id stays NULL,
+      // so it's never handed to a caller). Nothing deleted.
+      await client.query('UPDATE leads SET is_duplicate = TRUE WHERE id = $1', [leadId]);
       await client.query('COMMIT');
       console.log(JSON.stringify({
         type:              'lead.assign.duplicate_skipped',

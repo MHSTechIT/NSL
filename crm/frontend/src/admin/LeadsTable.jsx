@@ -213,6 +213,12 @@ export default function LeadsTable({ token, source = 'meta' }) {
   const [deleting, setDeleting]         = useState(false);
   const [confirmOpen, setConfirmOpen]   = useState(false);
 
+  // Quarantined duplicate leads — hidden from the main list (server excludes
+  // is_duplicate), shown only in the floating Duplicates page.
+  const [dupLeads, setDupLeads]     = useState([]);
+  const [dupOpen, setDupOpen]       = useState(false);
+  const [dupLoading, setDupLoading] = useState(false);
+
   function loadLeads() {
     setLoading(true);
     fetch(`/api/admin/leads?source=${source}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -221,7 +227,17 @@ export default function LeadsTable({ token, source = 'meta' }) {
       .finally(() => setLoading(false));
   }
 
+  function loadDuplicates() {
+    setDupLoading(true);
+    fetch(`/api/admin/duplicate-leads?source=${source}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setDupLeads(d.leads || []))
+      .catch(() => setDupLeads([]))
+      .finally(() => setDupLoading(false));
+  }
+
   useEffect(() => { loadLeads(); }, [token, source]);
+  useEffect(() => { loadDuplicates(); }, [token, source]);
 
   // Fetch webinar sessions for filter dropdown
   useEffect(() => {
@@ -320,8 +336,27 @@ export default function LeadsTable({ token, source = 'meta' }) {
     return keys;
   })();
   const dynamicMode = isMetaTempLike(source) && fieldKeys.length > 0;
-  const cellValue = (l, key) =>
-    (key && key.startsWith('fd:')) ? (l.field_data?.[key.slice(3)] ?? '') : (l[key] ?? '');
+  /* Classify a Meta form field key as the Name or Phone field, regardless of how
+     each form spelled it ("full name" / "full_name" / "name (பெயர்)" → name;
+     "phone number" / "phone_number" / "mobile" → phone). Lets us merge all those
+     spelling variants into ONE Name and ONE Phone column. */
+  const fieldKind = (k) => {
+    const s = String(k).toLowerCase();
+    if (/phone|mobile/.test(s)) return 'phone';
+    if (/name|பெயர/.test(s))    return 'name';
+    return null;
+  };
+  const cellValue = (l, key) => {
+    // Merged Name/Phone columns: show the first non-empty value across every
+    // spelling variant the lead carries, falling back to the static column.
+    if (key === 'fd:__name__' || key === 'fd:__phone__') {
+      const kind = key === 'fd:__name__' ? 'name' : 'phone';
+      const fd = l.field_data || {};
+      for (const k of Object.keys(fd)) { if (fieldKind(k) === kind && fd[k]) return fd[k]; }
+      return kind === 'name' ? (l.full_name ?? '') : (l.whatsapp_number ?? '');
+    }
+    return (key && key.startsWith('fd:')) ? (l.field_data?.[key.slice(3)] ?? '') : (l[key] ?? '');
+  };
 
   const filtered = leads.filter(l => {
     // Webinar filter — match by webinar_id
@@ -491,9 +526,26 @@ export default function LeadsTable({ token, source = 'meta' }) {
   // conditional — 'meta' shows everything, 'yt' shows only the fields the
   // YT funnel actually captures.
   const isMeta = source === 'meta';
+  /* Collapse name/phone spelling-variants into ONE Name + ONE Phone column,
+     placed where the first such field appears; every other field stays 1:1. */
+  const dynFieldCols = (() => {
+    const out = []; const usedMerge = new Set();
+    for (const k of fieldKeys) {
+      const kind = fieldKind(k);
+      if (kind) {
+        if (!usedMerge.has(kind)) {
+          usedMerge.add(kind);
+          out.push({ key: `fd:__${kind}__`, label: kind === 'name' ? 'Name' : 'Phone' });
+        }
+      } else {
+        out.push({ key: `fd:${k}`, label: prettyLabel(k) });
+      }
+    }
+    return out;
+  })();
   const cols = dynamicMode
     ? [
-        ...fieldKeys.map(k => ({ key: `fd:${k}`, label: prettyLabel(k) })),
+        ...dynFieldCols,
         { key: 'meta_form_id', label: 'Form' },
         { key: 'created_at', label: 'Registered' },
         { key: 'wa_clicked', label: 'WhatsApp' },
@@ -593,34 +645,24 @@ export default function LeadsTable({ token, source = 'meta' }) {
             </button>
           )}
 
-          {/* Duplicates filter */}
+          {/* Duplicates — opens the floating Duplicates page (quarantined,
+              never assigned to callers, never deleted). */}
           <button
-            onClick={() => {
-              if (activeFilter === 'duplicates') {
-                setActiveFilter('all');
-                setDeleteMode(false);
-                setSelected(new Set());
-              } else {
-                setActiveFilter('duplicates');
-                setDeleteMode(true);
-                setSelected(new Set());
-              }
-            }}
+            onClick={() => { setDupOpen(true); loadDuplicates(); }}
             className="leads-action-btn"
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
               height: '2.4rem', padding: '0 16px', borderRadius: 50,
-              border: activeFilter === 'duplicates' ? '1.5px solid rgba(217,119,6,0.50)' : '1.5px solid rgba(217,119,6,0.35)',
-              background: activeFilter === 'duplicates' ? 'rgba(255,237,213,0.90)' : 'rgba(255,247,237,0.80)',
+              border: '1.5px solid rgba(217,119,6,0.35)',
+              background: 'rgba(255,247,237,0.80)',
               fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '0.82rem',
               color: '#D97706', cursor: 'pointer', transition: 'all 180ms',
-              boxShadow: activeFilter === 'duplicates' ? '0 0 0 3px rgba(217,119,6,0.12)' : 'none',
             }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="8" y="2" width="13" height="13" rx="2"/><path d="M3 9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2"/>
             </svg>
-            Duplicates{duplicateCount > 0 ? ` (${duplicateCount})` : ''}
+            Duplicates{dupLeads.length > 0 ? ` (${dupLeads.length})` : ''}
           </button>
 
           {/* Delete mode toggle */}
@@ -1108,6 +1150,72 @@ export default function LeadsTable({ token, source = 'meta' }) {
             loadLeads();
           }}
         />
+      )}
+
+      {/* ── Floating Duplicates page ── */}
+      {dupOpen && (
+        <div
+          onClick={() => setDupOpen(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 9700, background: 'rgba(15,0,40,0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: 'min(980px, 96vw)', maxHeight: '88vh', background: '#fff', borderRadius: 18, boxShadow: '0 24px 60px rgba(15,0,40,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Outfit, sans-serif' }}
+          >
+            <div style={{ padding: '16px 22px', borderBottom: '1px solid rgba(209,196,240,0.6)', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 800, color: '#3B0764', fontSize: '1.05rem' }}>
+                  Duplicate leads <span style={{ color: '#D97706' }}>({dupLeads.length})</span>
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'rgba(91,33,182,0.6)', marginTop: 2 }}>
+                  Same phone + webinar as an existing lead. Kept here — never shown in Leads, never assigned to a caller, never deleted.
+                </div>
+              </div>
+              <button onClick={loadDuplicates} title="Refresh" style={{ border: '1.5px solid rgba(91,33,182,0.30)', background: '#fff', color: '#5B21B6', borderRadius: 50, width: 34, height: 34, cursor: 'pointer', fontWeight: 800 }}>↻</button>
+              <button onClick={() => setDupOpen(false)} title="Close" style={{ border: 'none', background: 'rgba(91,33,182,0.08)', color: '#5B21B6', borderRadius: 50, width: 34, height: 34, cursor: 'pointer', fontWeight: 800 }}>✕</button>
+            </div>
+
+            <div style={{ overflow: 'auto' }}>
+              {dupLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'rgba(91,33,182,0.55)', fontSize: '0.9rem' }}>Loading…</div>
+              ) : dupLeads.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'rgba(91,33,182,0.55)', fontSize: '0.9rem' }}>No duplicate leads — every lead is unique for its webinar. 🎉</div>
+              ) : (
+                <table className="w-full text-sm" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                  <thead>
+                    <tr className="bg-purple-50/60" style={{ position: 'sticky', top: 0 }}>
+                      {['Name', 'Phone', 'Webinar', 'Duplicate of', 'Registered'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-purple-500 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dupLeads.map((l, i) => {
+                      const w = webinars.find(x => String(x.id) === String(l.webinar_id));
+                      const name = l.full_name || l.field_data?.['full name'] || l.field_data?.full_name || '—';
+                      return (
+                        <tr key={l.id} style={{ borderTop: '1px solid rgba(209,196,240,0.4)', background: i % 2 ? 'rgba(237,234,248,0.18)' : '#fff' }}>
+                          <td className="px-4 py-3 font-semibold text-gray-900 whitespace-nowrap">{name}</td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap font-mono text-xs">+91 {String(l.whatsapp_number || '').replace(/\D/g, '').slice(-10)}</td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{w?.name ? w.name.replace(/^AWS-/, 'AWS - ') : '—'}</td>
+                          <td className="px-4 py-3 text-xs whitespace-nowrap">
+                            <span className="text-gray-700">{l.original_name || 'existing lead'}</span>
+                            <span style={{ color: l.original_assigned_to ? '#15803D' : '#B45309', fontWeight: 600 }}>
+                              {' '}· {l.original_assigned_to ? `with ${l.original_assigned_to}` : 'unassigned'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
+                            {l.created_at ? new Date(l.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

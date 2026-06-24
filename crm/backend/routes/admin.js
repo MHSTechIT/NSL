@@ -133,6 +133,7 @@ router.get('/leads', async (req, res) => {
         FROM leads l
         LEFT JOIN crm_users u ON u.id = l.assigned_user_id
        WHERE ($1 = 'all' OR l.source = $1)
+         AND COALESCE(l.is_duplicate, FALSE) = FALSE   -- quarantined dupes live on the Duplicates page
          ${scopeSQL}
        ORDER BY l.created_at DESC
     `, params);
@@ -145,12 +146,51 @@ router.get('/leads', async (req, res) => {
         // simplest correct behaviour is to return empty for TLs in that
         // case rather than leaking unscoped rows.
         if (tl) return res.json({ leads: [], total: 0 });
-        const { rows } = await pool.query("SELECT * FROM leads WHERE ($1 = 'all' OR source = $1) ORDER BY created_at DESC", [source]);
+        const { rows } = await pool.query("SELECT * FROM leads WHERE ($1 = 'all' OR source = $1) AND COALESCE(is_duplicate, FALSE) = FALSE ORDER BY created_at DESC", [source]);
         return res.json({ leads: rows, total: rows.length });
       } catch (_) { /* fallthrough */ }
     }
     console.error('Fetch leads error:', err.message);
     res.status(500).json({ error: 'Failed to fetch leads' });
+  }
+});
+
+/* ── GET /api/admin/duplicate-leads ──
+   The quarantined duplicate leads (is_duplicate=TRUE) for the floating
+   Duplicates page. These never appear in the Leads list and are never assigned
+   to a caller — but nothing is deleted, so they can be inspected here. Each row
+   carries the "kept" original (same phone + webinar) so the admin can see who
+   the lead duplicates. */
+router.get('/duplicate-leads', async (req, res) => {
+  const source = getReportSource(req);
+  const tl = req.adminUser && req.adminUser.kind === 'tl';
+  if (tl) return res.json({ leads: [], total: 0 });   // TL scope: dupes are admin/manager only
+  try {
+    const { rows } = await pool.query(`
+      SELECT d.*,
+             orig.id          AS original_lead_id,
+             orig.full_name   AS original_name,
+             ou.full_name     AS original_assigned_to
+        FROM leads d
+        LEFT JOIN LATERAL (
+          SELECT e.id, e.full_name, e.assigned_user_id
+            FROM leads e
+           WHERE e.id <> d.id
+             AND e.webinar_id = d.webinar_id
+             AND RIGHT(regexp_replace(COALESCE(e.whatsapp_number,''),'[^0-9]','','g'),10)
+               = RIGHT(regexp_replace(COALESCE(d.whatsapp_number,''),'[^0-9]','','g'),10)
+           ORDER BY (e.assigned_user_id IS NOT NULL) DESC, e.created_at ASC
+           LIMIT 1
+        ) orig ON TRUE
+        LEFT JOIN crm_users ou ON ou.id = orig.assigned_user_id
+       WHERE COALESCE(d.is_duplicate, FALSE) = TRUE
+         AND ($1 = 'all' OR d.source = $1)
+       ORDER BY d.created_at DESC
+    `, [source]);
+    res.json({ leads: rows, total: rows.length });
+  } catch (err) {
+    console.error('Fetch duplicate-leads error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch duplicate leads' });
   }
 });
 
