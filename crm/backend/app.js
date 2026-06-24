@@ -930,7 +930,10 @@ app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
 // Stash the raw request bytes on every request so webhook handlers can verify
 // HMAC signatures over the EXACT payload (Razorpay/Zoom sign raw bytes — a
 // re-stringified JSON body would not match). Zero behaviour change otherwise.
-app.use(express.json({ limit: '50kb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
+// 50kb was too small for bulk admin actions (e.g. deleting thousands of selected
+// leads sends a large id array). 2mb is safe for this internal admin API and any
+// webhook payload, while still bounding request size.
+app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 // ── Rate limiters ──
 const publicLimiter = rateLimit({

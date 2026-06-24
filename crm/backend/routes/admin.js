@@ -492,10 +492,24 @@ router.put('/webinar-config', configValidators, async (req, res) => {
     // string clears the name → the card falls back to the date label.
     if (currentWebinarName !== undefined) {
       try {
-        await pool.query(
+        const { rowCount } = await pool.query(
           'UPDATE webinars SET name = $1 WHERE is_active = TRUE AND source = $2',
           [currentWebinarName.trim() || null, source]
         );
+        // No active webinar to name (e.g. right after an end-of-webinar rollover
+        // blanked the card) — CREATE a fresh active one so the admin can start a
+        // new webinar by just typing a name. Date comes from the Start Date
+        // (next_webinar_at, always set).
+        if (rowCount === 0 && currentWebinarName.trim()) {
+          const { rows: cfgRow } = await pool.query(
+            'SELECT next_webinar_at FROM webinar_config WHERE source = $1', [source]);
+          const dt = cfgRow[0]?.next_webinar_at || new Date();
+          await pool.query(
+            'INSERT INTO webinars (date_time, is_active, name, source) VALUES ($1, TRUE, $2, $3)',
+            [dt, currentWebinarName.trim(), source]
+          );
+          console.log(`[admin] Created active ${source} webinar from name: ${currentWebinarName.trim()}`);
+        }
       } catch (nameErr) {
         webinarWarning = (webinarWarning ? webinarWarning + '; ' : '') + `current name: ${nameErr.message}`;
         console.error(`[admin] ${source} current webinar name error:`, nameErr.message);
@@ -520,6 +534,23 @@ router.put('/webinar-config', configValidators, async (req, res) => {
         webinarWarning = (webinarWarning ? webinarWarning + '; ' : '') + `next name: ${nameErr.message}`;
         console.error(`[admin] ${source} next webinar name error:`, nameErr.message);
       }
+    }
+
+    // Adopt orphaned leads: any lead of this source with NO webinar (e.g. created
+    // during a window where the webinar card was blanked and no active webinar
+    // existed) gets attached to the current active webinar. Stops leads from
+    // silently disappearing under the current-webinar filter.
+    try {
+      await pool.query(
+        `UPDATE leads
+            SET webinar_id = (SELECT id FROM webinars WHERE is_active = TRUE AND source = $1 LIMIT 1)
+          WHERE source = $1
+            AND webinar_id IS NULL
+            AND EXISTS (SELECT 1 FROM webinars WHERE is_active = TRUE AND source = $1)`,
+        [source]
+      );
+    } catch (adoptErr) {
+      console.error(`[admin] ${source} orphan-lead adopt error:`, adoptErr.message);
     }
 
     res.json({ success: true, updated_at: updates.updated_at, webinarWarning });

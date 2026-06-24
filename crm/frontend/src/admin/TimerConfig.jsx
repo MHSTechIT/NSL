@@ -681,49 +681,77 @@ export default function TimerConfig({ token, source = 'meta' }) {
         </div>
       </div>
 
-      {/* ══ BOTTOM — Past webinars (history) ══ */}
-      <div className="bg-white rounded-card border border-purple-100 p-5">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20,
-            fontFamily: 'Outfit, sans-serif', fontSize: '0.65rem', fontWeight: 700,
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-            background: 'rgba(107,114,128,0.12)', color: '#6B7280',
-          }}>
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#9CA3AF', display: 'inline-block' }} />
-            History
-          </span>
-          <span className="font-sans font-semibold text-purple-900 text-sm">Past webinars</span>
-          <span className="font-sans text-xs text-purple-400">{pastWebinars.length} total</span>
-        </div>
-        {webinarsLoading ? (
-          <p className="font-sans text-xs text-purple-400">Loading…</p>
-        ) : pastWebinars.length === 0 ? (
-          <p className="font-sans text-xs text-purple-400">No finished webinars yet — they appear here once a webinar's date has passed.</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
-            {pastWebinars.map(w => (
-              <div key={w.id} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                padding: '9px 12px', borderRadius: 10,
-                background: 'rgba(237,234,248,0.35)', border: '1px solid rgba(209,196,240,0.45)',
+      {/* ══ BOTTOM — Webinars (current + upcoming + past) ══ */}
+      {(() => {
+        const STATUS = {
+          current:  { label: 'Live',     fg: '#15803D', bg: 'rgba(22,163,74,0.12)',  dot: '#16A34A' },
+          upcoming: { label: 'Upcoming', fg: '#2563EB', bg: 'rgba(37,99,235,0.10)',  dot: '#2563EB' },
+          past:     { label: 'Past',     fg: '#6B7280', bg: 'rgba(107,114,128,0.12)', dot: '#9CA3AF' },
+        };
+        const rows = [
+          ...(activeWebinar   ? [{ ...activeWebinar,   _kind: 'current'  }] : []),
+          ...(upcomingWebinar ? [{ ...upcomingWebinar, _kind: 'upcoming' }] : []),
+          ...pastWebinars.map(w => ({ ...w, _kind: 'past' })),
+        ];
+        return (
+          <div className="bg-white rounded-card border border-purple-100 p-5">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20,
+                fontFamily: 'Outfit, sans-serif', fontSize: '0.65rem', fontWeight: 700,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: 'rgba(91,33,182,0.10)', color: '#5B21B6',
               }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="font-sans font-semibold text-purple-900 text-sm" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {w.name ? w.name.replace(/^AWS-/, 'AWS - ') : 'Webinar'}
-                  </div>
-                  <div className="font-sans text-xs text-purple-400">
-                    {new Date(w.webinar_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST
-                  </div>
-                </div>
-                <span className="font-sans text-xs" style={{ color: '#5B21B6', fontWeight: 700, flexShrink: 0 }}>
-                  {w.lead_count} leads
-                </span>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#5B21B6', display: 'inline-block' }} />
+                Webinars
+              </span>
+              <span className="font-sans font-semibold text-purple-900 text-sm">All webinars</span>
+              <span className="font-sans text-xs text-purple-400">{rows.length} total</span>
+            </div>
+            {webinarsLoading ? (
+              <p className="font-sans text-xs text-purple-400">Loading…</p>
+            ) : rows.length === 0 ? (
+              <p className="font-sans text-xs text-purple-400">No webinars yet — set a name + date above to create one.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
+                {rows.map(w => {
+                  const s = STATUS[w._kind];
+                  return (
+                    <div key={w.id} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      padding: '10px 12px', borderRadius: 10,
+                      background: w._kind === 'current' ? 'rgba(22,163,74,0.06)' : 'rgba(237,234,248,0.35)',
+                      border: `1px solid ${w._kind === 'current' ? 'rgba(22,163,74,0.30)' : 'rgba(209,196,240,0.45)'}`,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20,
+                          fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
+                          background: s.bg, color: s.fg, flexShrink: 0,
+                        }}>
+                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: s.dot }} />
+                          {s.label}
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="font-sans font-semibold text-purple-900 text-sm" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {w.name ? w.name.replace(/^AWS-/, 'AWS - ') : 'Webinar'}
+                          </div>
+                          <div className="font-sans text-xs text-purple-400">
+                            {w.webinar_at ? new Date(w.webinar_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) + ' IST' : '—'}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="font-sans text-xs" style={{ color: '#5B21B6', fontWeight: 700, flexShrink: 0 }}>
+                        {w.lead_count} leads
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       </div>
       ) : (

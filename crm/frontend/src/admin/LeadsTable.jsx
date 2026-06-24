@@ -44,8 +44,11 @@ function WebinarSelect({ value, onChange, webinars }) {
 
   const options = [
     { value: '', label: 'All Webinars' },
+    // Only the CURRENT (active) + UPCOMING (future) webinars belong in the
+    // filter — an ENDED webinar should disappear here (was: also showed any past
+    // webinar, so a finished one lingered as a stray date option).
     ...webinars
-      .filter(w => w.is_active || (w.webinar_at && new Date(w.webinar_at) <= new Date()))
+      .filter(w => w.is_active || (w.webinar_at && new Date(w.webinar_at) > new Date()))
       .map(w => ({
         value: String(w.id),
         label: w.name ? w.name.replace(/^AWS-/, 'AWS - ') : fmtWebinar(w.webinar_at),
@@ -1144,6 +1147,12 @@ export default function LeadsTable({ token, source = 'meta' }) {
             </h3>
             <p style={{ fontSize: '0.85rem', color: '#6B7280', margin: '0 0 24px', lineHeight: 1.6 }}>
               This action is <strong style={{ color: '#DC2626' }}>permanent</strong> and cannot be undone. The selected leads will be removed from the database forever.
+              {(() => {
+                const assigned = sorted.filter(l => selected.has(l.id) && l.assigned_user_id).length;
+                return assigned > 0 ? (
+                  <><br /><br /><strong style={{ color: '#DC2626' }}>{assigned}</strong> of these are currently assigned to callers — they'll be pulled out of their queues, and their call notes/recordings deleted too.</>
+                ) : null;
+              })()}
             </p>
             <div style={{ display: 'flex', gap: 10 }}>
               <button
