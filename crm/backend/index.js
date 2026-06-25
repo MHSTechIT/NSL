@@ -12,6 +12,7 @@ const { startScheduler: startTataInboundSync } = require('./utils/tataInboundSyn
 const { startScheduler: startLeadsAlert }       = require('./utils/leadsAlertScheduler');
 const { startStaleCallReaper }                  = require('./utils/staleCallReaper');
 const { startDailyReconciliation }              = require('./utils/dailyReconciliation');
+const { startMetaLeadSyncScheduler }            = require('./utils/metaLeadSyncScheduler');
 
 // Single-process dev mode: also register the cross-service NOTIFY handlers
 // so the same pg_notify('lead.created') / pg_notify('webinar.config.updated')
@@ -55,6 +56,18 @@ app.listen(PORT, () => {
   // last_note_outcome=NULL for > 24 h. Catches anything the save-on-close
   // guard missed (tab crash, network drop, etc.).
   startDailyReconciliation();
+
+  // Meta lead-gen reconciliation sweep — every 5 min, pulls any leads the
+  // webhook missed for each workspace's selected forms, dedups on meta_lead_id,
+  // and assigns via round-robin. The legacy index.js entry was the only one NOT
+  // starting it (servers/crm.js does), so a leadgenx box booted via index.js
+  // never ran the 5-min Meta poll. Idempotent → safe to run here too.
+  // Opt out with DISABLE_META_LEAD_SYNC=true.
+  if (process.env.DISABLE_META_LEAD_SYNC === 'true') {
+    console.log('[index] DISABLE_META_LEAD_SYNC=true → Meta lead reconciliation poller off');
+  } else {
+    startMetaLeadSyncScheduler();
+  }
 
   // Register both LISTEN handlers in this single process so the same code
   // works whether the deployer runs `node index.js` (everything in one
